@@ -26,6 +26,19 @@ class Context:
         self.out = self.base * self.group_linear_factor
         self.dtype = jnp.float32
         self.init_scale = 1.0
+        self.global_prefix = ''
+        self.name_cache: typing.Dict[str, int] = {}
+
+    def add_to_prefix(self, appended=""):
+        new = self
+        new.global_prefix = self.global_prefix + '/' + self.incremental_name(appended)
+        return new
+
+    def incremental_name(self, name):
+        if name not in self.name_cache:
+            self.name_cache[name] = -1
+        self.name_cache[name] += 1
+        return f'{name}:{self.name_cache[name]:d}'
 
 
 def dataset(ctx: Context):
@@ -46,17 +59,23 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> 
 
 
 def get_or_create_parameter(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None) -> jnp.ndarray:
+    name = ctx.add_to_prefix(name).global_prefix
     if name not in ctx.parameter_dict:
         ctx.parameter_dict[name] = orthogonal_init(ctx, shape)
     return ctx.parameter_dict[name]
 
 
-def linear(inp: jnp.ndarray, ctx: Context, name: str) -> jnp.ndarray:
+def base_spec(inp: jnp.ndarray) -> str:
+    return ''.join(chr(ord('a') + i) for i in range(inp.ndim))
+
+
+def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("linear")
     shape = [ctx.out, ctx.base]
     if inp.shape[-1] == ctx.base:
         shape = shape[::-1]
-    spec = ''.join(chr(ord('a') + i) for i in range(inp.ndim))
-    return jnp.einsum(f'{spec},{spec[-1]}z->{spec[:-1]}z', inp, get_or_create_parameter(ctx, name, shape))
+    spec = base_spec(inp)
+    return jnp.einsum(f'{spec},{spec[-1]}z->{spec[:-1]}z', inp, get_or_create_parameter(ctx, "weight", shape))
 
 
 def input_embedding(ctx: Context, name: str) -> jnp.ndarray:
@@ -70,7 +89,7 @@ def relu(inp: jnp.ndarray) -> jnp.ndarray:
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
     ctx = Context()
     ctx.parameter_dict = params
-    return linear(relu(linear(inp, ctx, "lin0")), ctx, "lin1").mean()
+    return feed_forward(ctx, inp).mean()
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
