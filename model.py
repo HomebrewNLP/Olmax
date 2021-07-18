@@ -73,7 +73,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
     return linear(relu(linear(inp, ctx, "lin0")), ctx, "lin1").mean()
 
 
-def update(ctx: Context, grads: typing.List[jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
+def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
     return {k: p - g * ctx.learning_rate for (k, p), g in zip(ctx.parameter_dict.items(), grads.values())}
 
 
