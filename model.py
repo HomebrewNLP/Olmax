@@ -16,7 +16,7 @@ class Context:
         self.learning_rate = 1e-3
         self.parameters: typing.List[jnp.ndarray] = []
         self.parameter_dict: typing.Dict[str:jnp.ndarray] = {}
-        self.device_steps = 200
+        self.device_steps = 25
         self.steps = 10
         self.features_per_head = 16
         self.head_count = 1
@@ -26,6 +26,13 @@ class Context:
         self.out = self.base * self.group_linear_factor
         self.dtype = jnp.float32
         self.init_scale = 1.0
+
+
+def dataset(ctx: Context):
+    shape = [ctx.device_steps, ctx.batch_size, ctx.base]
+    size = util.prod(shape)
+    for i in range(ctx.steps):
+        yield jnp.reshape(jnp.arange(0, size), shape) / size
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> jnp.ndarray:
@@ -60,40 +67,43 @@ def relu(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.maximum(inp, 0)
 
 
-def compute(params: typing.Dict[str, jnp.ndarray]) -> jnp.ndarray:
+def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
     ctx = Context()
     ctx.parameter_dict = params
-    return linear(relu(linear(input_embedding(ctx, "embd"), ctx, "lin0")), ctx, "lin1").mean()
+    return linear(relu(linear(inp, ctx, "lin0")), ctx, "lin1").mean()
 
 
 def update(ctx: Context, grads: typing.List[jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
     return {k: p - g * ctx.learning_rate for (k, p), g in zip(ctx.parameter_dict.items(), grads.values())}
 
 
-def train_step(ctx: Context) -> typing.Tuple[jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
+def train_step(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
     grad_fn = jax.value_and_grad(compute, 0)
-    loss, grads = grad_fn(ctx.parameter_dict)
+    loss, grads = grad_fn(ctx.parameter_dict, inp)
     return loss, update(ctx, grads)
 
 
 @jax.jit
-def step(parameter_dict: typing.Dict[str,jnp.ndarray]) -> typing.Tuple[jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
+def step(parameter_dict: typing.Dict[str, jnp.ndarray], data: jnp.ndarray) -> typing.Tuple[
+    jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
     ctx = Context()
     ctx.parameter_dict = parameter_dict
     loss = jnp.zeros([])
-    for _ in range(ctx.device_steps):
-        out, ctx.parameter_dict = train_step(ctx)
+    for i in range(ctx.device_steps):
+        out, ctx.parameter_dict = train_step(ctx, data[i])
         loss += out
     return loss / ctx.device_steps, ctx.parameter_dict
 
 
 def main():
     ctx = Context()
-    compute(ctx.parameter_dict)
+    ctx.initializing = True
+    data = dataset(ctx)
+    compute(ctx.parameter_dict, next(data)[0])
     parameter_dict = ctx.parameter_dict
-    for _ in range(ctx.steps):
+    for dat in data:
         start_time = time.time()
-        loss, parameter_dict = step(parameter_dict)
+        loss, parameter_dict = step(parameter_dict, dat)
         print(loss, time.time() - start_time)
 
 
