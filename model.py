@@ -109,7 +109,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
     ctx = Context()
     ctx.parameter_dict = params
-    return feed_forward(ctx, inp).mean()
+    return attention(ctx, feed_forward(ctx, inp)).mean()
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
