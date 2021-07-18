@@ -17,7 +17,7 @@ class Context:
         self.parameters: typing.List[jnp.ndarray] = []
         self.parameter_dict: typing.Dict[str:jnp.ndarray] = {}
         self.device_steps = 25
-        self.steps = 10
+        self.steps = 100
         self.features_per_head = 16
         self.head_count = 1
         self.group_linear_factor = 2
