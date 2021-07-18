@@ -103,7 +103,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     logit -= jnp.reshape(jnp.arange(0, qry.shape[-2]), (1, -1)) > jnp.reshape(jnp.arange(0, qry.shape[-2]), (-1, 1))
     logit = jnp.exp(logit - lax.stop_gradient(logit.max(-1, keepdims=True)))
     logit /= logit.sum(-1, keepdims=True)
-    return jnp.einsum(f'{anonymous_spec},{spec[:-1]}z->{spec}', val, logit)
+    return linear(ctx, jnp.einsum(f'{anonymous_spec},{spec[:-1]}z->{spec}', val, logit))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
