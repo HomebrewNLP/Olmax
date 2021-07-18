@@ -143,10 +143,10 @@ def main():
     parameter_dict = ctx.parameter_dict
     for name, param in parameter_dict.items():
         print(name, util.prod(param.shape), param.shape)
-    for dat in data:
+    for idx, dat in enumerate(data):
         start_time = time.time()
         loss, parameter_dict = step(parameter_dict, dat)
-        print(loss, time.time() - start_time)
+        print(f'[{idx:{len(str(ctx.steps))}d}/{ctx.steps}] Loss: {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
 
 
 if __name__ == '__main__':
