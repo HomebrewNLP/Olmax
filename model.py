@@ -140,6 +140,8 @@ def main():
     data = dataset(ctx)
     compute(ctx.parameter_dict, next(data)[0])
     parameter_dict = ctx.parameter_dict
+    for name, param in parameter_dict.items():
+        print(name, util.prod(param.shape), param.shape)
     for dat in data:
         start_time = time.time()
         loss, parameter_dict = step(parameter_dict, dat)
