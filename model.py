@@ -48,7 +48,7 @@ def dataset(ctx: Context):
     shape = [ctx.device_steps, 2, ctx.batch_size, ctx.sequence_length, ctx.base]
     size = util.prod(shape)
     for i in range(ctx.steps):
-        yield jnp.reshape(jnp.arange(0, size), shape) / size
+        yield jnp.reshape(jnp.cos(jnp.arange(0, size)), shape)
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> jnp.ndarray:
