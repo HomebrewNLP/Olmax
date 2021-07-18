@@ -7,6 +7,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
+import copy
 
 
 class Context:
@@ -31,7 +32,7 @@ class Context:
         self.name_cache: typing.Dict[str, int] = {}
 
     def add_to_prefix(self, appended=""):
-        new = self
+        new = copy.copy(self)
         new.global_prefix = self.global_prefix + '/' + self.incremental_name(appended)
         return new
 
