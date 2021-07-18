@@ -17,8 +17,8 @@ class Context:
         self.learning_rate = 1e-3
         self.parameters: typing.List[jnp.ndarray] = []
         self.parameter_dict: typing.Dict[str:jnp.ndarray] = {}
-        self.device_steps = 25
-        self.steps = 100
+        self.device_steps = 16
+        self.steps = 2 ** 16
         self.features_per_head = 16
         self.head_count = 1
         self.group_linear_factor = 2
@@ -31,6 +31,7 @@ class Context:
         self.sequence_length = 17
         self.name_cache: typing.Dict[str, int] = {}
         self.masked_attention = False
+        self.print_interval = 2 ** 10
 
     def add_to_prefix(self, appended=""):
         new = copy.copy(self)
@@ -138,14 +139,28 @@ def main():
     ctx = Context()
     ctx.initializing = True
     data = dataset(ctx)
+    print("Acquiring parameters and graph..        ", end='', flush=True)
+    start_time = time.time()
     compute(ctx.parameter_dict, next(data)[0])
+    print(f"Took {time.time() - start_time:.1f}s")
+
     parameter_dict = ctx.parameter_dict
+
+    print("Compiling model..                       ", end='', flush=True)
+    start_time = time.time()
+    step(parameter_dict, next(data))
+    print(f"Took {time.time() - start_time:.1f}s")
+
     for name, param in parameter_dict.items():
         print(name, util.prod(param.shape), param.shape)
+
+    start_time = time.time()
     for idx, dat in enumerate(data):
-        start_time = time.time()
         loss, parameter_dict = step(parameter_dict, dat)
-        print(f'[{idx:{len(str(ctx.steps))}d}/{ctx.steps}] Loss: {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
+        if idx % ctx.print_interval == 0:
+            print(f'[{idx * ctx.device_steps:{len(str(ctx.steps * ctx.device_steps))}d}/{ctx.steps * ctx.device_steps}]'
+                  f' Loss: {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
+            start_time = time.time()
 
 
 if __name__ == '__main__':
