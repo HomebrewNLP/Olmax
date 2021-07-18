@@ -44,7 +44,7 @@ class Context:
 
 
 def dataset(ctx: Context):
-    shape = [ctx.device_steps, ctx.batch_size, ctx.sequence_length, ctx.base]
+    shape = [ctx.device_steps, 2, ctx.batch_size, ctx.sequence_length, ctx.base]
     size = util.prod(shape)
     for i in range(ctx.steps):
         yield jnp.reshape(jnp.arange(0, size), shape) / size
@@ -106,7 +106,8 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
     ctx = Context()
     ctx.parameter_dict = params
-    return attention(ctx, feed_forward(ctx, inp)).mean()
+    src, tgt = inp
+    return jnp.square(attention(ctx, feed_forward(ctx, src)) - tgt).mean()
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
