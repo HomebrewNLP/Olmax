@@ -27,6 +27,7 @@ class Context:
         self.dtype = jnp.float32
         self.init_scale = 1.0
         self.global_prefix = ''
+        self.sequence_length = 17
         self.name_cache: typing.Dict[str, int] = {}
 
     def add_to_prefix(self, appended=""):
@@ -42,7 +43,7 @@ class Context:
 
 
 def dataset(ctx: Context):
-    shape = [ctx.device_steps, ctx.batch_size, ctx.base]
+    shape = [ctx.device_steps, ctx.batch_size, ctx.sequence_length, ctx.base]
     size = util.prod(shape)
     for i in range(ctx.steps):
         yield jnp.reshape(jnp.arange(0, size), shape) / size
