@@ -51,16 +51,16 @@ def get_or_create_parameter(ctx: Context, name: str, shape: typing.Optional[typi
     return ctx.parameter_dict[name]
 
 
-def linear(inp: jnp.ndarray, params: Context, name: str) -> jnp.ndarray:
-    shape = [params.out, params.base]
-    if inp.shape[-1] == params.base:
+def linear(inp: jnp.ndarray, ctx: Context, name: str) -> jnp.ndarray:
+    shape = [ctx.out, ctx.base]
+    if inp.shape[-1] == ctx.base:
         shape = shape[::-1]
     spec = ''.join(chr(ord('a') + i) for i in range(inp.ndim))
-    return jnp.einsum(f'{spec},{spec[-1]}z->{spec[:-1]}z', inp, get_or_create_parameter(params, name, shape))
+    return jnp.einsum(f'{spec},{spec[-1]}z->{spec[:-1]}z', inp, get_or_create_parameter(ctx, name, shape))
 
 
-def input_embedding(params: Context, name: str) -> jnp.ndarray:
-    return get_or_create_parameter(params, name, [params.batch_size, params.base])
+def input_embedding(ctx: Context, name: str) -> jnp.ndarray:
+    return get_or_create_parameter(ctx, name, [ctx.batch_size, ctx.base])
 
 
 def relu(inp: jnp.ndarray) -> jnp.ndarray:
