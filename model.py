@@ -1,3 +1,4 @@
+import copy
 import time
 import typing
 
@@ -7,7 +8,6 @@ import jax.lax as lax
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
-import copy
 
 
 class Context:
@@ -78,10 +78,6 @@ def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         shape = shape[::-1]
     spec = base_spec(inp)
     return jnp.einsum(f'{spec},{spec[-1]}z->{spec[:-1]}z', inp, get_or_create_parameter(ctx, "weight", shape))
-
-
-def input_embedding(ctx: Context, name: str) -> jnp.ndarray:
-    return get_or_create_parameter(ctx, name, [ctx.batch_size, ctx.base])
 
 
 def relu(inp: jnp.ndarray) -> jnp.ndarray:
