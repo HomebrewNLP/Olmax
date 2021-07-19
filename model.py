@@ -8,6 +8,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
+# jax.config.update("jax_disable_jit", True)
 
 
 class Context:
