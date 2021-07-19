@@ -11,12 +11,11 @@ import numpy as np
 
 
 class Context:
-    def __init__(self):
+    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.seed = 0
         self.prng_key = random.PRNGKey(self.seed)
         self.learning_rate = 1e-3
-        self.parameters: typing.List[jnp.ndarray] = []
-        self.parameter_dict: typing.Dict[str:jnp.ndarray] = {}
+        self.parameters: typing.Dict[str:jnp.ndarray] = {}
         self.device_steps = 16
         self.steps = 2 ** 16
         self.features_per_head = 16
@@ -33,6 +32,9 @@ class Context:
         self.masked_attention = False
         self.print_interval = 2 ** 10
 
+        if config is not None:
+            self.__dict__.update(config)
+
     def add_to_prefix(self, appended=""):
         new = copy.copy(self)
         new.global_prefix = self.global_prefix + '/' + self.incremental_name(appended)
@@ -43,6 +45,27 @@ class Context:
             self.name_cache[name] = -1
         self.name_cache[name] += 1
         return f'{name}:{self.name_cache[name]:d}'
+
+    def serialize(self):
+        return copy.copy(self.__dict__)
+
+
+class WhileContext:
+    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+        self.ctx = Context()
+        self.current_step = jnp.zeros([], dtype=jnp.int64)
+        self.data: typing.Optional[jnp.ndarray] = None
+        self.loss = jnp.zeros([])
+
+        if config is not None:
+            self.ctx.parameters = config['parameters']
+            self.loss = config['loss']
+            self.current_step = config['current_step']
+            self.data = config['data']
+
+    def serialize(self):
+        return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'loss': self.loss,
+                'data': self.data}
 
 
 def dataset(ctx: Context):
@@ -64,9 +87,9 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> 
 
 def get_or_create_parameter(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None) -> jnp.ndarray:
     name = ctx.add_to_prefix(name).global_prefix
-    if name not in ctx.parameter_dict:
-        ctx.parameter_dict[name] = orthogonal_init(ctx, shape)
-    return ctx.parameter_dict[name]
+    if name not in ctx.parameters:
+        ctx.parameters[name] = orthogonal_init(ctx, shape)
+    return ctx.parameters[name]
 
 
 def base_spec(inp: jnp.ndarray) -> str:
@@ -108,31 +131,38 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
     ctx = Context()
-    ctx.parameter_dict = params
+    ctx.parameters = params
     src, tgt = inp
     return jnp.square(attention(ctx, feed_forward(ctx, src)) - tgt).mean()
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
-    return {k: p - g * ctx.learning_rate for (k, p), g in zip(ctx.parameter_dict.items(), grads.values())}
+    return {k: p - g * ctx.learning_rate for (k, p), g in zip(ctx.parameters.items(), grads.values())}
 
 
-def train_step(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
+def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+    wctx = WhileContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0)
-    loss, grads = grad_fn(ctx.parameter_dict, inp)
-    return loss, update(ctx, grads)
+    loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.device_steps])
+    wctx.ctx.parameters = update(wctx.ctx, grads)
+    wctx.loss += loss
+    return wctx.serialize()
+
+
+def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
+    wctx = WhileContext(while_ctx_dict)
+    wctx.current_step += 1
+    return jnp.equal(wctx.current_step % wctx.ctx.device_steps, 0)
 
 
 @jax.jit
-def step(parameter_dict: typing.Dict[str, jnp.ndarray], data: jnp.ndarray) -> typing.Tuple[
+def step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray) -> typing.Tuple[
     jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
-    ctx = Context()
-    ctx.parameter_dict = parameter_dict
-    loss = jnp.zeros([])
-    for i in range(ctx.device_steps):
-        out, ctx.parameter_dict = train_step(ctx, data[i])
-        loss += out
-    return loss / ctx.device_steps, ctx.parameter_dict
+    wctx = WhileContext()
+    wctx.ctx.parameters = parameters
+    wctx.data = data
+    wctx = WhileContext(lax.while_loop(cond_fn, train_step, wctx.serialize()))
+    return wctx.loss / wctx.ctx.device_steps, wctx.ctx.parameters
 
 
 def main():
@@ -141,22 +171,22 @@ def main():
     data = dataset(ctx)
     print("Acquiring parameters and graph..        ", end='', flush=True)
     start_time = time.time()
-    compute(ctx.parameter_dict, next(data)[0])
+    compute(ctx.parameters, next(data)[0])
     print(f"Took {time.time() - start_time:.1f}s")
 
-    parameter_dict = ctx.parameter_dict
+    parameters = ctx.parameters
 
     print("Compiling model..                       ", end='', flush=True)
     start_time = time.time()
-    step(parameter_dict, next(data))
+    step(parameters, next(data))
     print(f"Took {time.time() - start_time:.1f}s")
 
-    for name, param in parameter_dict.items():
+    for name, param in parameters.items():
         print(name, util.prod(param.shape), param.shape)
 
     start_time = time.time()
     for idx, dat in enumerate(data):
-        loss, parameter_dict = step(parameter_dict, dat)
+        loss, parameters = step(parameters, dat)
         if idx % ctx.print_interval == 0:
             print(f'[{idx * ctx.device_steps:{len(str(ctx.steps * ctx.device_steps))}d}/{ctx.steps * ctx.device_steps}]'
                   f' Loss: {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
