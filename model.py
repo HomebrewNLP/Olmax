@@ -53,7 +53,7 @@ class Context:
 class WhileContext:
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.ctx = Context()
-        self.current_step = jnp.zeros([], dtype=jnp.int64)
+        self.current_step = jnp.zeros([], dtype=jnp.uint32)
         self.data: typing.Optional[jnp.ndarray] = None
         self.loss = jnp.zeros([])
 
