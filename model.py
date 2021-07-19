@@ -16,7 +16,7 @@ class Context:
         self.prng_key = random.PRNGKey(self.seed)
         self.learning_rate = 1e-3
         self.parameters: typing.Dict[str:jnp.ndarray] = {}
-        self.device_steps = 16
+        self.device_steps = 1024
         self.steps = 2 ** 16
         self.features_per_head = 16
         self.head_count = 1
@@ -30,7 +30,7 @@ class Context:
         self.sequence_length = 17
         self.name_cache: typing.Dict[str, int] = {}
         self.masked_attention = False
-        self.print_interval = 2 ** 10
+        self.print_interval = 16
 
         if config is not None:
             self.__dict__.update(config)
