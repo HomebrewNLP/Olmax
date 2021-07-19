@@ -197,8 +197,7 @@ def main():
     step(parameters, next(data))
     print(f"Took {time.time() - start_time:.1f}s")
 
-    for name, param in parameters.items():
-        print(name, util.prod(param.shape), param.shape)
+    print(f"Parameters: {sum(util.prod(param.shape) for name, param in parameters.items())}")
 
     start_time = time.time()
     for idx, dat in enumerate(data):
