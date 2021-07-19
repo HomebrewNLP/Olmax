@@ -138,7 +138,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
-    return {k: p - g * ctx.learning_rate for (k, p), g in zip(ctx.parameters.items(), grads.values())}
+    return {k: p - grads[k] * ctx.learning_rate for k, p in ctx.parameters.items()}
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
