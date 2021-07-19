@@ -23,6 +23,7 @@ class Context:
         self.head_count = 1
         self.group_linear_factor = 2
         self.batch_size = 7
+        self.depth = 8
         self.base = self.features_per_head * self.head_count
         self.out = self.base * self.group_linear_factor
         self.dtype = jnp.float32
@@ -135,7 +136,10 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    return jnp.square(attention(ctx, feed_forward(ctx, src)) - tgt).mean()
+    for _ in range(ctx.depth):
+        src += feed_forward(ctx, src)
+        src += attention(ctx, src)
+    return jnp.square(src - tgt).mean()
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
