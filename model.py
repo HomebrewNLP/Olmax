@@ -146,13 +146,13 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.device_steps])
     wctx.ctx.parameters = update(wctx.ctx, grads)
     wctx.loss += loss
+    wctx.current_step += 1
     return wctx.serialize()
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhileContext(while_ctx_dict)
-    wctx.current_step += 1
-    return jnp.equal(wctx.current_step % wctx.ctx.device_steps, 0)
+    return jnp.not_equal(jnp.mod(wctx.current_step + 1, wctx.ctx.device_steps), 0)
 
 
 @jax.jit
