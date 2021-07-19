@@ -69,10 +69,11 @@ class WhileContext:
 
 
 def dataset(ctx: Context):
-    shape = [ctx.device_steps, 2, ctx.batch_size, ctx.sequence_length, ctx.base]
-    size = util.prod(shape)
+    shape = [ctx.device_steps, 1, ctx.batch_size, ctx.sequence_length, ctx.base]
     for i in range(ctx.steps):
-        yield jnp.reshape(jnp.cos(jnp.arange(0, size)), shape)
+        src = random.normal(ctx.prng_key, shape, ctx.dtype)
+        tgt = jnp.cos(src) + src.sum((-1, -2), keepdims=True) / (ctx.sequence_length * ctx.base)
+        yield jnp.concatenate([src, tgt], 1)
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> jnp.ndarray:
