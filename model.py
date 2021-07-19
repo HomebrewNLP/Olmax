@@ -8,6 +8,8 @@ import jax.lax as lax
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
+
+
 # jax.config.update("jax_disable_jit", True)
 
 
@@ -88,7 +90,7 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> 
     return jnp.moveaxis(jnp.reshape(out, tuple(np.delete(shape, column_axis)) + (shape[column_axis],)), -1, column_axis)
 
 
-def get_or_create_parameter(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None) -> jnp.ndarray:
+def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None) -> jnp.ndarray:
     name = ctx.add_to_prefix(name).global_prefix
     if name not in ctx.parameters:
         ctx.parameters[name] = orthogonal_init(ctx, shape)
@@ -105,7 +107,7 @@ def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if inp.shape[-1] == ctx.base:
         shape = shape[::-1]
     spec = base_spec(inp)
-    return jnp.einsum(f'{spec},{spec[-1]}z->{spec[:-1]}z', inp, get_or_create_parameter(ctx, "weight", shape))
+    return jnp.einsum(f'{spec},{spec[-1]}z->{spec[:-1]}z', inp, get_param(ctx, "weight", shape))
 
 
 def relu(inp: jnp.ndarray) -> jnp.ndarray:
@@ -132,13 +134,21 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return linear(ctx, jnp.einsum(f'{anonymous_spec},{spec[:-1]}z->{spec}', val, logit))
 
 
+def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("instance_norm")
+    inp = inp - inp.mean(-1, keepdims=True)
+    inp = inp * lax.rsqrt(jnp.square(inp).sum(-1, keepdims=True))
+    inp = inp * get_param(ctx, "scale", [1] * (inp.ndim - 1) + [ctx.base])
+    return inp + get_param(ctx, "shift", [1] * (inp.ndim - 1) + [ctx.base])
+
+
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
     for _ in range(ctx.depth):
-        src += feed_forward(ctx, src)
-        src += attention(ctx, src)
+        src += feed_forward(ctx, instance_norm(ctx, src))
+        src += attention(ctx, instance_norm(ctx, src))
     return jnp.square(src - tgt).mean()
 
 
