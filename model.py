@@ -103,7 +103,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     spec = base_spec(inp)
     embd = get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], ctx.embedding_std)
-    out = jnp.einsum(f"{spec}x,xyz->{spec}yz", one_hot(inp, ctx.data.vocab_size), embd)
+    out = shard(jnp.einsum(f"{spec}x,xyz->{spec}yz", one_hot(inp, ctx.data.vocab_size), embd))
 
     position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
     feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
@@ -119,8 +119,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
     spec = base_spec(inp)[:-2]
-    return jnp.einsum(f"{spec}xy,xyz->{spec}z", inp,
-                      get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab]))
+    embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab])
+    return shard(jnp.einsum(f"{spec}xy,xyz->{spec}z", inp, embd), None)
 
 
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -151,8 +151,8 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("cross_entropy_loss")
     spec = base_spec(src)
-    max_src = lax.stop_gradient(src).max(-1, keepdims=True)
-    log_z = jnp.log(jnp.exp(src - max_src).sum(-1, keepdims=True)) + max_src
+    max_src = shard(lax.stop_gradient(src).max(-1, keepdims=True), None)
+    log_z = jnp.log(shard(jnp.exp(src - max_src).sum(-1, keepdims=True), None)) + max_src
     loss = jnp.einsum(f"{spec},{spec}->", src - log_z, one_hot(tgt, ctx.data.vocab_size))
     return (jnp.square(log_z).sum() * ctx.z_loss - loss) / tgt.size
 
