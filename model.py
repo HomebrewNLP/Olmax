@@ -14,7 +14,7 @@ from jax.experimental.maps import mesh
 from context import Context, WhileContext
 from data import text_dataset
 
-os.environ['TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD'] = 2 ** 36  # On TPU, only alloc >64GiB are possibly bad.
+os.environ['TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD'] = str(2 ** 36)  # On TPU, only alloc >64GiB are possibly bad.
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
 
 
