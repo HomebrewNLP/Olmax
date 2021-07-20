@@ -48,4 +48,4 @@ def text_dataset(ctx: Context) -> typing.Iterable[tf.Tensor]:
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_interleave)
     dset = dset.shuffle(ctx.data.shuffle_buffer, seed=ctx.data.seed).batch(device_steps * batch_size).map(_slice_target)
-    return iter(dset)
+    return dset.as_numpy_iterator()
