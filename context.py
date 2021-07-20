@@ -53,7 +53,7 @@ class Context:
         self.embedding_std = 0.004
         self.norm_std = 0.02
         self.name_cache: typing.Dict[str, int] = {}
-        self.masked_attention = False
+        self.masked_attention = True
         self.print_interval = 1
         self.data = DataContext()
         self.dims = Dims(self.data)

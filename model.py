@@ -1,3 +1,4 @@
+import math
 import time
 import typing
 import warnings
@@ -19,7 +20,7 @@ warnings.filterwarnings("ignore", message=".*is an experimental feature and prob
 # jax.config.update("jax_disable_jit", True)
 
 
-def dims_to_shape(ctx: Context, dims: typing.List[str]):
+def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
     return [ctx.dims.dim_sizes[d] for d in dims]
 
 
@@ -99,10 +100,20 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
+
     spec = base_spec(inp)
-    return jnp.einsum(f"{spec}x,xyz->{spec}yz", one_hot(inp, ctx.data.vocab_size),
-                      get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head],
-                                ctx.embedding_std))
+    embd = get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], ctx.embedding_std)
+    out = jnp.einsum(f"{spec}x,xyz->{spec}yz", one_hot(inp, ctx.data.vocab_size), embd)
+
+    position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
+    feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
+    position_count = util.prod(position_shape)
+    feature_count = util.prod(feature_shape)
+    positions = jnp.reshape(jnp.arange(0, position_shape), (-1, 1, 1))
+    features = jnp.arange(0, feature_count)
+    features = jnp.reshape(features, [1] + feature_shape) * 4 / feature_count
+    features = jnp.exp(features - math.log(position_count / 2 / math.pi))
+    return out + jnp.sin(features * positions)
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
