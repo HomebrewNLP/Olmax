@@ -123,8 +123,8 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("cross_entropy_loss")
     spec = base_spec(src)
-    max_src = lax.stop_gradient(src).max(-1, keepdim=True)
-    log_z = jnp.log(jnp.exp(src - max_src).sum(-1, keepdim=True)) + max_src
+    max_src = lax.stop_gradient(src).max(-1, keepdims=True)
+    log_z = jnp.log(jnp.exp(src - max_src).sum(-1, keepdims=True)) + max_src
     loss = jnp.einsum(f"{spec},{spec}->", src + log_z, one_hot(tgt, ctx.dims.vocab))
     return (jnp.square(log_z) * ctx.z_loss - loss) / tgt.size
 
