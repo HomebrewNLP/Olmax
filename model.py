@@ -99,7 +99,7 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 
     for i in range(grad.ndim):
         new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
-        ctx.parameters[ctx.add_to_prefix(f"dim{i}").global_prefix] = new
+        ctx.parameters[ctx.add_to_prefix(f"dim{i}", count=False).global_prefix] = new
 
     return grad * optimizer_rsqrt(weight_update)
 
@@ -116,7 +116,7 @@ def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("momentum")
     state = zero_param(ctx, "momentum_buffer", ctx.parameter_dims.get(param_name))
     new_state = ctx.momentum_beta * state + grad
-    ctx.parameters[ctx.add_to_prefix("momentum_buffer").global_prefix] = new_state
+    ctx.parameters[ctx.add_to_prefix("momentum_buffer", count=False).global_prefix] = new_state
     if not ctx.nesterov_momentum:
         return new_state
     return grad + ctx.momentum_beta * new_state
