@@ -42,7 +42,7 @@ def text_dataset(ctx: Context) -> typing.Iterable[tf.Tensor]:
 
     def _slice_target(x):
         x = tf.cast(tf.reshape(x, (device_steps, batch_size, sequence_length + 1)), tf.int32)
-        return tf.stack([x[:, :sequence_length], x[:, 1:]], 1)
+        return tf.stack([x[:, :, sequence_length], x[:, :, 1:]], 1)
 
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, sequence_length),
                            cycle_length=ctx.data.interleaved_datasets,
