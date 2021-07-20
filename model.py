@@ -97,7 +97,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    spec = base_spec(inp)
+    spec = base_spec(inp)[:-2]
     return jnp.einsum(f"{spec}xy,xyz->{spec}z", inp,
                       get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab]))
 
