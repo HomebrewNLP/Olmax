@@ -107,7 +107,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.masked_attention:
         mask = jnp.reshape(jnp.arange(0, qry.shape[-2]), (1, -1)) > jnp.reshape(jnp.arange(0, qry.shape[-2]), (-1, 1))
         logit += mask * -1e30
-    logit = jnp.exp(logit - lax.stop_gradient(logit.max(-1, keepdims=True)))
+    logit = jnp.exp(logit - lax.stop_gradient(logit).max(-1, keepdims=True))
     logit /= logit.sum(-1, keepdims=True)
     return shard(jnp.einsum(f'{anonymous_spec},{spec[:-1]}z->{spec}', val, logit))
 
@@ -125,7 +125,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
     spec = base_spec(src)
     max_src = lax.stop_gradient(src).max(-1, keepdims=True)
     log_z = jnp.log(jnp.exp(src - max_src).sum(-1, keepdims=True)) + max_src
-    loss = jnp.einsum(f"{spec},{spec}->", src + log_z, one_hot(tgt, ctx.dims.vocab))
+    loss = jnp.einsum(f"{spec},{spec}->", src + log_z, one_hot(tgt, ctx.data.vocab_size))
     return (jnp.square(log_z) * ctx.z_loss - loss) / tgt.size
 
 
