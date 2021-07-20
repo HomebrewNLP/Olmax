@@ -25,7 +25,7 @@ class DataContext:
         self.path = "gs://obst-euw4a-aa/the-char-pile/*"
         self.shuffle_buffer = 2 ** 16
         self.parallel_interleave = True
-        self.interleaved_datasets = 16
+        self.interleaved_datasets = 1
         self.seed = 0
 
 
