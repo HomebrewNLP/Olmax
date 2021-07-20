@@ -1,4 +1,3 @@
-import copy
 import time
 import typing
 import warnings
@@ -11,97 +10,17 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
+from context import Context, WhileContext
+from data import text_dataset
+
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
 
 
 # jax.config.update("jax_disable_jit", True)
 
 
-class Dims:
-    def __init__(self, group_linear_factor=2):
-        self.batch = "batch"
-        self.features_per_head = "features_per_head"
-        self.heads = "heads"
-        self.sequence = "sequence"
-        self.intermediate_feed_forward = "intermediate_feed_forward"
-        self.one = "one"
-        self.dim_sizes: typing.Dict[str, int] = {self.batch: 16,
-                                                 self.features_per_head: 16,
-                                                 self.heads: 8,
-                                                 self.sequence: 16,
-                                                 self.one: 1}
-        self.dim_sizes[self.intermediate_feed_forward] = self.dim_sizes[self.features_per_head] * group_linear_factor
-
-
-class Context:
-    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
-        self.seed = 0
-        self.prng_key = random.PRNGKey(self.seed)
-        self.learning_rate = -1e-3
-        self.parameters: typing.Dict[str, jnp.ndarray] = {}
-        self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
-        self.device_steps = 2 ** 1
-        self.steps = 2 ** 16
-        self.head_count = 1
-        self.group_linear_factor = 2
-        self.depth = 8
-        self.dtype = jnp.float32
-        self.init_scale = 1.0
-        self.global_prefix = ''
-        self.model_parallel = 1
-        self.data_parallel = 8
-        self.name_cache: typing.Dict[str, int] = {}
-        self.masked_attention = False
-        self.print_interval = 1
-        self.dims = Dims()
-
-        if config is not None:
-            self.__dict__.update(config)
-
-    def add_to_prefix(self, appended=""):
-        new = copy.copy(self)
-        new.global_prefix = self.global_prefix + '/' + self.incremental_name(appended)
-        return new
-
-    def incremental_name(self, name):
-        if name not in self.name_cache:
-            self.name_cache[name] = -1
-        self.name_cache[name] += 1
-        return f'{name}:{self.name_cache[name]:d}'
-
-
-class WhileContext:
-    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
-        self.ctx = Context()
-        self.current_step = jnp.zeros([], dtype=jnp.uint32)
-        self.data: typing.Optional[jnp.ndarray] = None
-        self.loss = jnp.zeros([])
-
-        if config is not None:
-            self.ctx.parameters = config['parameters']
-            self.loss = config['loss']
-            self.current_step = config['current_step']
-            self.data = config['data']
-
-    def serialize(self):
-        return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'loss': self.loss,
-                'data': self.data}
-
-
 def dims_to_shape(ctx: Context, dims: typing.List[str]):
     return [ctx.dims.dim_sizes[d] for d in dims]
-
-
-def dataset(ctx: Context):
-    shape = [ctx.device_steps, 1]
-    dims = ctx.dims
-    shape = shape + dims_to_shape(ctx, [dims.batch, dims.sequence, dims.heads, dims.features_per_head])
-    normalizer = util.prod(dims_to_shape(ctx, [dims.sequence, dims.heads, dims.features_per_head]))
-    for i in range(ctx.steps):
-        src = random.normal(ctx.prng_key, shape, ctx.dtype)
-        tgt = jnp.cos(src) + src.sum((-1, -2, -3), keepdims=True)
-        tgt = tgt / normalizer
-        yield jnp.concatenate([src, tgt], 1)
 
 
 def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0):
@@ -247,7 +166,7 @@ def sharding(ctx: Context, dims: typing.List[str]):
 def main():
     ctx = Context()
     ctx.initializing = True
-    data = dataset(ctx)
+    data = text_dataset(ctx)
     print("Acquiring parameters and graph..        ", end='', flush=True)
     start_time = time.time()
     compute_ctx(ctx, next(data)[0])
