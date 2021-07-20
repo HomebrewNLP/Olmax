@@ -27,7 +27,8 @@ class Dims:
                                                  self.features_per_head: 16,
                                                  self.heads: 8,
                                                  self.sequence: 16,
-                                                 self.vocab: data.vocab_size}
+                                                 self.vocab: data.vocab_size,
+                                                 self.one: 1}
         self.dim_sizes[self.intermediate_feed_forward] = self.dim_sizes[self.features_per_head] * group_linear_factor
 
 
