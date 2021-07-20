@@ -180,6 +180,34 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(jnp.einsum(f"{spec}xy,xyz->{spec}z", inp, embd), None)
 
 
+REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+
+
+def reversible(ctx: Context, fn: typing.Callable):
+    @jax.custom_vjp
+    def reversible_half_residual(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+        return inp
+
+    def reversible_forward(inp: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX, REVERSIBLE_CTX]:
+        params, x00, x01, x10, x11 = inp
+        new_ctx = ctx.add_to_prefix("reversible")
+        new_ctx.parameters = params
+        out = ctx.parameters, x10, x11, x00 + fn(new_ctx, x10), x01
+        return out, out
+
+    def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+        params, x10, x11, y00, x01 = inp
+        new_ctx = ctx.add_to_prefix("reversible")
+        new_ctx.parameters = params
+        x00 = y00 - fn(new_ctx, x10)
+        _, grad_fn = jax.vjp(reversible_forward, (params, x00, x01, x10, x11))
+        d_params, dx00, dx01, dx10, dx11 = grad_fn(dy)
+        return d_params, dx00, x00, x01 + dx10, x10
+
+    reversible_half_residual.defvjp(reversible_forward, reversible_backward)
+    return reversible_half_residual
+
+
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     base = linear(ctx, inp)
@@ -205,6 +233,15 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return scale * inp + get_param(ctx, "shift", shape, ctx.norm_std)
 
 
+def exec_fn(*fns: typing.Callable) -> typing.Callable:
+    def _run(ctx: Context, inp: jnp.ndarray):
+        for f in fns:
+            inp = f(ctx, inp)
+        return inp
+
+    return _run
+
+
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("cross_entropy_loss")
     spec = base_spec(src)
@@ -217,9 +254,11 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
     src = input_embed(ctx, src)
+    src = (src, jnp.zeros_like(src), src, jnp.zeros_like(src))
     for _ in range(ctx.depth):
-        src += feed_forward(ctx, instance_norm(ctx, src))
-        src += attention(ctx, instance_norm(ctx, src))
+        src = reversible(ctx, exec_fn(instance_norm, feed_forward))((ctx,) + src)
+        src = reversible(ctx, exec_fn(instance_norm, attention))((ctx,) + src)
+    src = src[0] + src[2]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
     return cross_entropy_loss(ctx, src, tgt)
