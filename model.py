@@ -341,7 +341,7 @@ def main():
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.data_parallel, ctx.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
-        loss, parameters = timeit("Compiling model and performing first step", step, partition, next(data))
+        loss, parameters = timeit("Compiling model and performing first step", step, ctx.parameters, next(data))
 
         print(f"Parameters: {sum(util.prod(param.shape) for name, param in parameters.items())}")
 
