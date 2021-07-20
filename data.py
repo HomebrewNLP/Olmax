@@ -1,7 +1,5 @@
-import typing
-
-import numpy as np
 import tensorflow as tf
+from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
 from context import Context
 
@@ -33,7 +31,7 @@ def decoder(int_string: bool, data: tf.Tensor, ctx: int):
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
 
 
-def text_dataset(ctx: Context) -> typing.Iterable[np.ndarray]:
+def text_dataset(ctx: Context) -> NumpyIterator:
     filenames = tf.io.gfile.glob(ctx.data.path)
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
