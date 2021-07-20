@@ -43,6 +43,8 @@ class Context:
         self.steps = 2 ** 16
         self.gradient_clip = 0.005
         self.head_count = 1
+        self.nesterov_momentum= True
+        self.momentum_beta = 0.9
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
         self.depth = 8

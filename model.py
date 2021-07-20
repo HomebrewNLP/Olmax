@@ -112,6 +112,15 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
     return clipped * do_clip + grad * (1 - do_clip)
 
 
+def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+    state = zero_param(ctx, "momentum", ctx.parameter_dims[param_name])
+    new_state = ctx.momentum_beta * state + grad
+    ctx.parameters[ctx.add_to_prefix("momentum").global_prefix] = new_state
+    if not ctx.nesterov_momentum:
+        return new_state
+    return grad + ctx.momentum_beta * new_state
+
+
 def base_spec(inp: jnp.ndarray) -> str:
     return ''.join(chr(ord('a') + i) for i in range(inp.ndim))
 
@@ -221,20 +230,22 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
     return compute_ctx(ctx, inp)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
-    out = {}
+def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
+    ctx = ctx.add_to_prefix("optimizer")
     for param_name, grad in grads.items():
+        if "optimizer" in param_name:
+            continue
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         grad = sm3(ctx, param_name, grad)
-        out[param_name] = ctx.parameters[param_name] + grad * ctx.learning_rate
-    return out
+        grad = momentum(ctx, param_name, grad)
+        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * ctx.learning_rate
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0)
     loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.device_steps])
-    wctx.ctx.parameters = update(wctx.ctx, grads)
+    update(wctx.ctx, grads)
     wctx.loss += loss
     wctx.current_step += 1
     return wctx.serialize()
