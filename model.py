@@ -113,7 +113,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     features = jnp.arange(0, feature_count)
     features = jnp.reshape(features, [1] + feature_shape) * 4 / feature_count
     features = jnp.exp(features - math.log(position_count / 2 / math.pi))
-    return out + jnp.sin(features * positions)
+    return out + jnp.sin(features * positions) * ctx.embedding_std
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
