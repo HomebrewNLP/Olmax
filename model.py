@@ -146,7 +146,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("instance_norm")
     shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, ctx.dims.features_per_head]
     inp = inp - shard(inp.mean(-1, keepdims=True), None)
-    scale = lax.rsqrt(shard(jnp.square(inp).sum(-1, keepdims=True), None))
+    scale = lax.rsqrt(ctx.norm_eps + shard(jnp.square(inp).sum(-1, keepdims=True), None))
     scale = scale * get_param(ctx, "scale", shape, ctx.norm_std, 1)
     return scale * inp + get_param(ctx, "shift", shape, ctx.norm_std)
 

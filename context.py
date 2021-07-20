@@ -42,6 +42,7 @@ class Context:
         self.device_steps = 2 ** 1
         self.steps = 2 ** 16
         self.head_count = 1
+        self.norm_eps = 1e-5
         self.group_linear_factor = 2
         self.depth = 8
         self.dtype = jnp.float32
