@@ -318,29 +318,30 @@ def sharding(ctx: Context, dims: typing.List[str]):
     return PartitionSpec(*out)
 
 
+def timeit(text: str, fn, *args, pad=45):
+    start_time = time.time()
+    print(f'{text}..{" " * (pad - len(text))}', end='')
+    out = fn(*args)
+    print(f"Took: {start_time:.2f}s")
+    return out
+
+
 def main():
     ctx = Context()
     ctx.initializing = True
-    data = text_dataset(ctx)
-    print("Acquiring parameters and graph..        ", end='', flush=True)
-    start_time = time.time()
-    compute_ctx(ctx, next(data)[0])
-    update(ctx, {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
-    print(f"Took {time.time() - start_time:.1f}s")
-
-    parameters = ctx.parameters
-
-    print("Compiling model..                       ", end='', flush=True)
+    data = timeit("Initializing dataset", text_dataset, ctx)
+    inp = timeit("Enqueueing first batch", next, data)[0]
+    timeit("Acquiring forward parameters", compute_ctx, ctx, inp)
+    timeit("Acquiring optimizer parameters", update, ctx,
+           {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
 
     partition = {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()}
-    step = pjit.pjit(jitless_step,
-                     in_axis_resources=(partition, PartitionSpec(None, None, "data_parallel", None)),
-                     out_axis_resources=(None, partition))
+    step = timeit("JITing model", pjit.pjit, jitless_step,
+                  (partition, PartitionSpec(None, None, "data_parallel", None)), (None, partition))
+
     mesh_devices = np.array(jax.devices()).reshape(ctx.data_parallel, ctx.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
-        start_time = time.time()
-        step(parameters, next(data))
-        print(f"Took {time.time() - start_time:.1f}s")
+        loss, parameters = timeit("Compiling model and performing first step", step, partition, next(data))
 
         print(f"Parameters: {sum(util.prod(param.shape) for name, param in parameters.items())}")
 
@@ -349,9 +350,8 @@ def main():
         for idx, dat in enumerate(data):
             loss, parameters = step(parameters, dat)
             if idx % ctx.print_interval == 0:
-                print(
-                    f'[{idx * ctx.device_steps:{len(str(ctx.steps * ctx.device_steps))}d}/{ctx.steps * ctx.device_steps}]'
-                    f' Loss: {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
+                print(f'[{idx * ctx.device_steps:{len(str(ctx.steps * ctx.device_steps))}d}/'
+                      f'{ctx.steps * ctx.device_steps}] Loss: {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
 
 
