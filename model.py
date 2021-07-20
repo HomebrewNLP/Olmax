@@ -83,7 +83,7 @@ def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
 
 def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("sm3")
-    dims = ctx.parameter_dims[param_name]
+    dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
     weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
     buffer = [weight_update]
     head_index = dims.index(ctx.dims.heads) if ctx.dims.heads in dims else -1
@@ -97,7 +97,7 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 
     weight_update = weight_update + jnp.square(grad)
 
-    for i, d in enumerate(dims):
+    for i in range(grad.ndim):
         new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
         ctx.parameters[ctx.add_to_prefix(f"dim{i}").global_prefix] = new
 
@@ -113,7 +113,7 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
 
 
 def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    state = zero_param(ctx, "momentum", ctx.parameter_dims[param_name])
+    state = zero_param(ctx, "momentum", ctx.parameter_dims.get(param_name))
     new_state = ctx.momentum_beta * state + grad
     ctx.parameters[ctx.add_to_prefix("momentum").global_prefix] = new_state
     if not ctx.nesterov_momentum:
@@ -284,6 +284,7 @@ def main():
     print("Acquiring parameters and graph..        ", end='', flush=True)
     start_time = time.time()
     compute_ctx(ctx, next(data)[0])
+    update(ctx, {name:jnp.zeros_like(param) for name, param in ctx.parameters.items()})
     print(f"Took {time.time() - start_time:.1f}s")
 
     parameters = ctx.parameters
