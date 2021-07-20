@@ -19,7 +19,6 @@ warnings.filterwarnings("ignore", message=".*is an experimental feature and prob
 
 # jax.config.update("jax_disable_jit", True)
 
-
 def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
     return [ctx.dims.dim_sizes[d] for d in dims]
 
@@ -66,6 +65,51 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] 
             if mean is not None:
                 ctx.parameters[name] += mean
     return ctx.parameters[name]
+
+
+def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
+    return get_param(ctx, name, shape, 0, 0)
+
+
+def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
+    base = ["one"] * ndim
+    base[dim_idx] = dim_name
+    return base
+
+
+def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
+    return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
+
+
+def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("sm3")
+    dims = ctx.parameter_dims[param_name]
+    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
+    buffer = [weight_update]
+    head_index = dims.index(ctx.dims.heads) if ctx.dims.heads in dims else -1
+
+    for i, d in enumerate(dims[1:], 1):
+        buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i)))
+        weight_update = jnp.minimum(weight_update, buffer[-1])
+
+        if i >= head_index >= 0:
+            weight_update = shard(weight_update, head_index, None)
+
+    weight_update = weight_update + jnp.square(grad)
+
+    for i, d in enumerate(dims):
+        new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
+        ctx.parameters[ctx.add_to_prefix(f"dim{i}").global_prefix] = new
+
+    return grad * optimizer_rsqrt(weight_update)
+
+
+def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+    grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
+    wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
+    do_clip = jnp.greater(grd_norm * jnp.reciprocal(wgt_norm), ctx.gradient_clip)
+    clipped = wgt_norm * jnp.reciprocal(grd_norm) * ctx.gradient_clip * grad
+    return clipped * do_clip + grad * (1 - do_clip)
 
 
 def base_spec(inp: jnp.ndarray) -> str:
@@ -178,7 +222,12 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]) -> typing.Dict[str, jnp.ndarray]:
-    return {k: p + grads[k] * ctx.learning_rate for k, p in ctx.parameters.items()}
+    out = {}
+    for param_name, grad in grads.items():
+        grad = adaptive_gradient_clipping(ctx, param_name, grad)
+        grad = sm3(ctx, param_name, grad)
+        out[param_name] = ctx.parameters[param_name] + grad * ctx.learning_rate
+    return out
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
