@@ -256,8 +256,8 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src = input_embed(ctx, src)
     src = (src, jnp.zeros_like(src), src, jnp.zeros_like(src))
     for _ in range(ctx.depth):
-        src = reversible(ctx, exec_fn(instance_norm, feed_forward))((ctx,) + src)
-        src = reversible(ctx, exec_fn(instance_norm, attention))((ctx,) + src)
+        src = reversible(ctx, exec_fn(instance_norm, feed_forward))((ctx.parameters,) + src)
+        src = reversible(ctx, exec_fn(instance_norm, attention))((ctx.parameters,) + src)
     src = src[0] + src[2]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
