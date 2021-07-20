@@ -163,6 +163,7 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     for _ in range(ctx.depth):
         src += feed_forward(ctx, instance_norm(ctx, src))
         src += attention(ctx, instance_norm(ctx, src))
+    src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
     return cross_entropy_loss(ctx, src, tgt)
 
