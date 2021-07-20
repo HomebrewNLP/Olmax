@@ -322,7 +322,7 @@ def timeit(text: str, fn, *args, pad=45):
     start_time = time.time()
     print(f'{text}..{" " * (pad - len(text))}', end='')
     out = fn(*args)
-    print(f"Took: {start_time:.2f}s")
+    print(f"Took:{time.time() - start_time:7.2f}s")
     return out
 
 
