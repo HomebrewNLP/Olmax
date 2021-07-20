@@ -254,11 +254,11 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
     src = input_embed(ctx, src)
-    src = (src, jnp.zeros_like(src), src, jnp.zeros_like(src))
+    src = (ctx.parameters, src, jnp.zeros_like(src), src, jnp.zeros_like(src))
     for _ in range(ctx.depth):
-        src = reversible(ctx, exec_fn(instance_norm, feed_forward))((ctx.parameters,) + src)
-        src = reversible(ctx, exec_fn(instance_norm, attention))((ctx.parameters,) + src)
-    src = src[0] + src[2]
+        src = reversible(ctx, exec_fn(instance_norm, feed_forward))(src)
+        src = reversible(ctx, exec_fn(instance_norm, attention))(src)
+    src = src[1] + src[3]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
     return cross_entropy_loss(ctx, src, tgt)
