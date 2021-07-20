@@ -31,9 +31,7 @@ def decoder(int_string: bool, data: tf.Tensor, ctx: int):
 
 
 def text_dataset(ctx: Context):
-    filenames = []
-    for file in ctx.data.path:
-        filenames.extend(tf.io.gfile.glob(file['path']))
+    filenames = tf.io.gfile.glob(ctx.data.path)
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
     sequence_length = ctx.dims.dim_sizes[ctx.dims.sequence]
