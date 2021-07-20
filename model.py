@@ -91,7 +91,7 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     spec = base_spec(inp)
-    return jnp.einsum(f"{spec}x,xyz-{spec}yz", one_hot(inp, ctx.data.vocab_size),
+    return jnp.einsum(f"{spec}x,xyz->{spec}yz", one_hot(inp, ctx.data.vocab_size),
                       get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head]))
 
 
