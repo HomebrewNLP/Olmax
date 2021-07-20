@@ -40,7 +40,7 @@ def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Op
         raise e
 
 
-def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> jnp.ndarray:
+def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jnp.ndarray:
     n_rows, n_cols = util.prod(shape) // shape[column_axis], shape[column_axis]
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
     out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.dtype))
@@ -51,13 +51,14 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> 
 
 
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
-              std: typing.Optional[float] = None, mean: typing.Optional[float] = None) -> jnp.ndarray:
+              std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
+              column_axis: typing.Optional[int] = None) -> jnp.ndarray:
     name = ctx.add_to_prefix(name).global_prefix
     if name not in ctx.parameters:
         ctx.parameter_dims[name] = shape
         shape = [ctx.dims.dim_sizes[dim] for dim in shape]
         if std is None and mean is None:
-            ctx.parameters[name] = orthogonal_init(ctx, shape)
+            ctx.parameters[name] = orthogonal_init(ctx, shape, -1 if column_axis is None else column_axis)
         else:
             ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.dtype)
             if std is not None:
@@ -78,11 +79,13 @@ def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         shape = [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head]
         spec = f'{spec},{spec[-1]}yz->{spec[:-1]}yz'
         head_dim = None
+        column_axis = 0
     else:
         shape = [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
         spec = f'{spec},{spec[-2:]}z->{spec[:-2]}z'
         head_dim = -2
-    return shard(jnp.einsum(spec, inp, get_param(ctx, "weight", shape)), head_dim)
+        column_axis = -1
+    return shard(jnp.einsum(spec, inp, get_param(ctx, "weight", shape, column_axis=column_axis)), head_dim)
 
 
 def relu(inp: jnp.ndarray) -> jnp.ndarray:
