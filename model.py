@@ -122,6 +122,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
+    src = input_embed(ctx, src)
     for _ in range(ctx.depth):
         src += feed_forward(ctx, instance_norm(ctx, src))
         src += attention(ctx, instance_norm(ctx, src))
