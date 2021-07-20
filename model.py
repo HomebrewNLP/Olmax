@@ -113,9 +113,10 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
 
 
 def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    state = zero_param(ctx, "momentum", ctx.parameter_dims.get(param_name))
+    ctx = ctx.add_to_prefix("momentum")
+    state = zero_param(ctx, "momentum_buffer", ctx.parameter_dims.get(param_name))
     new_state = ctx.momentum_beta * state + grad
-    ctx.parameters[ctx.add_to_prefix("momentum").global_prefix] = new_state
+    ctx.parameters[ctx.add_to_prefix("momentum_buffer").global_prefix] = new_state
     if not ctx.nesterov_momentum:
         return new_state
     return grad + ctx.momentum_beta * new_state
@@ -238,7 +239,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         grad = sm3(ctx, param_name, grad)
         grad = momentum(ctx, param_name, grad)
-        print(ctx.parameters[param_name].shape, grad.shape)
         ctx.parameters[param_name] = ctx.parameters[param_name] + grad * ctx.learning_rate
 
 
