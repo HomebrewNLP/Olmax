@@ -207,7 +207,7 @@ def main():
 
     partition = {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()}
     step = pjit.pjit(jitless_step,
-                     in_axis_resources=(partition, PartitionSpec(None, None, "data_parallel", None, None, None)),
+                     in_axis_resources=(partition, PartitionSpec(None, None, "data_parallel", None)),
                      out_axis_resources=(None, partition))
     mesh_devices = np.array(jax.devices()).reshape(ctx.data_parallel, ctx.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
