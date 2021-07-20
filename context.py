@@ -36,10 +36,10 @@ class Context:
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.seed = 0
         self.prng_key = random.PRNGKey(self.seed)
-        self.learning_rate = -1e-4
+        self.learning_rate = -1e-3
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
-        self.device_steps = 2 ** 10
+        self.device_steps = 2 ** 13
         self.steps = 2 ** 16
         self.gradient_clip = 0.005
         self.head_count = 1
