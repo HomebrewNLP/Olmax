@@ -234,11 +234,12 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
     ctx = ctx.add_to_prefix("optimizer")
     for param_name, grad in grads.items():
+        inner_ctx = ctx.add_to_prefix(param_name)
         if "optimizer" in param_name:
             continue
-        grad = adaptive_gradient_clipping(ctx, param_name, grad)
-        grad = sm3(ctx, param_name, grad)
-        grad = momentum(ctx, param_name, grad)
+        grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
+        grad = sm3(inner_ctx, param_name, grad)
+        grad = momentum(inner_ctx, param_name, grad)
         ctx.parameters[param_name] = ctx.parameters[param_name] + grad * ctx.learning_rate
 
 
