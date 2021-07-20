@@ -4,22 +4,6 @@ import typing
 from jax import numpy as jnp, random
 
 
-class Dims:
-    def __init__(self, group_linear_factor=2):
-        self.batch = "batch"
-        self.features_per_head = "features_per_head"
-        self.heads = "heads"
-        self.sequence = "sequence"
-        self.intermediate_feed_forward = "intermediate_feed_forward"
-        self.one = "one"
-        self.dim_sizes: typing.Dict[str, int] = {self.batch: 16,
-                                                 self.features_per_head: 16,
-                                                 self.heads: 8,
-                                                 self.sequence: 16,
-                                                 self.one: 1}
-        self.dim_sizes[self.intermediate_feed_forward] = self.dim_sizes[self.features_per_head] * group_linear_factor
-
-
 class DataContext:
     def __init__(self):
         self.path = "gs://obst-euw4a-aa/the-char-pile/*"
@@ -27,6 +11,24 @@ class DataContext:
         self.parallel_interleave = True
         self.interleaved_datasets = 1
         self.seed = 0
+        self.vocab_size = 256  # should be divisible by 128
+
+
+class Dims:
+    def __init__(self, data: DataContext, group_linear_factor=2):
+        self.batch = "batch"
+        self.features_per_head = "features_per_head"
+        self.heads = "heads"
+        self.sequence = "sequence"
+        self.intermediate_feed_forward = "intermediate_feed_forward"
+        self.one = "one"
+        self.vocab = "vocab"
+        self.dim_sizes: typing.Dict[str, int] = {self.batch: 16,
+                                                 self.features_per_head: 16,
+                                                 self.heads: 8,
+                                                 self.sequence: 16,
+                                                 self.vocab: data.vocab_size}
+        self.dim_sizes[self.intermediate_feed_forward] = self.dim_sizes[self.features_per_head] * group_linear_factor
 
 
 class Context:

@@ -1,4 +1,3 @@
-import os
 import time
 import typing
 import warnings
@@ -14,7 +13,6 @@ from jax.experimental.maps import mesh
 from context import Context, WhileContext
 from data import text_dataset
 
-os.environ['TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD'] = str(2 ** 36)  # On TPU, only alloc >64GiB are possibly bad.
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
 
 
@@ -84,6 +82,17 @@ def relu(inp: jnp.ndarray) -> jnp.ndarray:
 def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
     return linear(ctx, relu(linear(ctx, inp)))
+
+
+def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
+    return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
+
+
+def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("input_embed")
+    spec = base_spec(inp)
+    return jnp.einsum(f"{spec}x,xyz-{spec}yz", one_hot(inp, ctx.data.vocab_size),
+                      get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head]))
 
 
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
