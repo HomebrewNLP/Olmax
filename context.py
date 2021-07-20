@@ -23,10 +23,10 @@ class Dims:
         self.intermediate_feed_forward = "intermediate_feed_forward"
         self.one = "one"
         self.vocab = "vocab"
-        self.dim_sizes: typing.Dict[str, int] = {self.batch: 16,
+        self.dim_sizes: typing.Dict[str, int] = {self.batch: 128,
                                                  self.features_per_head: 16,
                                                  self.heads: 8,
-                                                 self.sequence: 16,
+                                                 self.sequence: 32,
                                                  self.vocab: data.vocab_size,
                                                  self.one: 1}
         self.dim_sizes[self.intermediate_feed_forward] = self.dim_sizes[self.features_per_head] * group_linear_factor
@@ -36,7 +36,7 @@ class Context:
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.seed = 0
         self.prng_key = random.PRNGKey(self.seed)
-        self.learning_rate = -1e-3
+        self.learning_rate = -1e-5
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
         self.device_steps = 2 ** 1
