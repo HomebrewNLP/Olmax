@@ -120,13 +120,22 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return inp + get_param(ctx, "shift", shape)
 
 
+def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("cross_entropy_loss")
+    spec = base_spec(src)
+    max_src = lax.stop_gradient(src).max(-1)
+    log_z = jnp.log(jnp.exp(src - max_src).sum(-1)) + max_src
+    loss = jnp.einsum(f"{spec},{spec}->", src + log_z, one_hot(tgt, ctx.dims.vocab))
+    return (jnp.square(log_z) * ctx.z_loss - loss) / tgt.size
+
+
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
     src = input_embed(ctx, src)
     for _ in range(ctx.depth):
         src += feed_forward(ctx, instance_norm(ctx, src))
         src += attention(ctx, instance_norm(ctx, src))
-    return jnp.square(src - tgt).mean()
+    return cross_entropy_loss(ctx, src, tgt)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
