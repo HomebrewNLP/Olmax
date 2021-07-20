@@ -82,7 +82,7 @@ def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("sm3")
+    ctx = ctx.add_to_prefix("sm3", count=False)
     dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
     weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
     buffer = [weight_update]
@@ -113,7 +113,7 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
 
 
 def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("momentum")
+    ctx = ctx.add_to_prefix("momentum", count=False)
     state = zero_param(ctx, "momentum_buffer", ctx.parameter_dims.get(param_name))
     new_state = ctx.momentum_beta * state + grad
     ctx.parameters[ctx.add_to_prefix("momentum_buffer", count=False).global_prefix] = new_state
