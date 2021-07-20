@@ -51,8 +51,8 @@ class Context:
         self.name_cache: typing.Dict[str, int] = {}
         self.masked_attention = False
         self.print_interval = 1
-        self.dims = Dims()
         self.data = DataContext()
+        self.dims = Dims(self.data)
 
         if config is not None:
             self.__dict__.update(config)
