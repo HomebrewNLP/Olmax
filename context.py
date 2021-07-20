@@ -43,7 +43,7 @@ class Context:
         self.steps = 2 ** 16
         self.gradient_clip = 0.005
         self.head_count = 1
-        self.nesterov_momentum= True
+        self.nesterov_momentum = True
         self.momentum_beta = 0.9
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
@@ -65,9 +65,11 @@ class Context:
         if config is not None:
             self.__dict__.update(config)
 
-    def add_to_prefix(self, appended=""):
+    def add_to_prefix(self, appended="", count=True):
         new = copy.copy(self)
-        new.global_prefix = self.global_prefix + '/' + self.incremental_name(appended)
+        if count:
+            appended = self.incremental_name(appended)
+        new.global_prefix = self.global_prefix + '/' + appended
         return new
 
     def incremental_name(self, name):

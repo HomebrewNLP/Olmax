@@ -52,7 +52,7 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jn
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
               column_axis: typing.Optional[int] = None) -> jnp.ndarray:
-    name = ctx.add_to_prefix(name).global_prefix
+    name = ctx.add_to_prefix(name, count=False).global_prefix
     if name not in ctx.parameters:
         ctx.parameter_dims[name] = shape
         shape = [ctx.dims.dim_sizes[dim] for dim in shape]
@@ -238,6 +238,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         grad = sm3(ctx, param_name, grad)
         grad = momentum(ctx, param_name, grad)
+        print(ctx.parameters[param_name].shape, grad.shape)
         ctx.parameters[param_name] = ctx.parameters[param_name] + grad * ctx.learning_rate
 
 
@@ -284,7 +285,7 @@ def main():
     print("Acquiring parameters and graph..        ", end='', flush=True)
     start_time = time.time()
     compute_ctx(ctx, next(data)[0])
-    update(ctx, {name:jnp.zeros_like(param) for name, param in ctx.parameters.items()})
+    update(ctx, {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
     print(f"Took {time.time() - start_time:.1f}s")
 
     parameters = ctx.parameters
