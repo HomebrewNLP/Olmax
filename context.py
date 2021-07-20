@@ -50,6 +50,8 @@ class Context:
         self.model_parallel = 1
         self.data_parallel = 8
         self.z_loss = 1e-5
+        self.embedding_std = 0.004
+        self.norm_std = 0.02
         self.name_cache: typing.Dict[str, int] = {}
         self.masked_attention = False
         self.print_interval = 1

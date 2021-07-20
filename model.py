@@ -49,11 +49,20 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1, ) -> 
     return jnp.moveaxis(jnp.reshape(out, tuple(np.delete(shape, column_axis)) + (shape[column_axis],)), -1, column_axis)
 
 
-def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None) -> jnp.ndarray:
+def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
+              std: typing.Optional[float] = None, mean: typing.Optional[float] = None) -> jnp.ndarray:
     name = ctx.add_to_prefix(name).global_prefix
     if name not in ctx.parameters:
         ctx.parameter_dims[name] = shape
-        ctx.parameters[name] = orthogonal_init(ctx, [ctx.dims.dim_sizes[dim] for dim in shape])
+        shape = [ctx.dims.dim_sizes[dim] for dim in shape]
+        if std is None and mean is None:
+            ctx.parameters[name] = orthogonal_init(ctx, shape)
+        else:
+            ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.dtype)
+            if std is not None:
+                ctx.parameters[name] *= std
+            if mean is not None:
+                ctx.parameters[name] += mean
     return ctx.parameters[name]
 
 
@@ -92,7 +101,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     spec = base_spec(inp)
     return jnp.einsum(f"{spec}x,xyz->{spec}yz", one_hot(inp, ctx.data.vocab_size),
-                      get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head]))
+                      get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head],
+                                ctx.embedding_std))
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -122,8 +132,9 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("instance_norm")
     shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, ctx.dims.features_per_head]
     inp = inp - shard(inp.mean(-1, keepdims=True), None)
-    inp = inp * (lax.rsqrt(shard(jnp.square(inp).sum(-1, keepdims=True), None)) * get_param(ctx, "scale", shape))
-    return inp + get_param(ctx, "shift", shape)
+    scale = lax.rsqrt(shard(jnp.square(inp).sum(-1, keepdims=True), None))
+    scale = scale * get_param(ctx, "scale", shape, ctx.norm_std, 1)
+    return scale * inp + get_param(ctx, "shift", shape, ctx.norm_std)
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
