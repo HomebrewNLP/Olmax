@@ -110,7 +110,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     val = linear(ctx, base)
     spec = base_spec(qry)
     anonymous_spec = spec.replace(spec[-2], "z")
-    logit = shard(jnp.einsum(f'{spec},{anonymous_spec}->{spec[:-1]}z', qry, key) / qry.shape[-1])
+    logit = shard(jnp.einsum(f'{spec},{anonymous_spec}->{spec[:-1]}z', qry / qry.shape[-1] ** 0.5, key))
     if ctx.masked_attention:
         mask = jnp.reshape(jnp.arange(0, qry.shape[-2]), (1, -1)) > jnp.reshape(jnp.arange(0, qry.shape[-2]), (-1, 1))
         logit += mask * -1e30
