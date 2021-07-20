@@ -95,6 +95,13 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
                       get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head]))
 
 
+def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("output_embed")
+    spec = base_spec(inp)
+    return jnp.einsum(f"{spec}xy,xyz->{spec}z", inp,
+                      get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab]))
+
+
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     base = linear(ctx, inp)
@@ -135,6 +142,7 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     for _ in range(ctx.depth):
         src += feed_forward(ctx, instance_norm(ctx, src))
         src += attention(ctx, instance_norm(ctx, src))
+    src = output_embed(ctx, src)
     return cross_entropy_loss(ctx, src, tgt)
 
 
