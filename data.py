@@ -46,7 +46,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, sequence_length),
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_interleave)
-    if ctx.data.shuffle_buffer == 0:
+    if ctx.data.shuffle_buffer > 0:
         dset = dset.shuffle(ctx.data.shuffle_buffer, seed=ctx.data.seed)
     dset = dset.batch(device_steps * batch_size).map(_slice_target)
     return dset.as_numpy_iterator()
