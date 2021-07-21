@@ -206,7 +206,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
             ctx.parameter_dims = new_ctx.parameter_dims
             ctx.name_cache = new_ctx.name_cache
             ctx.prng_key = new_ctx.prng_key
-            return params, x10, x11, x00 + out, x01
+            return new_ctx.parameters, x10, x11, x00 + out, x01
 
         return _fn
 
