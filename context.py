@@ -7,9 +7,9 @@ from jax import numpy as jnp, random
 class DataContext:
     def __init__(self):
         self.path = "gs://obst-euw4a-aa/the-char-pile/*"
-        self.shuffle_buffer = 2 ** 16
+        self.shuffle_buffer = 0
         self.parallel_workers = None
-        self.interleaved_datasets = 1
+        self.interleaved_datasets = 16
         self.prefetch_buffer = 0
         self.seed = 0
         self.vocab_size = 256  # should be divisible by 128
