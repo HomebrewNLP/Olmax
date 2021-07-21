@@ -198,9 +198,7 @@ def reversible(ctx: Context, fn: typing.Callable):
 
     def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
         params, x10, x11, y00, x01 = inp
-        new_ctx = ctx.add_to_prefix("reversible")
-        new_ctx.parameters = params
-        x00 = y00 - fn(new_ctx, x10)
+        x00 = y00 - fn(ctx, x10)
         _, grad_fn = jax.vjp(reversible_forward, (params, x00, x01, x10, x11))
         d_params, dx00, dx01, dx10, dx11 = grad_fn(dy)
         return d_params, dx00, x00, x01 + dx10, x10
