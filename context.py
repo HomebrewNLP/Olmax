@@ -35,10 +35,7 @@ class Dims:
 class Context:
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.seed = 0
-        self.prng_key = random.PRNGKey(self.seed)
         self.learning_rate = -1e-3
-        self.parameters: typing.Dict[str, jnp.ndarray] = {}
-        self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
         self.device_steps = 2 ** 13
         self.steps = 2 ** 16
         self.gradient_clip = 0.005
@@ -56,11 +53,15 @@ class Context:
         self.z_loss = 1e-5
         self.embedding_std = 0.004
         self.norm_std = 0.02
-        self.name_cache: typing.Dict[str, int] = {}
         self.masked_attention = True
         self.print_interval = 1
         self.data = DataContext()
         self.dims = Dims(self.data)
+
+        self.name_cache: typing.Dict[str, int] = {}
+        self.parameters: typing.Dict[str, jnp.ndarray] = {}
+        self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
+        self.prng_key = random.PRNGKey(self.seed)
 
         if config is not None:
             self.__dict__.update(config)
