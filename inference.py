@@ -29,8 +29,16 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     one_hot_mask = one_hot(wctx.current_step, wctx.ctx.dims.dim_sizes[wctx.ctx.dims.sequence])
     one_hot_mask = lax.broadcast(one_hot_mask, [wctx.ctx.dims.dim_sizes[wctx.ctx.dims.batch]])
 
-    out = body_ctx(wctx.ctx, wctx.data)
-    out_token = jnp.argmax(out, -1)
+    out_token = body_ctx(wctx.ctx, wctx.data)
+
+    temp = random.uniform(random.PRNGKey(wctx.ctx.seed), out_token.shape, maxval=1, minval=1e-9, dtype=jnp.float32)
+    temp = jnp.log(temp)
+    temp = jnp.negative(temp)
+    temp = jnp.log(temp)
+    temp = temp * lax.broadcast_in_dim(wctx.sampling_temperature, temp.shape, [0])
+
+    out_token = out_token + temp
+    out_token = jnp.argmax(out_token, -1)
     out_token = jnp.right_shift(out_token, jnp.array([1] * wctx.ctx.dims.dim_sizes[wctx.ctx.dims.batch])[0])
 
     one_hot_mask = one_hot_mask * jnp.greater_equal(wctx.current_step, wctx.start_pos)[0]
