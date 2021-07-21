@@ -190,6 +190,8 @@ def reversible(ctx: Context, fn: typing.Callable):
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
         out = ctx.parameters, x10, x11, x00 + fn(new_ctx, x10), x01
+        ctx.parameters = new_ctx.parameters
+        ctx.parameter_dims = new_ctx.parameter_dims
         return out
 
     def reversible_forward(inp: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX, REVERSIBLE_CTX]:
