@@ -1,3 +1,4 @@
+import copy
 import math
 import time
 import typing
@@ -184,13 +185,16 @@ REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.nd
 
 
 def reversible(ctx: Context, fn: typing.Callable):
+    name_cache = copy.deepcopy(ctx.name_cache)
+
     def base(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> jnp.ndarray:
         params, inp = inp
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
+        new_ctx.name_cache = copy.deepcopy(name_cache)
+        out = fn(new_ctx, inp)
         ctx.name_cache = new_ctx.name_cache
-        return fn(new_ctx, inp)
-
+        return out
 
     if ctx.parameter_dims:
         def _fn(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
@@ -203,26 +207,28 @@ def reversible(ctx: Context, fn: typing.Callable):
             ctx.name_cache = new_ctx.name_cache
             ctx.prng_key = new_ctx.prng_key
             return ctx.parameters, x10, x11, x00 + out, x01
+
         return _fn
-
-
 
     @jax.custom_vjp
     def reversible_half_residual(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
         params, x00, x01, x10, x11 = inp
-        out = base((params, x10))
-        return ctx.parameters, x10, x11, x00 + out, x01
+        out = base((params, x10)) + x00
+        return ctx.parameters, x10, x10, out, out
 
     def reversible_forward(inp: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX, REVERSIBLE_CTX]:
         out = reversible_half_residual(inp)
         return out, out
 
-    def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
-        params, x10, x11, y00, x01 = inp
+    def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX]:
+        params, dx10, x10, dy00, y00 = dy
+        if jnp.array_equal(y00, jnp.zeros_like(y00)):
+            y00 = inp[4]
+            x10 = inp[2]
         x00 = y00 - base((params, x10))
         _, grad_fn = jax.vjp(base, (params, x10))
-        d_params, dx10 = grad_fn(dy)
-        return d_params, dy, x00, x01 + dx10, x10
+        d_params, dx00 = grad_fn(dy00)[0]
+        return (d_params, dy00, x00, dx00 + dx10, x10),
 
     reversible_half_residual.defvjp(reversible_forward, reversible_backward)
     return reversible_half_residual
@@ -274,7 +280,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
     src = input_embed(ctx, src)
-    src = (ctx.parameters, src, jnp.zeros_like(src), src, jnp.zeros_like(src))
+    src = (ctx.parameters, src, src, src, src)
     for _ in range(ctx.depth):
         src = reversible(ctx, exec_fn(instance_norm, feed_forward))(src)
         src = reversible(ctx, exec_fn(instance_norm, attention))(src)
