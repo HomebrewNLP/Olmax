@@ -188,10 +188,24 @@ def reversible(ctx: Context, fn: typing.Callable):
         params, inp = inp
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, inp)
-        ctx.parameters = new_ctx.parameters
-        ctx.parameter_dims = new_ctx.parameter_dims
-        return out
+        ctx.name_cache = new_ctx.name_cache
+        return fn(new_ctx, inp)
+
+
+    if ctx.parameter_dims:
+        def _fn(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+            params, x00, x01, x10, x11 = inp
+            new_ctx = ctx.add_to_prefix("reversible")
+            new_ctx.parameters = params
+            out = fn(new_ctx, x10)
+            ctx.parameters = new_ctx.parameters
+            ctx.parameter_dims = new_ctx.parameter_dims
+            ctx.name_cache = new_ctx.name_cache
+            ctx.prng_key = new_ctx.prng_key
+            return ctx.parameters, x10, x11, x00 + out, x01
+        return _fn
+
+
 
     @jax.custom_vjp
     def reversible_half_residual(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
