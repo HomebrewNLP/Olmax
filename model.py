@@ -189,9 +189,9 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
 
     def base(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> jnp.ndarray:
         params, inp = inp
+        ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        new_ctx.name_cache = copy.deepcopy(name_cache)
         out = fn(new_ctx, inp)
         ctx.name_cache = new_ctx.name_cache
         return out
