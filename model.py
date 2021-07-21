@@ -206,7 +206,7 @@ def reversible(ctx: Context, fn: typing.Callable):
             ctx.parameter_dims = new_ctx.parameter_dims
             ctx.name_cache = new_ctx.name_cache
             ctx.prng_key = new_ctx.prng_key
-            return ctx.parameters, x10, x11, x00 + out, x01
+            return params, x10, x11, x00 + out, x01
 
         return _fn
 
@@ -214,7 +214,7 @@ def reversible(ctx: Context, fn: typing.Callable):
     def reversible_half_residual(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
         params, x00, x01, x10, x11 = inp
         out = base((params, x10)) + x00
-        return ctx.parameters, x10, x10, out, out
+        return params, x10, x10, out, out
 
     def reversible_forward(inp: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX, REVERSIBLE_CTX]:
         out = reversible_half_residual(inp)
