@@ -184,7 +184,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
 
-def reversible(ctx: Context, fn: typing.Callable):
+def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     name_cache = copy.deepcopy(ctx.name_cache)
 
     def base(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> jnp.ndarray:
@@ -281,9 +281,10 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
     src = input_embed(ctx, src)
     src = (ctx.parameters, src, src, src, src)
-    for _ in range(ctx.depth):
-        src = reversible(ctx, exec_fn(instance_norm, feed_forward))(src)
-        src = reversible(ctx, exec_fn(instance_norm, attention))(src)
+    for i in range(ctx.depth):
+        is_last = (i + 1) == ctx.depth
+        src = reversible(ctx, exec_fn(instance_norm, feed_forward), is_last)(src)
+        src = reversible(ctx, exec_fn(instance_norm, attention), is_last)(src)
     src = src[1] + src[3]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
