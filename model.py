@@ -222,7 +222,8 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
 
     def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX]:
         params, dx10, x10, dy00, y00 = dy
-        if jnp.array_equal(y00, jnp.zeros_like(y00)):
+        params = inp[0]
+        if is_last:
             y00 = inp[4]
             x10 = inp[2]
         x00 = y00 - base((params, x10))
