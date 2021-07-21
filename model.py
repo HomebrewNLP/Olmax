@@ -11,7 +11,7 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
-from context import Context, WhileContext
+from context import Context, WhileTrainContext
 from data import text_dataset
 
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
@@ -214,14 +214,18 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
     return (jnp.square(log_z).sum() * ctx.z_loss - loss) / tgt.size
 
 
-def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    src, tgt = inp
+def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     src = input_embed(ctx, src)
     for _ in range(ctx.depth):
         src += feed_forward(ctx, instance_norm(ctx, src))
         src += attention(ctx, instance_norm(ctx, src))
     src = instance_norm(ctx, src)
-    src = output_embed(ctx, src)
+    return output_embed(ctx, src)
+
+
+def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    src, tgt = inp
+    src = body_ctx(ctx, src)
     return cross_entropy_loss(ctx, src, tgt)
 
 
@@ -244,7 +248,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-    wctx = WhileContext(while_ctx_dict)
+    wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0)
     loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.device_steps])
     update(wctx.ctx, grads)
@@ -254,16 +258,16 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
-    wctx = WhileContext(while_ctx_dict)
+    wctx = WhileTrainContext(while_ctx_dict)
     return jnp.not_equal(jnp.mod(wctx.current_step + 1, wctx.ctx.device_steps), 0)
 
 
 def jitless_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray) -> typing.Tuple[
     jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
-    wctx = WhileContext()
+    wctx = WhileTrainContext()
     wctx.ctx.parameters = parameters
     wctx.data = data
-    wctx = WhileContext(lax.while_loop(cond_fn, train_step, wctx.serialize()))
+    wctx = WhileTrainContext(lax.while_loop(cond_fn, train_step, wctx.serialize()))
     return wctx.loss / wctx.ctx.device_steps, wctx.ctx.parameters
 
 
@@ -308,7 +312,7 @@ def main():
         start_time = time.time()
 
         for idx, dat in enumerate(data):
-            loss, parameters = step(parameters, dat)
+            loss, parameters, current_step = step(parameters, dat)
             if idx % ctx.print_interval == 0:
                 print(
                     f'[{idx * ctx.device_steps:{len(str(ctx.steps * ctx.device_steps))}d}/{ctx.steps * ctx.device_steps}]'

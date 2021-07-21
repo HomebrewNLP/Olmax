@@ -79,19 +79,57 @@ class Context:
         return f'{name}:{self.name_cache[name]:d}'
 
 
+
 class WhileContext:
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+        self.config = config
         self.ctx = Context()
         self.current_step = jnp.zeros([], dtype=jnp.uint32)
         self.data: typing.Optional[jnp.ndarray] = None
-        self.loss = jnp.zeros([])
 
-        if config is not None:
+        if self.config is not None:
             self.ctx.parameters = config['parameters']
-            self.loss = config['loss']
             self.current_step = config['current_step']
             self.data = config['data']
 
+    def _serialize(self) -> dict:
+        return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'data': self.data}
+
+
+class WhileTrainContext(WhileContext):
+    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+        super().__init__(config)
+        self.loss = jnp.zeros([])
+
+        if self.config is not None:
+            self.loss = config['loss']
+
     def serialize(self):
-        return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'loss': self.loss,
-                'data': self.data}
+        serialized = self._serialize()
+        serialized['loss'] = self.loss
+        return serialized
+
+
+class WhilePredictContext(WhileContext):
+    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+        super().__init__(config)
+
+        batch_dim_size = self.ctx.dims.dim_sizes[self.ctx.dims.batch]
+        sequence_dim_size = self.ctx.dims.dim_sizes[self.ctx.dims.sequence]
+
+        self.start_pos = jnp.zeros([batch_dim_size])
+        self.stop_pos = jnp.array([sequence_dim_size] * batch_dim_size)[0]
+        self.sampling_temperature = jnp.zeros([batch_dim_size])
+
+        if self.config is not None:
+            self.start_pos = config['start_pos']
+            self.stop_pos = config['stop_pos']
+            self.sampling_temperature = config['sampling_temperature']
+
+    def serialize(self):
+        serialized = self._serialize()
+        serialized['start_pos'] = self.start_pos
+        serialized['stop_pos'] = self.stop_pos
+        serialized['sampling_temperature'] = self.sampling_temperature
+
+        return serialized
