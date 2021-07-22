@@ -82,7 +82,17 @@ class Training(DataClass):
         self.print_interval = 1
 
 
-class Context:
+def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
+    for name, attr in instance.__dict__.items():
+        if name not in config:
+            continue
+        if isinstance(attr, DataClass):
+            init_class(attr, config[name])
+            continue
+        setattr(instance, name, config[name])
+
+
+class Context(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.data = DataContext()
         self.dims = Dims(self.data)
@@ -90,7 +100,10 @@ class Context:
         self.model = Model()
         self.training = Training()
 
-
+        if len(sys.argv) > 1 and sys.argv[1].endswith('.json'):
+            with open(sys.argv[1]) as f:
+                cfg = f.read()
+            init_class(self, jsonpickle.loads(cfg))
 
         self.seed = 0
         self.global_prefix = ''
@@ -117,7 +130,7 @@ class Context:
         return f'{name}:{self.name_cache[name]:d}'
 
 
-class WhileContext:
+class WhileContext(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.ctx = Context()
         self.current_step = jnp.zeros([], dtype=jnp.uint32)
