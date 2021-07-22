@@ -397,8 +397,8 @@ def main():
     print(f"Buffers:    {sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count:,}")
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
-                 'data': PartitionSpec(None, None, "data_parallel", None), 'current_step': None, 'loss': None},
-    step = timeit("JITing model", pjit.pjit, jitless_step, partition, partition)
+                 'data': PartitionSpec(None, None, "data_parallel", None), 'current_step': None, 'loss': None}
+    step = timeit("JITing model", pjit.pjit, jitless_step, (partition,), partition)
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
@@ -411,8 +411,11 @@ def main():
             if idx % ctx.training.print_interval == 0:
                 wctx = WhileContext(state)
                 print(f'[{idx * ctx.training.device_steps:{len(str(steps_per_print))}d}/{steps_per_print}] Loss:'
-                      f' {wctx.loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
+                      f' {wctx.loss / steps_per_print / ctx.training.print_interval :6.3f} - '
+                      f'Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
+                wctx.loss = jnp.zeros_like(wctx.loss)
+                state = wctx.serialize()
 
 
 if __name__ == '__main__':
