@@ -356,7 +356,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhileContext(while_ctx_dict)
-    return jnp.not_equal(jnp.mod(wctx.current_step + 1, wctx.ctx.training.device_steps), 0)
+    return jnp.not_equal(jnp.mod(wctx.current_step, wctx.ctx.training.device_steps), 0)
 
 
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -383,10 +383,23 @@ def timeit(text: str, fn, *args, pad=50):
     return out
 
 
+def train_loop(wctx: WhileContext, step: typing.Callable):
+    ctx = [wctx]
+
+    def _fn(dat: jnp.ndarray) -> WhileContext:
+        w = ctx[0](dat)
+        w.loss = jnp.zeros_like(w.loss)
+        w.current_step = w.current_step + 1
+        ctx[0] = WhileContext(step(w.serialize()))
+        return ctx[0]
+
+    return _fn
+
+
 def main():
     wctx = WhileContext()
     ctx = wctx.ctx
-    steps_per_print = ctx.training.steps * ctx.training.device_steps
+    total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0]
     timeit("Acquiring forward parameters", compute_ctx, ctx, inp)
@@ -397,25 +410,21 @@ def main():
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
                  'data': PartitionSpec(None, None, "data_parallel", None), 'current_step': None, 'loss': None}
-    step = timeit("JITing model", pjit.pjit, jitless_step, (partition,), partition)
+    step = train_loop(wctx, timeit("JITing model", pjit.pjit, jitless_step, (partition,), partition))
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
-        state = timeit("Compiling model and performing first step", step, wctx(next(data)).serialize())
+        timeit("Compiling model and performing first step", step, next(data))
         print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
-        state['loss'] = jnp.zeros_like(state['loss'])
 
         start_time = time.time()
         for idx, dat in enumerate(data):
-            state = step(WhileContext(state)(dat).serialize())
+            wctx = step(dat)
             if idx % ctx.training.print_interval == 0:
-                wctx = WhileContext(state)
-                print(f'[{idx * ctx.training.device_steps:{len(str(steps_per_print))}d}/{steps_per_print}] Loss:'
-                      f' {wctx.loss / ctx.training.device_steps / ctx.training.print_interval :6.3f} - '
+                print(f'[{wctx.current_step:{len(str(total_steps))}d}/{total_steps}] Loss:'
+                      f' {wctx.loss / ctx.training.device_steps / ctx.training.print_interval:6.3f} - '
                       f'Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
-                wctx.loss = jnp.zeros_like(wctx.loss)
-                state = wctx.serialize()
 
 
 if __name__ == '__main__':
