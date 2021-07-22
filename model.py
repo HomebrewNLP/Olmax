@@ -305,7 +305,7 @@ def exec_fn(*fns: typing.Callable) -> typing.Callable:
 
 
 @jax.custom_gradient
-def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int) -> typing.Tuple[jnp.ndarray, typing.Callable]:
+def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int):
     spec = base_spec(src)
     tgt = one_hot(tgt, src.shape[-1])
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
@@ -333,7 +333,7 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src = src[1] + src[3]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
-    return cross_entropy_loss(src, tgt)
+    return cross_entropy_loss(src, tgt, ctx.model.z_loss)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
