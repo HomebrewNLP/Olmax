@@ -3,6 +3,7 @@ from tensorflow.python.data.experimental.ops.distribute_options import AutoShard
 from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
 from context import Context
+import random
 
 tf1 = tf.compat.v1
 
@@ -31,10 +32,13 @@ def decoder(int_string: bool, data: tf.Tensor, ctx: int):
 def text_dataset(ctx: Context) -> NumpyIterator:
     filenames = tf.io.gfile.glob(ctx.data.path)
 
+    random.seed(ctx.seed)
+    random.shuffle(filenames)
+
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
     sequence_length = ctx.dims.sizes.sequence
     batch_size = ctx.dims.sizes.batch
-    device_steps = ctx.device_steps
+    device_steps = ctx.training.device_steps
 
     def _slice_target(x):
         x = tf.cast(tf.reshape(x, (device_steps, batch_size, sequence_length + 1)), tf.int32)

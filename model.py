@@ -25,9 +25,12 @@ def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
     return [ctx.dims.sizes[d] for d in dims]
 
 
+def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
+    return inp.shape[-1] != ctx.dims.sizes.features_per_head
+
+
 def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    dims = ctx.dims
-    return dims.features_per_head if inp.shape[-1] == dims.sizes.features_per_head else dims.intermediate_feed_forward
+    return ctx.dims.intermediate_feed_forward if is_intermediate(ctx, inp) else ctx.dims.features_per_head
 
 
 def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0):
@@ -49,8 +52,8 @@ def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Op
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jnp.ndarray:
     n_rows, n_cols = util.prod(shape) // shape[column_axis], shape[column_axis]
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
-    out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.dtype))
-    out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim) * ctx.init_scale
+    out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.dtype))
+    out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim) * ctx.model.initializer.scale
     if n_rows < n_cols:
         out = out.T
     return jnp.moveaxis(jnp.reshape(out, tuple(np.delete(shape, column_axis)) + (shape[column_axis],)), -1, column_axis)
@@ -66,7 +69,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] 
         if std is None and mean is None:
             ctx.parameters[name] = orthogonal_init(ctx, shape, -1 if column_axis is None else column_axis)
         else:
-            ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.dtype)
+            ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:
                 ctx.parameters[name] *= std
             if mean is not None:
@@ -114,19 +117,19 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
     wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
-    do_clip = jnp.greater(grd_norm * jnp.reciprocal(wgt_norm), ctx.gradient_clip)
-    clipped = wgt_norm * jnp.reciprocal(grd_norm) * ctx.gradient_clip * grad
+    do_clip = jnp.greater(grd_norm * jnp.reciprocal(wgt_norm), ctx.optimizer.gradient_clip)
+    clipped = wgt_norm * jnp.reciprocal(grd_norm) * ctx.optimizer.gradient_clip * grad
     return clipped * do_clip + grad * (1 - do_clip)
 
 
 def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("momentum", count=False)
     state = zero_param(ctx, "momentum_buffer", ctx.parameter_dims.get(param_name))
-    new_state = ctx.momentum_beta * state + grad
+    new_state = ctx.optimizer.momentum_beta * state + grad
     ctx.parameters[ctx.add_to_prefix("momentum_buffer", count=False).global_prefix] = new_state
-    if not ctx.nesterov_momentum:
+    if not ctx.optimizer.nesterov_momentum:
         return new_state
-    return grad + ctx.momentum_beta * new_state
+    return grad + ctx.optimizer.momentum_beta * new_state
 
 
 def base_spec(inp: jnp.ndarray) -> str:
@@ -152,10 +155,8 @@ def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def group_linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_linear")
     spec = base_spec(inp)
-    if inp.ndim == 3:
-        shape = [ctx.dims.heads, ctx.dims.intermediate_feed_forward, ctx.dims.features_per_head]
-    else:
-        shape = [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
+    dims = ctx.dims
+    shape = [dims.heads] + [dims.intermediate_feed_forward, dims.features_per_head][::2 * is_intermediate(ctx, inp) - 1]
     return shard(jnp.einsum(f'{spec},{spec[-2:]}z->{spec[:-1]}z', inp, get_param(ctx, "weight", shape)))
 
 
@@ -314,8 +315,8 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
     src = input_embed(ctx, src)
     src = (ctx.parameters, src, src, src, src)
-    for i in range(ctx.depth):
-        is_last = (i + 1) == ctx.depth
+    for i in range(ctx.model.depth):
+        is_last = (i + 1) == ctx.model.depth
         src = reversible(ctx, exec_fn(instance_norm, attention), is_last)(src)
         src = reversible(ctx, exec_fn(instance_norm, glu_group_feed_forward), is_last)(src)
     src = src[1] + src[3]
@@ -339,7 +340,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         grad = sm3(inner_ctx, param_name, grad)
         grad = momentum(inner_ctx, param_name, grad)
-        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * ctx.learning_rate
+        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * ctx.optimizer.learning_rate
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -389,6 +390,7 @@ def timeit(text: str, fn, *args, pad=45):
 def main():
     ctx = Context()
     ctx.initializing = True
+    steps_per_print = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0]
     timeit("Acquiring forward parameters", compute_ctx, ctx, inp)
@@ -399,7 +401,7 @@ def main():
     step = timeit("JITing model", pjit.pjit, jitless_step,
                   (partition, PartitionSpec(None, None, "data_parallel", None)), (None, partition))
 
-    mesh_devices = np.array(jax.devices()).reshape(ctx.data_parallel, ctx.model_parallel)
+    mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
         loss, parameters = timeit("Compiling model and performing first step", step, ctx.parameters, next(data))
 
@@ -409,9 +411,9 @@ def main():
 
         for idx, dat in enumerate(data):
             loss, parameters = step(parameters, dat)
-            if idx % ctx.print_interval == 0:
-                print(f'[{idx * ctx.device_steps:{len(str(ctx.steps * ctx.device_steps))}d}/'
-                      f'{ctx.steps * ctx.device_steps}] Loss: {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
+            if idx % ctx.training.print_interval == 0:
+                print(f'[{idx * ctx.training.device_steps:{len(str(steps_per_print))}d}/{steps_per_print}] Loss:'
+                      f' {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
 
 

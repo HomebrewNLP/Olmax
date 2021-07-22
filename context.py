@@ -41,31 +41,51 @@ class Dims:
         self.sizes = DimSizes(data)
 
 
-class Context:
-    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
-        self.seed = 0
-        self.learning_rate = -1e-3
-        self.device_steps = 2 ** 13
-        self.steps = 2 ** 16
-        self.gradient_clip = 0.005
-        self.head_count = 1
+class Optimizer:
+    def __init__(self):
+        self.learning_rate = -1e3
+        self.gradient_clip = 5e-3
         self.nesterov_momentum = True
         self.momentum_beta = 0.9
+
+
+class Initializer:
+    def __init__(self):
+        self.scale = 1.0
+        self.embedding_std = 0.004
+        self.norm_std = 0.02
+
+
+class Model:
+    def __init__(self):
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
         self.depth = 8
-        self.dtype = jnp.float32
-        self.init_scale = 1.0
-        self.global_prefix = ''
-        self.model_parallel = 1
-        self.data_parallel = 8
-        self.z_loss = 1e-5
-        self.embedding_std = 0.004
-        self.norm_std = 0.02
         self.masked_attention = True
+        self.dtype = jnp.float32
+        self.z_loss = 1e-5
+        self.initializer = Initializer()
+
+
+class Training:
+    def __init__(self):
+        self.device_steps = 16
+        self.steps = 2 ** 16
+        self.model_parallel = 8
+        self.data_parallel = 1
         self.print_interval = 1
+
+
+class Context:
+    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+        self.seed = 0
+        self.global_prefix = ''
+
         self.data = DataContext()
         self.dims = Dims(self.data)
+        self.optimizer = Optimizer()
+        self.model = Model()
+        self.training = Training()
 
         self.name_cache: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
