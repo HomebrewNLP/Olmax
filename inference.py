@@ -1,10 +1,6 @@
-import math
-import time
 import typing
-import warnings
 
 import jax
-import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
 from jax.experimental import PartitionSpec
@@ -12,11 +8,8 @@ from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
 from context import Context, WhilePredictContext
-from data import text_dataset
 
-from model import shard, body_ctx, sharding, one_hot
-
-
+from model import body_ctx, sharding, one_hot
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhilePredictContext(while_ctx_dict)
@@ -57,11 +50,20 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     return wctx.serialize()
 
 
-def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray) -> typing.Tuple[
+def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray,
+                            sampling_temperature: jnp.ndarray,
+                            top_n: jnp.ndarray,
+                            start_pos: jnp.ndarray,
+                            stop_pos: jnp.ndarray) -> typing.Tuple[
     jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
     wctx = WhilePredictContext()
     wctx.ctx.parameters = parameters
     wctx.data = data
+    wctx.sampling_temperature = sampling_temperature
+    wctx.top_n = top_n
+    wctx.start_pos = start_pos
+    wctx.stop_pos = stop_pos
+    wctx.current_step = jnp.min(start_pos)
 
     wctx = WhilePredictContext(lax.while_loop(cond_fn, body_fn, wctx.serialize()))
 
@@ -78,18 +80,27 @@ class Infrerence_Model():
 
         partition = {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()}
         self.step = pjit.pjit(jitless_prediction_step,
-                         in_axis_resources=(partition, PartitionSpec("data_parallel", None)),
+                         in_axis_resources=(partition, PartitionSpec("data_parallel", None), None, None, None, None),
                          out_axis_resources=(PartitionSpec(None, None), partition))
         self.mesh_devices = np.array(jax.devices()).reshape(ctx.data_parallel, ctx.model_parallel)
 
-        self.compleat(dumy_data)
+        self.compleat(dumy_data,
+                      np.zeros((ctx.dims.dim_sizes[ctx.dims.batch])),
+                      np.ones((ctx.dims.dim_sizes[ctx.dims.batch])),
+                      np.zeros((ctx.dims.dim_sizes[ctx.dims.batch])),
+                      np.array([ctx.dims.dim_sizes[ctx.dims.batch]] * ctx.dims.dim_sizes[ctx.dims.vocab]))
 
 
-    def compleat(self, promt):
+    def compleat(self, promt: np.array,
+                 sampling_temperature: np.array,
+                 top_n: np.array,
+                 start_pos: np.array,
+                 stop_pos: np.array) -> np.array:
+
         with mesh(self.mesh_devices, ('data_parallel', 'model_parallel')):
-            out, _ = self.step(self.parameters, promt)
+            out, _ = self.step(self.parameters, promt, sampling_temperature, top_n, start_pos, stop_pos)
 
-        print(out, out.shape)
+        return out
 
 
 if __name__ == '__main__':
