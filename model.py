@@ -360,7 +360,7 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
 
 
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-    return WhileContext(lax.while_loop(cond_fn, train_step, while_ctx_dict)).serialize()
+    return lax.while_loop(cond_fn, train_step, while_ctx_dict)
 
 
 def sharding(ctx: Context, dims: typing.List[str]):
@@ -402,8 +402,7 @@ def main():
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
         state = timeit("Compiling model and performing first step", step, wctx(next(data)).serialize())
-        print(f"\n\nParameters: {parameter_count:,}")
-        print(f"Buffers:    {buffer_count:,}\n\n")
+        print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
         state['loss'] = jnp.zeros_like(state['loss'])
 
         start_time = time.time()
