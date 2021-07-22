@@ -11,6 +11,7 @@ from jax import lax, numpy as jnp, random
 from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
+from jax.scipy.special import expit as sigmoid
 
 from context import Context, WhileContext
 from data import text_dataset
@@ -143,13 +144,38 @@ def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(jnp.einsum(spec, inp, get_param(ctx, "weight", shape, column_axis=column_axis)), head_dim)
 
 
+def group_linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("group_linear")
+    spec = base_spec(inp)
+    if inp.ndim == 3:
+        shape = [ctx.dims.heads, ctx.dims.intermediate_feed_forward, ctx.dims.features_per_head]
+    else:
+        shape = [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
+    return shard(jnp.einsum(f'{spec},{spec[-2:]}z->{spec[:-1]}z', inp, get_param(ctx, "weight", shape)))
+
+
 def relu(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.maximum(inp, 0)
+
+
+def mish(inp: jnp.ndarray) -> jnp.ndarray:
+    return jnp.tanh(jnp.logaddexp(inp, 0)) * inp
 
 
 def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
     return linear(ctx, relu(linear(ctx, inp)))
+
+
+def glu_group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("glu_group_feed_forward")
+    mid = mish(group_linear(ctx, inp)) * sigmoid(group_linear(ctx, inp)) + mish(group_linear(ctx, inp))
+    return group_linear(ctx, instance_norm(ctx, mid))
+
+
+def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("group_feed_forward")
+    return group_linear(ctx, mish(group_linear(ctx, inp)))
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
@@ -285,8 +311,8 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src = (ctx.parameters, src, src, src, src)
     for i in range(ctx.depth):
         is_last = (i + 1) == ctx.depth
-        src = reversible(ctx, exec_fn(instance_norm, feed_forward), is_last)(src)
         src = reversible(ctx, exec_fn(instance_norm, attention), is_last)(src)
+        src = reversible(ctx, exec_fn(instance_norm, glu_group_feed_forward), is_last)(src)
     src = src[1] + src[3]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
