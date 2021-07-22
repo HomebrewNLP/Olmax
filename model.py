@@ -347,7 +347,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0)
-    loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.device_steps])
+    loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
     update(wctx.ctx, grads)
     wctx.loss += loss
     wctx.current_step += 1
@@ -356,7 +356,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhileContext(while_ctx_dict)
-    return jnp.not_equal(jnp.mod(wctx.current_step + 1, wctx.ctx.device_steps), 0)
+    return jnp.not_equal(jnp.mod(wctx.current_step + 1, wctx.ctx.training.device_steps), 0)
 
 
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -397,7 +397,7 @@ def main():
     print(f"Buffers:    {sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count:,}")
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
-                 'data': PartitionSpec(None, None, "data_parallel", None), 'current_step': None, 'loss': None}
+                 'data': PartitionSpec(None, None, "data_parallel", None), 'current_step': None, 'loss': None},
     step = timeit("JITing model", pjit.pjit, jitless_step, partition, partition)
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
