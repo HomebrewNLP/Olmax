@@ -84,6 +84,14 @@ class Training(DataClass):
 
 class Context:
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+        self.data = DataContext()
+        self.dims = Dims(self.data)
+        self.optimizer = Optimizer()
+        self.model = Model()
+        self.training = Training()
+
+
+
         self.seed = 0
         self.global_prefix = ''
 
