@@ -9,7 +9,7 @@ class DataContext:
         self.path = "gs://obst-euw4a-aa/the-char-pile/*"
         self.shuffle_buffer = 0
         self.parallel_workers = None
-        self.interleaved_datasets = 16
+        self.interleaved_datasets = 1
         self.prefetch_buffer = 0
         self.seed = 0
         self.vocab_size = 256  # should be divisible by 128
@@ -17,7 +17,7 @@ class DataContext:
 
 class DimSizes:
     def __init__(self, data: DataContext, group_linear_factor=2):
-        self.batch = 1024
+        self.batch = 512
         self.features_per_head = 128
         self.heads = 8
         self.sequence = 256
@@ -62,7 +62,7 @@ class Model:
         self.group_linear_factor = 2
         self.depth = 8
         self.masked_attention = True
-        self.dtype = jnp.float32
+        self.dtype = jnp.bfloat16
         self.z_loss = 1e-5
         self.initializer = Initializer()
 
