@@ -296,7 +296,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def exec_fn(*fns: typing.Callable) -> typing.Callable:
-    def _run(ctx: Context, inp: jnp.ndarray):
+    def _run(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         for f in fns:
             inp = f(ctx, inp)
         return inp
@@ -329,7 +329,7 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     for i in range(ctx.model.depth):
         is_last = (i + 1) == ctx.model.depth
         src = reversible(ctx, exec_fn(instance_norm, attention), is_last)(src)
-        src = reversible(ctx, exec_fn(instance_norm, glu_group_feed_forward), is_last)(src)
+        src = reversible(ctx, exec_fn(instance_norm, group_feed_forward), is_last)(src)
     src = src[1] + src[3]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
