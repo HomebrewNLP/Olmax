@@ -304,13 +304,22 @@ def exec_fn(*fns: typing.Callable) -> typing.Callable:
     return _run
 
 
-def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("cross_entropy_loss")
+@jax.custom_gradient
+def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int) -> typing.Tuple[jnp.ndarray, typing.Callable]:
     spec = base_spec(src)
-    max_src = shard(lax.stop_gradient(src).max(-1, keepdims=True), None)
-    log_z = jnp.log(shard(jnp.exp(src - max_src).sum(-1, keepdims=True), None)) + max_src
-    loss = jnp.einsum(f"{spec},{spec}->", src - log_z, one_hot(tgt, ctx.data.vocab_size))
-    return (jnp.square(log_z).sum() * ctx.model.z_loss - loss) / tgt.size
+    tgt = one_hot(tgt, src.shape[-1])
+    shifted = src - shard(src.max(axis=-1, keepdims=True), None)
+    exp_shifted = jnp.exp(shifted)
+    sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
+    log_z = jnp.log(sum_exp)
+    loss = jnp.einsum(f"{spec},{spec}->", log_z - shifted, tgt)
+    loss = jnp.square(log_z).sum() * z_loss + loss
+    loss = loss / tgt.size
+
+    def grad_fn(g: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None, None]:
+        return g * (exp_shifted / sum_exp - tgt + log_z * 2 * z_loss), None, None
+
+    return loss, grad_fn
 
 
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -324,7 +333,7 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src = src[1] + src[3]
     src = instance_norm(ctx, src)
     src = output_embed(ctx, src)
-    return cross_entropy_loss(ctx, src, tgt)
+    return cross_entropy_loss(src, tgt)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
