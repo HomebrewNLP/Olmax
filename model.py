@@ -164,8 +164,15 @@ def relu(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.maximum(inp, 0)
 
 
-def mish(inp: jnp.ndarray) -> jnp.ndarray:
-    return jnp.tanh(jnp.logaddexp(inp, 0)) * inp
+@jax.custom_gradient
+def mish(inp: jnp.ndarray):
+    gate = jnp.tanh(jnp.logaddexp(inp, 0))
+    grad = gate + inp * sigmoid(inp) * (1 - jnp.square(gate))
+
+    def grad_fn(g):
+        return grad * g
+
+    return gate * inp, grad_fn
 
 
 def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
