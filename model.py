@@ -56,7 +56,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] 
     name = ctx.add_to_prefix(name, count=False).global_prefix
     if name not in ctx.parameters:
         ctx.parameter_dims[name] = shape
-        shape = dims_to_shape(shape)
+        shape = dims_to_shape(ctx, shape)
         if std is None and mean is None:
             ctx.parameters[name] = orthogonal_init(ctx, shape, -1 if column_axis is None else column_axis)
         else:
