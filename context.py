@@ -49,7 +49,7 @@ class Dims(DataClass):
 
 class Optimizer(DataClass):
     def __init__(self):
-        self.learning_rate = -1e3
+        self.learning_rate = -1e-3
         self.gradient_clip = 5e-3
         self.nesterov_momentum = True
         self.momentum_beta = 0.9
