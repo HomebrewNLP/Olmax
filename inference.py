@@ -37,7 +37,14 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     temp = jnp.log(temp)
     temp = temp * lax.broadcast_in_dim(wctx.sampling_temperature, temp.shape, [0])
 
+    sort = jnp.argsort(out_token)
+    sort = one_hot(sort, out_token.shape[-1])
+    sort = jnp.einsum("abcd,c->abd", sort, jnp.arange(out_token.shape[-1]))
+
+    top_n_mask = jnp.less(sort, lax.broadcast_in_dim(wctx.top_n, sort.shape, [0]))
+
     out_token = out_token + temp
+    out_token = out_token * top_n_mask
     out_token = jnp.argmax(out_token, -1)
     out_token = jnp.right_shift(out_token, jnp.array([1] * wctx.ctx.dims.dim_sizes[wctx.ctx.dims.batch])[0])
 
