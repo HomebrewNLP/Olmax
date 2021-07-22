@@ -15,8 +15,22 @@ class DataContext:
         self.vocab_size = 256  # should be divisible by 128
 
 
-class Dims:
+class DimSizes:
     def __init__(self, data: DataContext, group_linear_factor=2):
+        self.batch = 1024
+        self.features_per_head = 128
+        self.heads = 8
+        self.sequence = 256
+        self.vocab = data.vocab_size
+        self.one = 1
+        self.intermediate_feed_forward = self.features_per_head * group_linear_factor
+
+    def __getitem__(self, item: str):
+        return getattr(self, item)
+
+
+class Dims:
+    def __init__(self, data: DataContext):
         self.batch = "batch"
         self.features_per_head = "features_per_head"
         self.heads = "heads"
@@ -24,13 +38,7 @@ class Dims:
         self.intermediate_feed_forward = "intermediate_feed_forward"
         self.one = "one"
         self.vocab = "vocab"
-        self.dim_sizes: typing.Dict[str, int] = {self.batch: 128,
-                                                 self.features_per_head: 16,
-                                                 self.heads: 8,
-                                                 self.sequence: 32,
-                                                 self.vocab: data.vocab_size,
-                                                 self.one: 1}
-        self.dim_sizes[self.intermediate_feed_forward] = self.dim_sizes[self.features_per_head] * group_linear_factor
+        self.sizes = DimSizes(data)
 
 
 class Context:

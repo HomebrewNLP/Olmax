@@ -36,8 +36,8 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     filenames = tf.io.gfile.glob(ctx.data.path)
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
-    sequence_length = ctx.dims.dim_sizes[ctx.dims.sequence]
-    batch_size = ctx.dims.dim_sizes[ctx.dims.batch]
+    sequence_length = ctx.dims
+    batch_size = ctx.dims.sizes.batch
     device_steps = ctx.device_steps
 
     def _slice_target(x):

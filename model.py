@@ -22,7 +22,12 @@ warnings.filterwarnings("ignore", message=".*is an experimental feature and prob
 # jax.config.update("jax_disable_jit", True)
 
 def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
-    return [ctx.dims.dim_sizes[d] for d in dims]
+    return [ctx.dims.sizes[d] for d in dims]
+
+
+def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    dims = ctx.dims
+    return dims.features_per_head if inp.shape[-1] == dims.sizes.features_per_head else dims.intermediate_feed_forward
 
 
 def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0):
@@ -280,7 +285,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("instance_norm")
-    shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, ctx.dims.features_per_head]
+    shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, get_feature_dim(ctx, inp)]
     inp = inp - shard(inp.mean(-1, keepdims=True), None)
     scale = lax.rsqrt(ctx.norm_eps + shard(jnp.square(inp).sum(-1, keepdims=True), None))
     scale = scale * get_param(ctx, "scale", shape, ctx.norm_std, 1)
