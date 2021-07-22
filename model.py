@@ -411,7 +411,7 @@ def main():
             if idx % ctx.training.print_interval == 0:
                 wctx = WhileContext(state)
                 print(f'[{idx * ctx.training.device_steps:{len(str(steps_per_print))}d}/{steps_per_print}] Loss:'
-                      f' {wctx.loss / steps_per_print / ctx.training.print_interval :6.3f} - '
+                      f' {wctx.loss / ctx.training.device_steps / ctx.training.print_interval :6.3f} - '
                       f'Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
                 wctx.loss = jnp.zeros_like(wctx.loss)
