@@ -391,10 +391,9 @@ def main():
     inp = timeit("Enqueueing first batch", next, data)[0]
     timeit("Acquiring forward parameters", compute_ctx, ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
-    print(f"Parameters: {parameter_count:,}")
     timeit("Acquiring optimizer parameters", update, ctx,
            {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
-    print(f"Buffers:    {sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count:,}")
+    buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
                  'data': PartitionSpec(None, None, "data_parallel", None), 'current_step': None, 'loss': None}
@@ -403,9 +402,11 @@ def main():
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
         state = timeit("Compiling model and performing first step", step, wctx(next(data)).serialize())
+        print(f"\n\nParameters: {parameter_count:,}")
+        print(f"Buffers:    {buffer_count:,}\n\n")
+        state['loss'] = jnp.zeros_like(state['loss'])
 
         start_time = time.time()
-
         for idx, dat in enumerate(data):
             state = step(WhileContext(state)(dat).serialize())
             if idx % ctx.training.print_interval == 0:
