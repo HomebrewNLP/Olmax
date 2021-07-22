@@ -1,10 +1,16 @@
 import copy
+import sys
 import typing
 
+import jsonpickle
 from jax import numpy as jnp, random
 
 
-class DataContext:
+class DataClass:
+    pass
+
+
+class DataContext(DataClass):
     def __init__(self):
         self.path = "gs://obst-euw4a-aa/the-char-pile/*"
         self.shuffle_buffer = 0
@@ -15,7 +21,7 @@ class DataContext:
         self.vocab_size = 256  # should be divisible by 128
 
 
-class DimSizes:
+class DimSizes(DataClass):
     def __init__(self, data: DataContext, group_linear_factor=2):
         self.batch = 512
         self.features_per_head = 128
@@ -29,7 +35,7 @@ class DimSizes:
         return getattr(self, item)
 
 
-class Dims:
+class Dims(DataClass):
     def __init__(self, data: DataContext):
         self.batch = "batch"
         self.features_per_head = "features_per_head"
@@ -41,7 +47,7 @@ class Dims:
         self.sizes = DimSizes(data)
 
 
-class Optimizer:
+class Optimizer(DataClass):
     def __init__(self):
         self.learning_rate = -1e3
         self.gradient_clip = 5e-3
@@ -49,14 +55,14 @@ class Optimizer:
         self.momentum_beta = 0.9
 
 
-class Initializer:
+class Initializer(DataClass):
     def __init__(self):
         self.scale = 1.0
         self.embedding_std = 0.004
         self.norm_std = 0.02
 
 
-class Model:
+class Model(DataClass):
     def __init__(self):
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
@@ -67,7 +73,7 @@ class Model:
         self.initializer = Initializer()
 
 
-class Training:
+class Training(DataClass):
     def __init__(self):
         self.device_steps = 16
         self.steps = 2 ** 16
@@ -80,12 +86,6 @@ class Context:
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.seed = 0
         self.global_prefix = ''
-
-        self.data = DataContext()
-        self.dims = Dims(self.data)
-        self.optimizer = Optimizer()
-        self.model = Model()
-        self.training = Training()
 
         self.name_cache: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
@@ -125,3 +125,7 @@ class WhileContext:
     def serialize(self):
         return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'loss': self.loss,
                 'data': self.data}
+
+    def __call__(self, data: jnp.ndarray):
+        self.data = data
+        return self

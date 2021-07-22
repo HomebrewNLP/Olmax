@@ -402,12 +402,12 @@ def main():
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
-        state = timeit("Compiling model and performing first step", step, wctx.serialize())
+        state = timeit("Compiling model and performing first step", step, wctx(next(data)).serialize())
 
         start_time = time.time()
 
         for idx, dat in enumerate(data):
-            state = step(state)
+            state = step(WhileContext(state)(dat).serialize())
             if idx % ctx.training.print_interval == 0:
                 wctx = WhileContext(state)
                 print(f'[{idx * ctx.training.device_steps:{len(str(steps_per_print))}d}/{steps_per_print}] Loss:'
