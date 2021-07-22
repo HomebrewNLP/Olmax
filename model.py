@@ -314,6 +314,7 @@ def exec_fn(*fns: typing.Callable) -> typing.Callable:
 @jax.custom_gradient
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int):
     spec = base_spec(src)
+    normalization = tgt.size
     tgt = one_hot(tgt, src.shape[-1])
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
@@ -321,8 +322,8 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int):
     log_z = jnp.log(sum_exp)
     loss = jnp.einsum(f"{spec},{spec}->", log_z - shifted, tgt)
     loss = jnp.square(log_z).sum() * z_loss + loss
-    loss = loss / tgt.size
-    grad = exp_shifted / sum_exp - tgt + log_z * 2 * z_loss
+    loss = loss / normalization
+    grad = (exp_shifted / sum_exp - tgt + log_z * 2 * z_loss) / normalization
     del spec, tgt, shifted, exp_shifted, sum_exp, log_z, src
 
     def grad_fn(g: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None, None]:
