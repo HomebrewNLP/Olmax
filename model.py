@@ -278,7 +278,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     spec = base_spec(qry)
     anonymous_spec = spec.replace(spec[-2], "z")
     logit = shard(jnp.einsum(f'{spec},{anonymous_spec}->{spec[:-1]}z', qry / qry.shape[-1] ** 0.5, key))
-    if ctx.masked_attention:
+    if ctx.model.masked_attention:
         mask = jnp.reshape(jnp.arange(0, qry.shape[-2]), (1, -1)) > jnp.reshape(jnp.arange(0, qry.shape[-2]), (-1, 1))
         logit += mask * -1e30
     logit = jnp.exp(logit - lax.stop_gradient(logit).max(-1, keepdims=True))
@@ -289,9 +289,9 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("instance_norm")
     shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, get_feature_dim(ctx, inp)]
     inp = inp - shard(inp.mean(-1, keepdims=True), None)
-    scale = lax.rsqrt(ctx.norm_eps + shard(jnp.square(inp).sum(-1, keepdims=True), None))
-    scale = scale * get_param(ctx, "scale", shape, ctx.norm_std, 1)
-    return scale * inp + get_param(ctx, "shift", shape, ctx.norm_std)
+    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(inp).sum(-1, keepdims=True), None))
+    scale = scale * get_param(ctx, "scale", shape, ctx.model.norm_std, 1)
+    return scale * inp + get_param(ctx, "shift", shape, ctx.model.initializer.norm_std)
 
 
 def exec_fn(*fns: typing.Callable) -> typing.Callable:
@@ -309,7 +309,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
     max_src = shard(lax.stop_gradient(src).max(-1, keepdims=True), None)
     log_z = jnp.log(shard(jnp.exp(src - max_src).sum(-1, keepdims=True), None)) + max_src
     loss = jnp.einsum(f"{spec},{spec}->", src - log_z, one_hot(tgt, ctx.data.vocab_size))
-    return (jnp.square(log_z).sum() * ctx.z_loss - loss) / tgt.size
+    return (jnp.square(log_z).sum() * ctx.model.z_loss - loss) / tgt.size
 
 
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -359,13 +359,8 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     return jnp.not_equal(jnp.mod(wctx.current_step + 1, wctx.ctx.device_steps), 0)
 
 
-def jitless_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray) -> typing.Tuple[
-    jnp.ndarray, typing.Dict[str, jnp.ndarray]]:
-    wctx = WhileContext()
-    wctx.ctx.parameters = parameters
-    wctx.data = data
-    wctx = WhileContext(lax.while_loop(cond_fn, train_step, wctx.serialize()))
-    return wctx.loss / wctx.ctx.device_steps, wctx.ctx.parameters
+def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+    return WhileContext(lax.while_loop(cond_fn, train_step, while_ctx_dict)).serialize()
 
 
 def sharding(ctx: Context, dims: typing.List[str]):
@@ -389,32 +384,34 @@ def timeit(text: str, fn, *args, pad=45):
 
 
 def main():
-    ctx = Context()
-    ctx.initializing = True
+    wctx = WhileContext()
+    ctx = wctx.ctx
     steps_per_print = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0]
     timeit("Acquiring forward parameters", compute_ctx, ctx, inp)
+    parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
+    print(f"Parameters: {parameter_count:,}")
     timeit("Acquiring optimizer parameters", update, ctx,
            {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
+    print(f"Buffers:    {sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count:,}")
 
-    partition = {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()}
-    step = timeit("JITing model", pjit.pjit, jitless_step,
-                  (partition, PartitionSpec(None, None, "data_parallel", None)), (None, partition))
+    partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
+                 'data': PartitionSpec(None, None, "data_parallel", None), 'current_step': None, 'loss': None}
+    step = timeit("JITing model", pjit.pjit, jitless_step, partition, partition)
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
-        loss, parameters = timeit("Compiling model and performing first step", step, ctx.parameters, next(data))
-
-        print(f"Parameters: {sum(util.prod(param.shape) for name, param in parameters.items())}")
+        state = timeit("Compiling model and performing first step", step, wctx.serialize())
 
         start_time = time.time()
 
         for idx, dat in enumerate(data):
-            loss, parameters = step(parameters, dat)
+            state = step(state)
             if idx % ctx.training.print_interval == 0:
+                wctx = WhileContext(state)
                 print(f'[{idx * ctx.training.device_steps:{len(str(steps_per_print))}d}/{steps_per_print}] Loss:'
-                      f' {loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
+                      f' {wctx.loss:6.3f} - Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
 
 
