@@ -21,13 +21,9 @@ def decoder(int_string: bool, data: tf.Tensor, ctx: int):
             dat = tf1.parse_single_example(proto, {'text': tf1.VarLenFeature(tf.int64)})
             dat = tf.cast(tf.sparse.to_dense(dat['text']), tf.int32)
         else:
-
             text_slice = tf1.parse_single_example(proto, {'text': tf1.FixedLenFeature([], tf.string)})['text']
             dat = tf.reshape(tf.strings.unicode_decode(text_slice, 'UTF-8'), (-1, 1))
-        dat = tf.data.Dataset.from_tensor_slices(dat)
-        dat = dat.window(size=ctx + 1, shift=ctx, stride=1, drop_remainder=True)
-        dat = dat.interleave(lambda x: x.batch(ctx + 1, drop_remainder=True), cycle_length=1)
-        return dat
+        return tf.data.Dataset.from_tensor_slices(dat).batch(ctx + 1, drop_remainder=True)
 
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
 
@@ -36,7 +32,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     filenames = tf.io.gfile.glob(ctx.data.path)
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
-    sequence_length = ctx.dims
+    sequence_length = ctx.dims.sizes.sequence
     batch_size = ctx.dims.sizes.batch
     device_steps = ctx.device_steps
 
