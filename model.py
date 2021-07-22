@@ -271,7 +271,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
 
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
-    base = linear(ctx, inp)
+    base = relu(linear(ctx, inp))
     qry = linear(ctx, base)
     key = linear(ctx, base)
     val = linear(ctx, base)
