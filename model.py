@@ -375,11 +375,11 @@ def sharding(ctx: Context, dims: typing.List[str]):
     return PartitionSpec(*out)
 
 
-def timeit(text: str, fn, *args, pad=45):
+def timeit(text: str, fn, *args, pad=50):
     start_time = time.time()
     print(f'{text}..', end='', flush=True)
     out = fn(*args)
-    print(f"{' ' * (pad - len(text))}Took:{time.time() - start_time:7.2f}s", flush=True)
+    print(f"{' ' * (pad - len(text))}Took:{time.time() - start_time:9.2f}s", flush=True)
     return out
 
 
