@@ -192,7 +192,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
     spec = base_spec(inp)
-    embd = get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], ctx.embedding_std)
+    embd = get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head],
+                     ctx.model.initializer.embedding_std)
     out = shard(jnp.einsum(f"{spec}x,xyz->{spec}yz", one_hot(inp, ctx.data.vocab_size), embd))
 
     position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
@@ -203,7 +204,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     features = jnp.arange(0, feature_count)
     features = jnp.reshape(features, [1] + feature_shape) * 4 / feature_count
     features = jnp.exp(features - math.log(position_count / 2 / math.pi))
-    return out + jnp.sin(features * positions) * ctx.embedding_std
+    return out + jnp.sin(features * positions) * ctx.model.initializer.embedding_std
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
