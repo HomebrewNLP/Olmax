@@ -289,7 +289,7 @@ def softmax(logit: jnp.ndarray, masked_attention: bool):
 
     def grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None]:
         prod = logit * dy
-        return prod - prod.sum(-1, keepdims=True) * logit
+        return prod - prod.sum(-1, keepdims=True) * logit, None
 
     return logit, grad_fn
 
