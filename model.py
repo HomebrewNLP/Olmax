@@ -323,7 +323,7 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int):
     loss = jnp.einsum(f"{spec},{spec}->", log_z - shifted, tgt)
     loss = jnp.square(log_z).sum() * z_loss + loss
     loss = loss / normalization
-    grad = (exp_shifted / sum_exp - tgt + log_z * 2 * z_loss) / normalization
+    grad = (exp_shifted * (1 + log_z * 2 * z_loss) / sum_exp - tgt) / normalization
     del spec, tgt, shifted, exp_shifted, sum_exp, log_z, src
 
     def grad_fn(g: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None, None]:
