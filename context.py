@@ -96,6 +96,22 @@ class Context(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.data = DataContext()
         self.dims = Dims(self.data)
+        self.optimizer = Optimizer()
+        self.model = Model()
+        self.training = Training()
+
+        if len(sys.argv) > 1 and sys.argv[1].endswith('.json'):
+            with open(sys.argv[1]) as f:
+                cfg = f.read()
+            init_class(self, jsonpickle.loads(cfg))
+
+        self.seed = 0
+        self.global_prefix = ''
+
+        self.name_cache: typing.Dict[str, int] = {}
+        self.parameters: typing.Dict[str, jnp.ndarray] = {}
+        self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
+        self.prng_key = random.PRNGKey(self.seed)
 
         if config is not None:
             self.__dict__.update(config)
