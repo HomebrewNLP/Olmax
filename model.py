@@ -280,9 +280,9 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
 @jax.custom_gradient
 def softmax(logit: jnp.ndarray, masked_attention: bool):
     if masked_attention:
-        ones = (1,) * (logit.ndim - 2)
+        ones = (1,) * (logit.ndim - 3)
         arange = jnp.arange(0, logit.shape[-1])
-        logit += -1e30 * (jnp.reshape(arange, ones + (1, -1)) > jnp.reshape(arange, ones + (-1, 1)))
+        logit += -1e30 * (jnp.reshape(arange, ones + (1, 1, -1)) > jnp.reshape(arange, ones + (-1, 1, 1)))
     logit = jnp.exp(logit - logit.max(-1, keepdims=True))
     logit /= logit.sum(-1, keepdims=True)
 
@@ -303,7 +303,6 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     anonymous_spec = spec.replace(spec[-2], "z")
     logit = shard(jnp.einsum(f'{spec},{anonymous_spec}->{spec[:-1]}z', qry / qry.shape[-1] ** 0.5, key))
     logit = softmax(logit, ctx.model.masked_attention)
-
     return shard(jnp.einsum(f'{anonymous_spec},{spec[:-1]}z->{spec}', val, logit))
 
 
