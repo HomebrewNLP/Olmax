@@ -13,7 +13,7 @@ from jax.experimental import pjit
 from jax.experimental.maps import mesh
 from jax.scipy.special import expit as sigmoid
 
-from context import Context, WhileContext
+from context import Context, WhileTrainContext
 from data import text_dataset
 
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
@@ -332,8 +332,7 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int):
     return loss, grad_fn
 
 
-def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    src, tgt = inp
+def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     src = input_embed(ctx, src)
     src = (ctx.parameters, src, src, src, src)
     for i in range(ctx.model.depth):
@@ -342,7 +341,12 @@ def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         src = reversible(ctx, exec_fn(instance_norm, group_feed_forward), is_last)(src)
     src = src[1] + src[3]
     src = instance_norm(ctx, src)
-    src = output_embed(ctx, src)
+    return output_embed(ctx, src)
+
+
+def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    src, tgt = inp
+    src = body_ctx(ctx, src)
     return cross_entropy_loss(src, tgt, ctx.model.z_loss)
 
 
@@ -365,7 +369,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-    wctx = WhileContext(while_ctx_dict)
+    wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0)
     loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
     update(wctx.ctx, grads)
@@ -375,7 +379,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
-    wctx = WhileContext(while_ctx_dict)
+    wctx = WhileTrainContext(while_ctx_dict)
     return jnp.not_equal(jnp.mod(wctx.current_step, wctx.ctx.training.device_steps), 0)
 
 
@@ -403,21 +407,21 @@ def timeit(text: str, fn, *args, pad=50):
     return out
 
 
-def train_loop(wctx: WhileContext, step: typing.Callable):
+def train_loop(wctx: WhileTrainContext, step: typing.Callable):
     ctx = [wctx]
 
-    def _fn(dat: jnp.ndarray) -> WhileContext:
+    def _fn(dat: jnp.ndarray) -> WhileTrainContext:
         w = ctx[0](dat)
         w.loss = jnp.zeros_like(w.loss)
         w.current_step = w.current_step + 1
-        ctx[0] = WhileContext(step(w.serialize()))
+        ctx[0] = WhileTrainContext(step(w.serialize()))
         return ctx[0]
 
     return _fn
 
 
 def main():
-    wctx = WhileContext()
+    wctx = WhileTrainContext()
     ctx = wctx.ctx
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
