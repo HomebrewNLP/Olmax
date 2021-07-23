@@ -277,21 +277,24 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     return reversible_half_residual
 
 
-@jax.custom_gradient
-def softmax(logit: jnp.ndarray, masked_attention: bool):
+def softmax(logit: jnp.ndarray, masked_attention: bool) -> jnp.ndarray:
     # [Batch, Sequence, Heads, AnonymousSequence]
-    if masked_attention:
-        ones = (1,) * (logit.ndim - 3)
-        arange = jnp.arange(0, logit.shape[-1])
-        logit += -1e30 * (jnp.reshape(arange, ones + (1, 1, -1)) > jnp.reshape(arange, ones + (-1, 1, 1)))
-    logit = jnp.exp(logit - logit.max(-1, keepdims=True))
-    logit /= logit.sum(-1, keepdims=True)
+    @jax.custom_gradient
+    def _fn(lgt: jnp.ndarray):
+        if masked_attention:
+            ones = (1,) * (lgt.ndim - 3)
+            arange = jnp.arange(0, lgt.shape[-1])
+            lgt += -1e30 * (jnp.reshape(arange, ones + (1, 1, -1)) > jnp.reshape(arange, ones + (-1, 1, 1)))
+        lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
+        lgt /= lgt.sum(-1, keepdims=True)
 
-    def grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None]:
-        prod = logit * dy
-        return prod - prod.sum(-1, keepdims=True) * logit, None
+        def grad_fn(dy: jnp.ndarray) -> jnp.ndarray:
+            prod = lgt * dy
+            return prod - prod.sum(-1, keepdims=True) * lgt
 
-    return logit, grad_fn
+        return lgt, grad_fn
+
+    return _fn(logit)
 
 
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
