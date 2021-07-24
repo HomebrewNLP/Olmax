@@ -310,8 +310,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
 
 
 def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarray, qry_param: jnp.ndarray,
-                 val_param: jnp.ndarray,
-                 masked_attention: bool) -> jnp.ndarray:
+                 val_param: jnp.ndarray, masked_attention: bool) -> jnp.ndarray:
     batch_dims = tuple(range(src.ndim - 3))
     head_dim = src.ndim - 2
     feature_dim = src.ndim - 1
@@ -382,7 +381,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward])
     attn_params = [get_param(ctx, name, [ctx.dims.intermediate_feed_forward] + feature_dims)
                    for name in ("key", "query", "value")]
-    return shard(attention_op(inp, base_param, *attn_params))
+    return shard(attention_op(inp, base_param, *attn_params, ctx.model.masked_attention))
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
