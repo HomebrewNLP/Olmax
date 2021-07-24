@@ -367,7 +367,7 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
             base_grad += dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2), tuple(), tuple())
 
             base_grad = jnp.where(inp >= 0, base_grad, jnp.zeros_like(base_grad))
-            base_grad = dot_general(base_grad, b_p, (feature_dim,), (feature_dim,), tuple(), tuple())
+            base_grad = dot_general(base_grad, b_p, (head_dim,), (2,), tuple(), tuple())
 
             b_p_grad = dot_general(inp, base_grad, batch_seq, batch_seq, tuple(), tuple())
 
