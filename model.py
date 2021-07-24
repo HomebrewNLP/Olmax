@@ -70,12 +70,16 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
     :param precision: jax precision (0=low/bfp16 1=high,tf32 2=highest,fp32)
     :return: tensor containing left@right
     """
-    l_start = left_sum_start % left.ndim
-    r_start = right_sum_start % right.ndim
-    l_end = default(left_sum_end, left_sum_start) % left.ndim + 1
-    r_end = default(right_sum_end, right_sum_start) % right.ndim + 1
+    l_ndim = left.ndim
+    r_ndim = right.ndim
+    l_start = left_sum_start % l_ndim
+    r_start = right_sum_start % r_ndim
+    l_end = default(left_sum_end, left_sum_start) % l_ndim + 1
+    r_end = default(right_sum_end, right_sum_start) % r_ndim + 1
+    min_start = min(r_start, l_start)
     contract_dims = tuple(range(l_start, l_end)), tuple(range(r_start, r_end))
-    return lax.dot_general(left, right, (contract_dims, (tuple(range(min(r_start, l_start))),) * 2), "fastest")
+    batch_dims = tuple(range(l_ndim, l_ndim - min_start, -1)), tuple(range(r_ndim, r_ndim - min_start, -1))
+    return lax.dot_general(left, right, (contract_dims, batch_dims), "fastest")
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jnp.ndarray:
