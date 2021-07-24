@@ -53,10 +53,11 @@ def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
     return default_value if value is None else value
 
 
-def dot_general(left: jnp.ndarray, right: jnp.ndarray,
-                contract_dims: typing.Tuple[typing.Sequence[int], typing.Sequence[int]],
-                batch_dims: typing.Tuple[typing.Sequence[int], typing.Sequence[int]]) -> jnp.ndarray:
-    return lax.dot_general(left, right, (contract_dims, batch_dims), "fastest")
+def dot_general(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: typing.Sequence[int],
+                right_contract_dims: typing.Sequence[int], left_batch_dims: typing.Sequence[int],
+                right_batch_dims: typing.Sequence[int]) -> jnp.ndarray:
+    dims = ((left_contract_dims, right_contract_dims), (left_batch_dims, right_batch_dims))
+    return lax.dot_general(left, right, dims, "fastest")
 
 
 def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, right_sum_start: int,
@@ -82,10 +83,9 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
     l_end = default(left_sum_end, left_sum_start) % l_ndim + 1
     r_end = default(right_sum_end, right_sum_start) % r_ndim + 1
     min_start = min(r_start, l_start)
-    contract_dims = tuple(range(l_start, l_end)), tuple(range(r_start, r_end))
-    batch_dims = (tuple(range(l_ndim - l_start, l_ndim - l_start - min_start, -1)),
-                  tuple(range(r_ndim - r_start, r_ndim - r_start - min_start, -1)))
-    return dot_general(left, right, contract_dims, batch_dims)
+    return dot_general(left, right, tuple(range(l_start, l_end)), tuple(range(r_start, r_end)),
+                       tuple(range(l_ndim - l_start, l_ndim - l_start - min_start, -1)),
+                       tuple(range(r_ndim - r_start, r_ndim - r_start - min_start, -1)))
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jnp.ndarray:
@@ -218,9 +218,9 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1])
-    mid = dot_general(inp, inp_weight, ((ndim - 1,), (1,)), ((ndim - 2,), (0,)))
+    mid = dot_general(inp, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,))
     mid = mish(mid)
-    out = dot_general(mid, out_weight, ((ndim - 1,), (1,)), ((0,), (0,)))
+    out = dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,))
     return out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1))
 
 
@@ -333,7 +333,7 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
         qry = qry.transpose(qry_permute)
         val = val.transpose(key_permute)
 
-        lgt = dot_general(key, qry, ((feature_dim,), (head_dim,)), (batch_seq, batch_seq))
+        lgt = dot_general(key, qry, (feature_dim,), (head_dim,), batch_seq, batch_seq)
         if masked_attention:
             ones = (1,) * (lgt.ndim - 2)
             arange = jnp.arange(0, lgt.shape[-1])
@@ -341,33 +341,33 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
             lgt += (-1e30 * mask).astype(lgt.dtype)
         lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
         lgt /= lgt.sum(-1, keepdims=True)
-        out = dot_general(lgt, val, ((feature_dim,), (head_dim,)), (batch_seq, batch_seq))
+        out = dot_general(lgt, val, (feature_dim,), (head_dim,), batch_seq, batch_seq)
         out = out.transpose(key_permute)
 
         def grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             dy = dy.transpose(qry_permute)
 
-            d_logit = dot_product(val, dy, -1, -2)
-            val_grad = dot_product(dy, lgt, -1, -2)
+            d_logit = dot_general(val, dy, (-1,), (-2,), tuple(), tuple())
+            val_grad = dot_general(dy, lgt, (-1,), (-2,), tuple(), tuple())
 
             prod = lgt * d_logit
             lgt_grad = prod - prod.sum(-1, keepdims=True) * lgt
 
-            qry_grad = dot_general(lgt_grad, qry, (feature_dim,) * 2, (batch_seq,) * 2, )
-            key_grad = dot_general(lgt_grad, key, (sequence_dim,) * 2, (batch_seq,) * 2, )
+            qry_grad = dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq)
+            key_grad = dot_general(lgt_grad, key, (sequence_dim,), (sequence_dim,), batch_seq, batch_seq)
 
-            k_p_grad = dot_general(key_grad, base, (batch_seq, batch_dims + (head_dim,)), ((), ()), )
-            v_p_grad = dot_general(val_grad, base, (batch_seq, batch_dims + (head_dim,)), ((), ()), )
-            q_p_grad = dot_general(qry_grad, base, (batch_seq, batch_dims + (feature_dim,)), ((), ()), )
+            k_p_grad = dot_general(key_grad, base, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
+            v_p_grad = dot_general(val_grad, base, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
+            q_p_grad = dot_general(qry_grad, base, batch_seq, batch_dims + (feature_dim,), tuple(), tuple())
 
-            base_grad = dot_general(key_grad, k_p, ((feature_dim,), (1,)), ((), ()))
-            base_grad += dot_general(val_grad, v_p, ((feature_dim,), (1,)), ((), ()))
-            base_grad += dot_general(qry_grad, q_p, ((head_dim,), (0,)), ((), ()), )
+            base_grad = dot_general(key_grad, k_p, (feature_dim,), (1,), tuple(), tuple())
+            base_grad += dot_general(val_grad, v_p, (feature_dim,), (1,), tuple(), tuple())
+            base_grad += dot_general(qry_grad, q_p, (head_dim,), (0,), tuple(), tuple())
 
             base_grad = jnp.where(base > 0, base_grad, jnp.zeros_like(base_grad))
-            base_grad = dot_general(base_grad, b_p, ((feature_dim,), (feature_dim,)), ((), ()), )
+            base_grad = dot_general(base_grad, b_p, (feature_dim,), (feature_dim,), tuple(), tuple())
 
-            b_p_grad = dot_general(inp, base_grad, (batch_seq,) * 2, ((), ()))
+            b_p_grad = dot_general(inp, base_grad, batch_seq, batch_seq, tuple(), tuple())
 
             return base_grad, b_p_grad, k_p_grad, q_p_grad, v_p_grad
 
