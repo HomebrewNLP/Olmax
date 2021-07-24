@@ -67,7 +67,6 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
     :param right_sum_start: stort/only summed dim in right tensor
     :param left_sum_end: optional end if multiple dims are used
     :param right_sum_end: optional end if multiple dims are used
-    :param precision: jax precision (0=low/bfp16 1=high,tf32 2=highest,fp32)
     :return: tensor containing left@right
     """
     l_ndim = left.ndim
@@ -78,7 +77,8 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
     r_end = default(right_sum_end, right_sum_start) % r_ndim + 1
     min_start = min(r_start, l_start)
     contract_dims = tuple(range(l_start, l_end)), tuple(range(r_start, r_end))
-    batch_dims = tuple(range(l_ndim, l_ndim - min_start, -1)), tuple(range(r_ndim, r_ndim - min_start, -1))
+    batch_dims = (tuple(range(l_ndim - l_start, l_ndim - l_start - min_start, -1)),
+                  tuple(range(r_ndim - r_start, r_ndim - r_start - min_start, -1)))
     return lax.dot_general(left, right, (contract_dims, batch_dims), "fastest")
 
 
@@ -338,7 +338,7 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
         qry = qry.transpose(qry_permute)
         val = val.transpose(key_permute)
 
-        lgt = dot_product(key, qry, -1, -2)  # batch head seq seq
+        lgt = lax.dot_general(key, qry, (((-1,), (-2,)), (batch_seq, batch_seq)), "fastest")  # batch head seq seq
         if masked_attention:
             ones = (1,) * (lgt.ndim - 2)
             arange = jnp.arange(0, lgt.shape[-1])
