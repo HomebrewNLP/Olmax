@@ -69,7 +69,6 @@ class Model(DataClass):
         self.depth = 8
         self.masked_attention = True
         self.dtype = jnp.bfloat16
-        self.z_loss = 1e-5
         self.initializer = Initializer()
 
 

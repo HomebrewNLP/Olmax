@@ -406,19 +406,17 @@ def exec_fn(*fns: typing.Callable) -> typing.Callable:
 
 
 @jax.custom_gradient
-def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray, z_loss: int):
+def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
     spec = base_spec(src)
     normalization = tgt.size
     tgt = one_hot(tgt, src.shape[-1])
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
-    log_z = jnp.log(sum_exp)
-    loss = jnp.einsum(f"{spec},{spec}->", log_z - shifted, tgt)
-    loss = jnp.square(log_z).sum() * z_loss + loss
+    loss = jnp.einsum(f"{spec},{spec}->", jnp.log(sum_exp) - shifted, tgt)
     loss = loss / normalization
-    grad = (exp_shifted * (1 + log_z * 2 * z_loss) / sum_exp - tgt) / normalization
-    del spec, tgt, shifted, exp_shifted, sum_exp, log_z, src
+    grad = (exp_shifted / sum_exp - tgt) / normalization
+    del spec, tgt, shifted, exp_shifted, sum_exp, src
 
     def grad_fn(g: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None, None]:
         return g * grad, None, None
@@ -440,8 +438,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
 
 def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     src, tgt = inp
-    src = body_ctx(ctx, src)
-    return cross_entropy_loss(src, tgt, ctx.model.z_loss)
+    return cross_entropy_loss(body_ctx(ctx, src), tgt)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
