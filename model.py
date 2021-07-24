@@ -194,8 +194,9 @@ def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def group_linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_linear")
     dims = ctx.dims
+    ndim = inp.ndim
     shape = [dims.heads] + [dims.intermediate_feed_forward, dims.features_per_head][::2 * is_intermediate(ctx, inp) - 1]
-    return shard(dot_product(inp, get_param(ctx, "weight", shape), -1, 1))
+    return shard(lax.dot_general(inp, get_param(ctx, "weight", shape), (((ndim - 1,), (1,)), ((ndim - 2,), (0,)))))
 
 
 def relu(inp: jnp.ndarray) -> jnp.ndarray:
