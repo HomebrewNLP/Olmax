@@ -336,9 +336,10 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
 
         lgt = dot_product(key, qry, -1, -2)  # batch head seq seq
         if masked_attention:
-            ones = (1,) * (lgt.ndim - 3)
+            ones = (1,) * (lgt.ndim - 2)
             arange = jnp.arange(0, lgt.shape[-1])
-            lgt += -1e30 * (jnp.reshape(arange, ones + (1, 1, -1)) > jnp.reshape(arange, ones + (-1, 1, 1)))
+            mask: jnp.ndarray = jnp.greater(jnp.reshape(arange, ones + (1, -1)), jnp.reshape(arange, ones + (-1, 1)))
+            lgt += (-1e30 * mask).astype(lgt.dtype)
         lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
         lgt /= lgt.sum(-1, keepdims=True)
         out = dot_product(lgt, val, -1, -2)  # batch head seq feat
