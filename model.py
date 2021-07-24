@@ -346,7 +346,7 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
             lgt += (-1e30 * mask).astype(lgt.dtype)
         lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
         lgt /= lgt.sum(-1, keepdims=True)
-        out = dot_product(lgt, val, -1, -2)  # batch head seq feat
+        out = lax.dot_general(lgt, val, (((feature_dim,), (head_dim,)), (batch_seq, batch_seq)), "fastest")
         out = out.transpose(key_permute)
 
         def grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
