@@ -356,9 +356,9 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
             qry_grad = dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq)
             key_grad = dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq)
 
-            k_p_grad = dot_general(key_grad, base, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
-            v_p_grad = dot_general(val_grad, base, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
-            q_p_grad = dot_general(qry_grad, base, batch_seq, batch_dims + (feature_dim,), tuple(), tuple())
+            k_p_grad = dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
+            q_p_grad = dot_general(base, qry_grad, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
+            v_p_grad = dot_general(base, val_grad, batch_seq, batch_dims + (feature_dim,), tuple(), tuple())
 
             base_grad = dot_general(key_grad, k_p, (feature_dim,), (1,), tuple(), tuple())
             base_grad += dot_general(val_grad, v_p, (feature_dim,), (1,), tuple(), tuple())
