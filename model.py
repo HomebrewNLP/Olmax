@@ -338,7 +338,7 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
         qry = qry.transpose(qry_permute)
         val = val.transpose(key_permute)
 
-        lgt = lax.dot_general(key, qry, (((-1,), (-2,)), (batch_seq, batch_seq)), "fastest")  # batch head seq seq
+        lgt = lax.dot_general(key, qry, (((feature_dim,), (head_dim,)), (batch_seq, batch_seq)), "fastest")
         if masked_attention:
             ones = (1,) * (lgt.ndim - 2)
             arange = jnp.arange(0, lgt.shape[-1])
