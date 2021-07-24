@@ -241,11 +241,12 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
     position_count = util.prod(position_shape)
     feature_count = util.prod(feature_shape)
-    positions = jnp.reshape(jnp.arange(0, position_shape, dtype=ctx.model.dtype), (-1, 1, 1))
-    features = jnp.arange(0, feature_count, dtype=ctx.model.dtype)
+    positions = jnp.reshape(jnp.arange(0, position_shape), (-1, 1, 1))
+    features = jnp.arange(0, feature_count)
     features = jnp.reshape(features, [1] + feature_shape) * 4 / feature_count
     features = jnp.exp(features - math.log(position_count / 2 / math.pi))
-    return out + lax.stop_gradient(jnp.sin(features * positions) * ctx.model.initializer.embedding_std)
+    pos_embd = lax.stop_gradient(jnp.sin(features * positions) * ctx.model.initializer.embedding_std).astype(out.dtype)
+    return out + pos_embd
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
