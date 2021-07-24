@@ -347,8 +347,8 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
         def grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             dy = dy.transpose(qry_permute)
 
-            d_logit = dot_general(val, dy, (-1,), (-2,), tuple(), tuple())
-            val_grad = dot_general(dy, lgt, (-1,), (-2,), tuple(), tuple())
+            d_logit = dot_general(val, dy, (-1,), (-2,), batch_seq, batch_seq)
+            val_grad = dot_general(dy, lgt, (-1,), (-2,), batch_seq, batch_seq)
 
             prod = lgt * d_logit
             lgt_grad = prod - prod.sum(-1, keepdims=True) * lgt
