@@ -54,8 +54,7 @@ def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
 
 
 def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, right_sum_start: int,
-                left_sum_end: typing.Optional[int] = None, right_sum_end: typing.Optional[int] = None,
-                precision: int = 0) -> jnp.ndarray:
+                left_sum_end: typing.Optional[int] = None, right_sum_end: typing.Optional[int] = None) -> jnp.ndarray:
     """
     Performs a basic dot product across two tensors. All dimensions in front of left_sum_start and behind right_sum_end
     are kept. All dimensions in front of right_sum_start are batch dimensions. left_sum_end has to be the true end.
@@ -77,7 +76,7 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
     r_end = default(right_sum_end, right_sum_start) % right.ndim + 1
     contract_dims = tuple(range(l_start, l_end)), tuple(range(r_start, r_end))
     batch_dims = tuple(range(l_start)), tuple(range(r_start))
-    return lax.dot_general(left, right, (contract_dims, batch_dims), precision)
+    return lax.dot_general(left, right, (contract_dims, batch_dims), "fastest")
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jnp.ndarray:
@@ -355,21 +354,21 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
             prod = lgt * d_logit
             lgt_grad = prod - prod.sum(-1, keepdims=True) * lgt
 
-            qry_grad = lax.dot_general(lgt_grad, qry, ((feature_dim,) * 2, (batch_seq,) * 2), 0)
-            key_grad = lax.dot_general(lgt_grad, key, ((sequence_dim,) * 2, (batch_seq,) * 2), 0)
+            qry_grad = lax.dot_general(lgt_grad, qry, ((feature_dim,) * 2, (batch_seq,) * 2), "fastest")
+            key_grad = lax.dot_general(lgt_grad, key, ((sequence_dim,) * 2, (batch_seq,) * 2), "fastest")
 
-            k_p_grad = lax.dot_general(key_grad, base, ((batch_seq, batch_dims + (head_dim,)), ((), ())), 0)
-            v_p_grad = lax.dot_general(val_grad, base, ((batch_seq, batch_dims + (head_dim,)), ((), ())), 0)
-            q_p_grad = lax.dot_general(qry_grad, base, ((batch_seq, batch_dims + (feature_dim,)), ((), ())), 0)
+            k_p_grad = lax.dot_general(key_grad, base, ((batch_seq, batch_dims + (head_dim,)), ((), ())), "fastest")
+            v_p_grad = lax.dot_general(val_grad, base, ((batch_seq, batch_dims + (head_dim,)), ((), ())), "fastest")
+            q_p_grad = lax.dot_general(qry_grad, base, ((batch_seq, batch_dims + (feature_dim,)), ((), ())), "fastest")
 
-            base_grad = lax.dot_general(key_grad, k_p, (((feature_dim,), (1,)), ((), ())), 0)
-            base_grad += lax.dot_general(val_grad, v_p, (((feature_dim,), (1,)), ((), ())), 0)
-            base_grad += lax.dot_general(qry_grad, q_p, (((head_dim,), (0,)), ((), ())), 0)
+            base_grad = lax.dot_general(key_grad, k_p, (((feature_dim,), (1,)), ((), ())), "fastest")
+            base_grad += lax.dot_general(val_grad, v_p, (((feature_dim,), (1,)), ((), ())), "fastest")
+            base_grad += lax.dot_general(qry_grad, q_p, (((head_dim,), (0,)), ((), ())), "fastest")
 
             base_grad = jnp.where(base > 0, base_grad, jnp.zeros_like(base_grad))
-            base_grad = lax.dot_general(base_grad, b_p, (((feature_dim,), (feature_dim,)), ((), ())), 0)
+            base_grad = lax.dot_general(base_grad, b_p, (((feature_dim,), (feature_dim,)), ((), ())), "fastest")
 
-            b_p_grad = lax.dot_general(inp, base_grad, ((batch_seq,) * 2, ((), ())), 0)
+            b_p_grad = lax.dot_general(inp, base_grad, ((batch_seq,) * 2, ((), ())), "fastest")
 
             return base_grad, b_p_grad, k_p_grad, q_p_grad, v_p_grad
 
