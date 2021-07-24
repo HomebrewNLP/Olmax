@@ -474,7 +474,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhileTrainContext(while_ctx_dict)
-    return jnp.not_equal(jnp.mod(wctx.current_step, wctx.ctx.training.device_steps), 0)
+    return jnp.not_equal(jnp.mod(wctx.current_step, wctx.ctx.training.device_steps + 1), 0)
 
 
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -539,8 +539,8 @@ def main():
         for idx, dat in enumerate(data):
             wctx = step(dat)
             if idx % ctx.training.print_interval == 0:
-                print(f'[{wctx.current_step:{len(str(total_steps))}d}/{total_steps}] Loss:'
-                      f' {wctx.loss / ctx.training.device_steps / ctx.training.print_interval:6.3f} - '
+                print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
+                      f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
                       f'Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
 
