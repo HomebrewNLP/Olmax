@@ -234,7 +234,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     embd = get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
                      ctx.model.initializer.embedding_std)
-    out = dot_product(one_hot(inp, ctx.data.vocab_size), embd, -1, 0)
+    out = dot_product(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), embd, -1, 0)
     out = linear(ctx, relu(out))
 
     position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
@@ -407,7 +407,7 @@ def exec_fn(*fns: typing.Callable) -> typing.Callable:
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
     spec = base_spec(src)
     normalization = tgt.size
-    tgt = one_hot(tgt, src.shape[-1])
+    tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
