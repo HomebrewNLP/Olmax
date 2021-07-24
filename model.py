@@ -218,10 +218,10 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1])
-    mid = dot_general(inp, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,))
+    mid = shard(dot_general(inp, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1)
     mid = mish(mid)
-    out = dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,))
-    return out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1))
+    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+    return shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
@@ -233,7 +233,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     embd = get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
                      ctx.model.initializer.embedding_std)
-    out = dot_product(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), embd, -1, 0)
+    out = shard(dot_product(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), embd, -1, 0), None)
     out = linear(ctx, relu(out))
 
     position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
@@ -242,8 +242,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     feature_count = util.prod(feature_shape)
     positions = jnp.reshape(jnp.arange(0, position_shape), (-1, 1, 1))
     features = jnp.arange(0, feature_count)
-    features = jnp.reshape(features, [1] + feature_shape) * 4 / feature_count
-    features = jnp.exp(features - math.log(position_count / 2 / math.pi))
+    features = shard(jnp.reshape(features, [1] + feature_shape) * 4 / feature_count, 1, None)
+    features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 1))
     pos_embd = lax.stop_gradient(jnp.sin(features * positions) * ctx.model.initializer.embedding_std).astype(out.dtype)
     return out + pos_embd
 
@@ -319,20 +319,21 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
     key_permute = batch_dims + (head_dim, sequence_dim, feature_dim)
     qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
     batch_seq = batch_dims + (sequence_dim,)
+    tp = tuple()
 
     # TODO: Add sharding, annotate shapes, test code, maybe do gradient checkpointing?
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, b_p: jnp.ndarray, k_p: jnp.ndarray, q_p: jnp.ndarray, v_p: jnp.ndarray):
-        base = relu(dot_product(inp, b_p, -2, 0, -1, 1))  # batch, seq, feat
-        key = dot_product(base, k_p, -1, 0)
-        qry = dot_product(base, q_p, -1, 0)
-        val = dot_product(base, v_p, -1, 0)
+        base = relu(shard(dot_product(inp, b_p, -2, 0, -1, 1), None))  # batch, seq, feat
+        key = shard(dot_product(base, k_p, -1, 0))
+        qry = shard(dot_product(base, q_p, -1, 0))
+        val = shard(dot_product(base, v_p, -1, 0))
 
-        key = key.transpose(key_permute)
-        qry = qry.transpose(qry_permute)
-        val = val.transpose(key_permute)
+        key = shard(key.transpose(key_permute), -3)
+        val = shard(val.transpose(key_permute), -3)
+        qry = shard(qry.transpose(qry_permute), -3)
 
-        lgt = dot_general(key, qry, (feature_dim,), (head_dim,), batch_seq, batch_seq)
+        lgt = shard(dot_general(key, qry, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
         if masked_attention:
             ones = (1,) * (lgt.ndim - 2)
             arange = jnp.arange(0, lgt.shape[-1])
@@ -340,32 +341,32 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
             lgt += (-1e30 * mask).astype(lgt.dtype)
         lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
         lgt /= lgt.sum(-1, keepdims=True)
-        out = dot_general(lgt, val, (feature_dim,), (head_dim,), batch_seq, batch_seq)
-        out = out.transpose(key_permute)
+        out = shard(dot_general(lgt, val, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
+        out = shard(out.transpose(key_permute))
 
         def grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            dy = dy.transpose(qry_permute)
+            dy = shard(dy.transpose(qry_permute), -3)
 
-            d_logit = dot_general(val, dy, (feature_dim,), (head_dim,), batch_seq, batch_seq)
-            val_grad = dot_general(dy, lgt, (feature_dim,), (head_dim,), batch_seq, batch_seq)
+            val_grad = shard(dot_general(dy, lgt, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
 
+            d_logit = shard(dot_general(val, dy, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
             prod = lgt * d_logit
-            lgt_grad = prod - prod.sum(-1, keepdims=True) * lgt
+            lgt_grad = prod - shard(prod.sum(-1, keepdims=True), -3) * lgt
 
-            qry_grad = dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq)
-            key_grad = dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq)
+            qry_grad = shard(dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq), -3)
+            key_grad = shard(dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq), -3)
 
-            k_p_grad = dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
-            q_p_grad = dot_general(base, qry_grad, batch_seq, batch_dims + (head_dim,), tuple(), tuple())
-            v_p_grad = dot_general(base, val_grad, batch_seq, batch_dims + (feature_dim,), tuple(), tuple())
+            k_p_grad = shard(dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,), tp, tp), 1, None)
+            q_p_grad = shard(dot_general(base, qry_grad, batch_seq, batch_dims + (head_dim,), tp, tp), 1, None)
+            v_p_grad = shard(dot_general(base, val_grad, batch_seq, batch_dims + (feature_dim,), tp, tp), 1, None)
 
-            base_grad = dot_general(key_grad, k_p, (sequence_dim, feature_dim), (1, 2), tuple(), tuple())
-            base_grad += dot_general(qry_grad, q_p, (sequence_dim, feature_dim), (1, 2), tuple(), tuple())
-            base_grad += dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2), tuple(), tuple())
+            base_grad = shard(dot_general(key_grad, k_p, (sequence_dim, feature_dim), (1, 2), tp, tp), None)
+            base_grad += shard(dot_general(qry_grad, q_p, (sequence_dim, feature_dim), (1, 2), tp, tp), None)
+            base_grad += shard(dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2), tp, tp), None)
 
-            base_grad = jnp.where(base > 0, base_grad, jnp.zeros_like(base_grad))
-            inp_grad = dot_general(base_grad, b_p, (head_dim,), (2,), tuple(), tuple())
-            b_p_grad = dot_general(inp, base_grad, batch_seq, batch_seq, tuple(), tuple())
+            base_grad = jnp.where(base > 0, base_grad, shard(jnp.zeros_like(base_grad), None))
+            inp_grad = shard(dot_general(base_grad, b_p, (head_dim,), (2,), tp, tp))
+            b_p_grad = shard(dot_general(inp, base_grad, batch_seq, batch_seq, tp, tp), 0, None)
 
             return inp_grad, b_p_grad, k_p_grad, q_p_grad, v_p_grad
 
