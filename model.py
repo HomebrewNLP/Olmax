@@ -75,8 +75,7 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
     l_end = default(left_sum_end, left_sum_start) % left.ndim + 1
     r_end = default(right_sum_end, right_sum_start) % right.ndim + 1
     contract_dims = tuple(range(l_start, l_end)), tuple(range(r_start, r_end))
-    batch_dims = tuple(range(l_start)), tuple(range(r_start))
-    return lax.dot_general(left, right, (contract_dims, batch_dims), "fastest")
+    return lax.dot_general(left, right, (contract_dims, (tuple(range(min(r_start, l_start))),) * 2), "fastest")
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jnp.ndarray:
