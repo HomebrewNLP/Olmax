@@ -218,7 +218,10 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1])
-    return dot_general(ctx, inp_weight, ((ndim - 1,), (1,)), ((), ()))
+    mid = dot_general(ctx, inp_weight, ((ndim - 1,), (1,)), ((ndim - 2,), (0,)))
+    mid = mish(mid)
+    out = dot_general(mid, out_weight, ((ndim - 1,), (1,)), ((0,), (0,)))
+    return out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1))
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
