@@ -44,7 +44,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     batch_size = ctx.dims.sizes.batch
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
-    assert full_batch % ctx.data.datasets_used_per_step
+    assert not(full_batch % ctx.data.datasets_used_per_step)
 
     def _slice_target(x):
         x = tf.cast(tf.reshape(x, (device_steps, batch_size, sequence_length + 1)), tf.int32)
