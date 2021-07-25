@@ -375,7 +375,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("instance_norm")
-    shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, get_feature_dim(ctx, inp)]
+    shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, ctx.dims.features_per_head]
     scale = get_param(ctx, "scale", shape, ctx.model.initializer.norm_std, 1)
     shift = get_param(ctx, "shift", shape, ctx.model.initializer.norm_std)
     if ctx.is_initializing:
