@@ -433,8 +433,12 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
     return cross_entropy_loss(body_ctx(ctx, src), tgt)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
+def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
     ctx = ctx.add_to_prefix("optimizer")
+    opt = ctx.optimizer
+    learning_rate = opt.learning_rate
+    learning_rate *= jnp.minimum(current_step, opt.warmup_end) / opt.warmup_end
+    learning_rate *= opt.exponential_decay ** relu(current_step - opt.warmup_end)
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name)
         if "optimizer" in param_name:
@@ -442,14 +446,14 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         grad = sm3(inner_ctx, param_name, grad)
         grad = momentum(inner_ctx, param_name, grad)
-        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * ctx.optimizer.learning_rate
+        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * learning_rate
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0)
     loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
-    update(wctx.ctx, grads)
+    update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
     wctx.current_step += 1
     return wctx.serialize()
@@ -507,7 +511,8 @@ def main():
     timeit("Acquiring forward parameters", body_ctx, ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
     timeit("Acquiring optimizer parameters", update, ctx,
-           {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
+           {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()},
+           jnp.zeros([], dtype=ctx.model.dtype))
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},

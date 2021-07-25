@@ -53,6 +53,7 @@ class TensorboardTrace(DataClass):
     Defines a tensorboard profiling output (folder) on which a tensorboard can be run to measure RAM utilization and
     view the operation trace.
     """
+
     def __init__(self):
         self.start_step = 16
         self.stop_step = 64 + 16
@@ -62,10 +63,13 @@ class TensorboardTrace(DataClass):
 
 class Optimizer(DataClass):
     def __init__(self):
-        self.learning_rate = -1e-3
+        self.learning_rate = 1e-3
         self.gradient_clip = 0.1
         self.nesterov_momentum = True
         self.momentum_beta = 0.9
+        self.warmup_start = 0
+        self.warmup_end = 4096
+        self.exponential_decay = 1e-4
 
 
 class Initializer(DataClass):
