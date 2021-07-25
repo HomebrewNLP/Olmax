@@ -12,10 +12,10 @@ class DataClass:
 
 class DataContext(DataClass):
     def __init__(self):
-        self.path = "gs://obst-euw4a-aa/the-char-pile/*"
+        self.path = "gs://obst-euw4a-aa/the-small-chunk-char-pile/*"
         self.shuffle_buffer = 0
-        self.parallel_workers = 16
-        self.interleaved_datasets = 16
+        self.parallel_workers = 64
+        self.interleaved_datasets = 128
         self.prefetch_buffer = 1
         self.seed = 0
         self.vocab_size = 256  # should be divisible by 128
