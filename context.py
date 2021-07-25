@@ -16,6 +16,7 @@ class DataContext(DataClass):
         self.shuffle_buffer = 0
         self.parallel_workers = 128
         self.interleaved_datasets = 1024
+        self.datasets_used_per_step = self.parallel_workers
         self.prefetch_buffer = 16
         self.seed = 0
         self.vocab_size = 256  # should be divisible by 128

@@ -1,19 +1,20 @@
+import random
+
 import tensorflow as tf
 from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
 from context import Context
-import random
 
 tf1 = tf.compat.v1
 
 
-def decoder(int_string: bool, data: tf.Tensor, ctx: int):
+def decoder(int_string: bool, data: tf.Tensor, batch_prod: int):
     """
     Read a given tfrecord and windowed text dataset out of it.
     :param int_string: whether the entire dataset is in int64 or byte
     :param data: protobuf object to decode
-    :param ctx: context size of generated dataset
+    :param batch_prod: sub_batch * (context + 1)
     :return: tensorflow dataset of tokens
     """
 
@@ -23,8 +24,11 @@ def decoder(int_string: bool, data: tf.Tensor, ctx: int):
             dat = tf.cast(tf.sparse.to_dense(dat['text']), tf.int32)
         else:
             text_slice = tf1.parse_single_example(proto, {'text': tf1.FixedLenFeature([], tf.string)})['text']
-            dat = tf.reshape(tf.strings.unicode_decode(text_slice, 'UTF-8'), (-1, 1))
-        return tf.data.Dataset.from_tensor_slices(dat).batch(ctx + 1, drop_remainder=True)
+            dat = tf.strings.unicode_decode(text_slice, 'UTF-8')
+        dat = tf.reshape(dat, (-1,))
+        dat = tf.slice(dat, 0, tf.size(dat) // batch_prod * batch_prod)
+        dat = tf.reshape(dat, (-1, batch_prod))
+        return tf.data.Dataset.from_tensor_slices(dat)
 
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
 
@@ -39,17 +43,20 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     sequence_length = ctx.dims.sizes.sequence
     batch_size = ctx.dims.sizes.batch
     device_steps = ctx.training.device_steps
+    full_batch = device_steps * batch_size
+    assert full_batch % ctx.data.datasets_used_per_step
 
     def _slice_target(x):
         x = tf.cast(tf.reshape(x, (device_steps, batch_size, sequence_length + 1)), tf.int32)
         return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
 
-    dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, sequence_length),
+    dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x,
+                                             (sequence_length + 1) * full_batch // ctx.data.datasets_used_per_step),
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_workers)
     if ctx.data.shuffle_buffer > 0:
         dset = dset.shuffle(ctx.data.shuffle_buffer, seed=ctx.data.seed)
-    dset = dset.batch(device_steps * batch_size).map(_slice_target)
+    dset = dset.batch(ctx.data.datasets_used_per_step).map(_slice_target)
     if ctx.data.prefetch_buffer > 0:
         dset = dset.prefetch(ctx.data.prefetch_buffer)
     options = tf.data.Options()
