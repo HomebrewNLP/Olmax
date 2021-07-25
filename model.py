@@ -433,13 +433,17 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
     return cross_entropy_loss(body_ctx(ctx, src), tgt)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
-    ctx = ctx.add_to_prefix("optimizer")
+def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
     learning_rate *= jnp.minimum(current_step, opt.warmup_end) / opt.warmup_end
     learning_rate *= opt.exponential_decay ** relu(current_step - opt.warmup_end)
-    learning_rate = learning_rate.astype(ctx.model.dtype)
+    return learning_rate.astype(ctx.model.dtype)
+
+
+def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
+    ctx = ctx.add_to_prefix("optimizer")
+    lr = get_current_lr(ctx, current_step)
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name)
         if "optimizer" in param_name:
@@ -447,7 +451,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         grad = sm3(inner_ctx, param_name, grad)
         grad = momentum(inner_ctx, param_name, grad)
-        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * learning_rate
+        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * lr
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -531,7 +535,8 @@ def main():
             if idx % ctx.training.print_interval == 0:
                 print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
                       f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
-                      f'Took: {time.time() - start_time:9.6f}s')
+                      f'LearningRate: {get_current_lr(ctx, wctx.current_step):.5f} - '
+                      f'Took: {time.time() - start_time:10.6f}s')
                 start_time = time.time()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
