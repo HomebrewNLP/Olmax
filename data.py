@@ -47,7 +47,17 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     assert not(full_batch % ctx.data.datasets_used_per_step)
 
     def _slice_target(x):
-        x = tf.cast(tf.reshape(x, (device_steps, batch_size, sequence_length + 1)), tf.int32)
+        """
+        We're transposing here to ensure that the sampled data is balanced not only between batches but also within
+        the batch.
+        With 2 data loaders and a batch of 4, you'd have [[1, 1, 1, 1], [2, 2, 2, 2]] as returned sample without it and
+        [[1, 2, 1, 2], [1, 2, 1, 2]] with it.
+        :param x: tensor that's sliced
+        :return: src/tgt
+        """
+        x = tf.reshape(x, (batch_size, device_steps, sequence_length + 1))
+        x = tf.cast(x, tf.int32)
+        x = tf.transpose(x, (1, 0, 2))
         return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
 
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x,
