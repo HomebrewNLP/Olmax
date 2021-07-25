@@ -537,6 +537,11 @@ def main():
                       f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
                       f'Took: {time.time() - start_time:9.6f}s')
                 start_time = time.time()
+            if ctx.training.trace.do_trace:
+                if idx == ctx.training.trace.start_step:
+                    jax.profiler.start_trace(ctx.training.trace.start_step)
+                if idx == ctx.training.trace.stop_step:
+                    jax.profiler.stop_trace()
 
 
 if __name__ == '__main__':

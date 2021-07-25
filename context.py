@@ -47,6 +47,18 @@ class Dims(DataClass):
         self.sizes = DimSizes(data, group_linear_factor)
 
 
+class TensorboardTrace(DataClass):
+    """
+    Defines a tensorboard profiling output (folder) on which a tensorboard can be run to measure RAM utilization and
+    view the operation trace.
+    """
+    def __init__(self):
+        self.start_step = 16
+        self.stop_step = 64 + 16
+        self.do_trace = False
+        self.output_path = "trace"
+
+
 class Optimizer(DataClass):
     def __init__(self):
         self.learning_rate = -1e-3
@@ -79,6 +91,7 @@ class Training(DataClass):
         self.model_parallel = 8
         self.data_parallel = 1
         self.print_interval = 1
+        self.trace = TensorboardTrace()
 
 
 def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
