@@ -26,7 +26,7 @@ def decoder(int_string: bool, data: tf.Tensor, batch_prod: int):
             text_slice = tf1.parse_single_example(proto, {'text': tf1.FixedLenFeature([], tf.string)})['text']
             dat = tf.strings.unicode_decode(text_slice, 'UTF-8')
         dat = tf.reshape(dat, (-1,))
-        dat = tf.slice(dat, 0, tf.size(dat) // batch_prod * batch_prod)
+        dat = tf.slice(dat, (0,), (tf.size(dat) // batch_prod * batch_prod,))
         dat = tf.reshape(dat, (-1, batch_prod))
         return tf.data.Dataset.from_tensor_slices(dat)
 
