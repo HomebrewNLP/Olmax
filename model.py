@@ -10,7 +10,6 @@ import numpy as np
 from jax import lax, numpy as jnp, random
 from jax.experimental import PartitionSpec
 from jax.experimental import pjit
-from jax.experimental.compilation_cache import compilation_cache
 from jax.experimental.maps import mesh
 from jax.scipy.special import expit as sigmoid
 
@@ -18,7 +17,6 @@ from context import Context, WhileTrainContext
 from data import text_dataset
 
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
-compilation_cache.initialize_cache("compilation_cache")
 
 
 # jax.config.update("jax_disable_jit", True)
