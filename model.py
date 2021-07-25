@@ -439,6 +439,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
     learning_rate = opt.learning_rate
     learning_rate *= jnp.minimum(current_step, opt.warmup_end) / opt.warmup_end
     learning_rate *= opt.exponential_decay ** relu(current_step - opt.warmup_end)
+    learning_rate = learning_rate.astype(ctx.model.dtype)
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name)
         if "optimizer" in param_name:
