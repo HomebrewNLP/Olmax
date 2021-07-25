@@ -58,7 +58,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     options.experimental_optimization.autotune_buffers = True
     options.experimental_optimization.filter_fusion = True
     options.experimental_optimization.map_and_batch_fusion = True
-    options.experimental_optimization.map_and_filter_fusion = False
+    options.experimental_optimization.map_and_filter_fusion = True
     options.experimental_optimization.map_fusion = True
     options.experimental_optimization.map_parallelization = True
     options.experimental_optimization.noop_elimination = True
