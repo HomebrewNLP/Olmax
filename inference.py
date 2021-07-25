@@ -8,8 +8,8 @@ from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
 from context import Context, WhilePredictContext
-
 from model import body_ctx, sharding, one_hot
+
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhilePredictContext(while_ctx_dict)
@@ -69,6 +69,7 @@ def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp
 
     return wctx.data, wctx.ctx.parameters
 
+
 class Infrerence_Model():
     def __init__(self, ctx: Context):
         ctx.initializing = True
@@ -80,8 +81,9 @@ class Infrerence_Model():
 
         partition = {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()}
         self.step = pjit.pjit(jitless_prediction_step,
-                         in_axis_resources=(partition, PartitionSpec("data_parallel", None), None, None, None, None),
-                         out_axis_resources=(PartitionSpec(None, None), partition))
+                              in_axis_resources=(
+                              partition, PartitionSpec("data_parallel", None), None, None, None, None),
+                              out_axis_resources=(PartitionSpec(None, None), partition))
         self.mesh_devices = np.array(jax.devices()).reshape(ctx.data_parallel, ctx.model_parallel)
 
         self.compleat(dumy_data,
@@ -90,13 +92,11 @@ class Infrerence_Model():
                       np.zeros((ctx.dims.dim_sizes[ctx.dims.batch])),
                       np.array([ctx.dims.dim_sizes[ctx.dims.batch]] * ctx.dims.dim_sizes[ctx.dims.vocab]))
 
-
     def compleat(self, promt: np.array,
                  sampling_temperature: np.array,
                  top_n: np.array,
                  start_pos: np.array,
                  stop_pos: np.array) -> np.array:
-
         with mesh(self.mesh_devices, ('data_parallel', 'model_parallel')):
             out, _ = self.step(self.parameters, promt, sampling_temperature, top_n, start_pos, stop_pos)
 

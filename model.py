@@ -539,7 +539,7 @@ def main():
                 start_time = time.time()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
-                    jax.profiler.start_trace(ctx.training.trace.start_step)
+                    jax.profiler.start_trace(ctx.training.trace.output_path)
                 if idx == ctx.training.trace.stop_step:
                     jax.profiler.stop_trace()
 

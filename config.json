@@ -1,0 +1,4 @@
+{
+  "training":  {"trace":  {"do_trace":  true}},
+  "model":  {"depth":  4}
+}

@@ -180,9 +180,9 @@ class WhilePredictContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
 
-        batch_dim_size = self.ctx.dims.dim_sizes[self.ctx.dims.batch]
-        sequence_dim_size = self.ctx.dims.dim_sizes[self.ctx.dims.sequence]
-        vocab_dim_size = self.ctx.dims.dim_sizes[self.ctx.dims.vocab]
+        batch_dim_size = self.ctx.dims.sizes.batch
+        sequence_dim_size = self.ctx.dims.sizes.sequence
+        vocab_dim_size = self.ctx.dims.sizes.vocab
 
         self.start_pos = jnp.zeros([batch_dim_size])
         self.stop_pos = jnp.array([sequence_dim_size] * batch_dim_size)[0]
