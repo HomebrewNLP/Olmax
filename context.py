@@ -14,17 +14,17 @@ class DataContext(DataClass):
     def __init__(self):
         self.path = "gs://obst-euw4a-aa/the-char-pile/*"
         self.shuffle_buffer = 0
-        self.parallel_workers = None
-        self.interleaved_datasets = 1
-        self.prefetch_buffer = 0
+        self.parallel_workers = 16
+        self.interleaved_datasets = 16
+        self.prefetch_buffer = 1
         self.seed = 0
         self.vocab_size = 256  # should be divisible by 128
 
 
 class DimSizes(DataClass):
-    def __init__(self, data: DataContext, group_linear_factor=2):
-        self.batch = 512
-        self.features_per_head = 128
+    def __init__(self, data: DataContext, group_linear_factor):
+        self.batch = 256
+        self.features_per_head = 512
         self.heads = 8
         self.sequence = 256
         self.vocab = data.vocab_size
@@ -36,7 +36,7 @@ class DimSizes(DataClass):
 
 
 class Dims(DataClass):
-    def __init__(self, data: DataContext):
+    def __init__(self, data: DataContext, group_linear_factor: int):
         self.batch = "batch"
         self.features_per_head = "features_per_head"
         self.heads = "heads"
@@ -44,7 +44,7 @@ class Dims(DataClass):
         self.intermediate_feed_forward = "intermediate_feed_forward"
         self.one = "one"
         self.vocab = "vocab"
-        self.sizes = DimSizes(data)
+        self.sizes = DimSizes(data, group_linear_factor)
 
 
 class Optimizer(DataClass):
@@ -66,7 +66,7 @@ class Model(DataClass):
     def __init__(self):
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
-        self.depth = 8
+        self.depth = 4
         self.masked_attention = True
         self.dtype = jnp.bfloat16
         self.initializer = Initializer()
@@ -74,7 +74,7 @@ class Model(DataClass):
 
 class Training(DataClass):
     def __init__(self):
-        self.device_steps = 16
+        self.device_steps = 256
         self.steps = 2 ** 16
         self.model_parallel = 8
         self.data_parallel = 1
@@ -94,9 +94,9 @@ def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
 class Context(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.data = DataContext()
-        self.dims = Dims(self.data)
         self.optimizer = Optimizer()
         self.model = Model()
+        self.dims = Dims(self.data, self.model.group_linear_factor)
         self.training = Training()
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.json'):
@@ -127,7 +127,6 @@ class Context(DataClass):
             self.name_cache[name] = -1
         self.name_cache[name] += 1
         return f'{name}:{self.name_cache[name]:d}'
-
 
 
 class WhileContext(DataClass):
