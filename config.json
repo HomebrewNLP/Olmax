@@ -1,4 +1,24 @@
 {
-  "training":  {"trace":  {"do_trace":  true}},
-  "model":  {"depth":  4}
+  "training": {
+    "trace": {
+      "start_step": 2,
+      "stop_step": 8,
+      "do_trace": false
+    },
+    "device_steps": 128
+  },
+
+  "model": {
+    "depth": 4
+  },
+
+  "dims": {
+    "sizes": {
+      "batch": 2048
+    }
+  },
+
+  "data": {
+    "prefetch_buffer": 32
+  }
 }
