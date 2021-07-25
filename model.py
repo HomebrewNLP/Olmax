@@ -175,28 +175,6 @@ def base_spec(inp: jnp.ndarray) -> str:
     return ''.join(chr(ord('a') + i) for i in range(inp.ndim))
 
 
-def linear(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("linear")
-    if inp.ndim == 3:
-        shape = [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head]
-        head_dim = None
-        column_axis = 0
-        r_start = 0
-        r_end = None
-        l_start = inp.ndim - 1
-        l_end = None
-    else:
-        shape = [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
-        r_start = 0
-        r_end = 1
-        l_start = inp.ndim - 2
-        l_end = inp.ndim - 1
-        head_dim = -2
-        column_axis = -1
-    return shard(dot_product(inp, get_param(ctx, "weight", shape, column_axis=column_axis),
-                             l_start, r_start, l_end, r_end), head_dim)
-
-
 def relu(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.maximum(inp, 0)
 
@@ -218,6 +196,8 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1])
+    if ctx.is_initializing:
+        return inp
     mid = shard(dot_general(inp, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1)
     mid = mish(mid)
     out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
@@ -231,10 +211,15 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    embd = get_param(ctx, "weight", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
-                     ctx.model.initializer.embedding_std)
-    out = shard(dot_product(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), embd, -1, 0), None)
-    out = linear(ctx, relu(out))
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
+                         ctx.model.initializer.embedding_std)
+    out_embd = get_param(ctx, "out_embd",
+                         [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head])
+    if ctx.is_initializing:
+        return jnp.zeros([1] * (inp.ndim + 1))
+
+    out = shard(dot_product(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd, -1, 0), None)
+    out = shard(dot_product(relu(out), out_embd, -1, 0))
 
     position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
     feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
@@ -251,6 +236,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
     embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab])
+    if ctx.is_initializing:
+        return inp
     return shard(dot_product(inp, embd, -2, 0, -1, 1), None)
 
 
@@ -269,7 +256,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
         ctx.name_cache = new_ctx.name_cache
         return out
 
-    if ctx.parameter_dims:
+    if ctx.is_initializing:
         def _fn(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
             params, x00, x01, x10, x11 = inp
             new_ctx = ctx.add_to_prefix("reversible")
@@ -279,7 +266,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
             ctx.parameter_dims = new_ctx.parameter_dims
             ctx.name_cache = new_ctx.name_cache
             ctx.prng_key = new_ctx.prng_key
-            return new_ctx.parameters, x10, x11, x00 + out, x01
+            return new_ctx.parameters, x10, x11, out, x01
 
         return _fn
 
@@ -381,16 +368,22 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward])
     attn_params = [get_param(ctx, name, [ctx.dims.intermediate_feed_forward] + feature_dims)
                    for name in ("key", "query", "value")]
+    if ctx.is_initializing:
+        return inp
     return shard(attention_op(inp, base_param, *attn_params, ctx.model.masked_attention))
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("instance_norm")
     shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, get_feature_dim(ctx, inp)]
+    scale = get_param(ctx, "scale", shape, ctx.model.initializer.norm_std, 1)
+    shift = get_param(ctx, "shift", shape, ctx.model.initializer.norm_std)
+    if ctx.is_initializing:
+        return inp
+
     inp = inp - shard(inp.mean(-1, keepdims=True), None)
-    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(inp).mean(-1, keepdims=True), None))
-    scale = scale * get_param(ctx, "scale", shape, ctx.model.initializer.norm_std, 1)
-    return scale * inp + get_param(ctx, "shift", shape, ctx.model.initializer.norm_std)
+    inp = inp * scale * lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(inp).mean(-1, keepdims=True), None))
+    return inp + shift
 
 
 def exec_fn(*fns: typing.Callable) -> typing.Callable:
@@ -433,15 +426,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     return output_embed(ctx, src)
 
 
-def compute_ctx(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    src, tgt = inp
-    return cross_entropy_loss(body_ctx(ctx, src), tgt)
-
-
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
     ctx = Context()
     ctx.parameters = params
-    return compute_ctx(ctx, inp)
+    src, tgt = inp
+    return cross_entropy_loss(body_ctx(ctx, src), tgt)
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray]):
@@ -511,10 +500,11 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
 def main():
     wctx = WhileTrainContext()
     ctx = wctx.ctx
+    ctx.is_initializing = True
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
-    inp = timeit("Enqueueing first batch", next, data)[0]
-    timeit("Acquiring forward parameters", compute_ctx, ctx, inp)
+    inp = timeit("Enqueueing first batch", next, data)[0, 0]
+    timeit("Acquiring forward parameters", body_ctx, ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
     timeit("Acquiring optimizer parameters", update, ctx,
            {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})

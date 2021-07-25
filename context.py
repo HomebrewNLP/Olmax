@@ -124,6 +124,7 @@ class Context(DataClass):
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
         self.prng_key = random.PRNGKey(self.seed)
+        self.is_initializing = False
 
         if config is not None:
             self.__dict__.update(config)
