@@ -54,8 +54,8 @@ def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
 
 
 def dot_general(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: typing.Sequence[int],
-                right_contract_dims: typing.Sequence[int], left_batch_dims: typing.Sequence[int],
-                right_batch_dims: typing.Sequence[int]) -> jnp.ndarray:
+                right_contract_dims: typing.Sequence[int], left_batch_dims: typing.Sequence[int] = tuple(),
+                right_batch_dims: typing.Sequence[int] = tuple()) -> jnp.ndarray:
     dims = ((left_contract_dims, right_contract_dims), (left_batch_dims, right_batch_dims))
     return lax.dot_general(left, right, dims, "fastest")
 
@@ -179,17 +179,6 @@ def relu(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.maximum(inp, 0)
 
 
-@jax.custom_gradient
-def mish(inp: jnp.ndarray):
-    gate = jnp.tanh(jnp.logaddexp(inp, 0))
-    grad = gate + inp * sigmoid(inp) * (1 - jnp.square(gate))
-
-    def grad_fn(g):
-        return grad * g
-
-    return gate * inp, grad_fn
-
-
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     ndim = inp.ndim
@@ -198,10 +187,31 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1])
     if ctx.is_initializing:
         return inp
-    mid = shard(dot_general(inp, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1)
-    mid = mish(mid)
-    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
-    return shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
+
+    transpose = tuple(range(1, ndim - 1)) + (0, ndim - 1)
+    batch_seq_1 = tuple(range(1, ndim - 1))
+
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray, i_w: jnp.ndarray, o_w: jnp.ndarray):
+        mid = shard(dot_general(src, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1)
+        out = shard(dot_general(relu(mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+        out = shard(out.transpose(transpose))
+
+        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+            dy_t = dy.transpose(transpose)
+            r_mid = relu(mid)
+            o_w_grad = dot_general(r_mid, dy_t, batch_seq_1, batch_seq_1, (0,), (0,))
+            d_mid = dot_general(dy_t, out_weight, (dy_t.ndim - 1,), (2,), (0,), (0,))
+            d_mid = d_mid * jnp.greater(mid, 0).astype(ctx.model.dtype)
+            d_mid = d_mid.transpose(transpose)
+            i_w_grad = dot_general(d_mid, src, batch_seq_1, batch_seq_1, (0,), (0,))
+            d_src = dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,))
+            d_src = d_src.transpose(transpose)
+            return d_src, i_w_grad, o_w_grad
+
+        return out, _grad_fn
+
+    return _fn(inp, inp_weight, out_weight)
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
@@ -296,8 +306,15 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     return reversible_half_residual
 
 
-def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarray, qry_param: jnp.ndarray,
-                 val_param: jnp.ndarray, masked_attention: bool) -> jnp.ndarray:
+def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("attention")
+    feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
+    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward])
+    attn_params = [get_param(ctx, name, [ctx.dims.intermediate_feed_forward] + feature_dims)
+                   for name in ("key", "query", "value")]
+    if ctx.is_initializing:
+        return src
+
     batch_dims = tuple(range(src.ndim - 3))
     head_dim = src.ndim - 2
     feature_dim = src.ndim - 1
@@ -306,9 +323,7 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
     key_permute = batch_dims + (head_dim, sequence_dim, feature_dim)
     qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
     batch_seq = batch_dims + (sequence_dim,)
-    tp = tuple()
 
-    # TODO: Add sharding, annotate shapes, test code, maybe do gradient checkpointing?
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, b_p: jnp.ndarray, k_p: jnp.ndarray, q_p: jnp.ndarray, v_p: jnp.ndarray):
         base = relu(shard(dot_product(inp, b_p, -2, 0, -1, 1), None))  # batch, seq, feat
@@ -321,7 +336,7 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
         qry = shard(qry.transpose(qry_permute), -3)
 
         lgt = shard(dot_general(key, qry, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
-        if masked_attention:
+        if ctx.model.masked_attention:
             ones = (1,) * (lgt.ndim - 2)
             arange = jnp.arange(0, lgt.shape[-1])
             mask: jnp.ndarray = jnp.greater(jnp.reshape(arange, ones + (1, -1)), jnp.reshape(arange, ones + (-1, 1)))
@@ -343,34 +358,23 @@ def attention_op(src: jnp.ndarray, base_param: jnp.ndarray, key_param: jnp.ndarr
             qry_grad = shard(dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq), -3)
             key_grad = shard(dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq), -3)
 
-            k_p_grad = shard(dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,), tp, tp), 1, None)
-            q_p_grad = shard(dot_general(base, qry_grad, batch_seq, batch_dims + (head_dim,), tp, tp), 1, None)
-            v_p_grad = shard(dot_general(base, val_grad, batch_seq, batch_dims + (feature_dim,), tp, tp), 1, None)
+            k_p_grad = shard(dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,)), 1, None)
+            q_p_grad = shard(dot_general(base, qry_grad, batch_seq, batch_dims + (head_dim,)), 1, None)
+            v_p_grad = shard(dot_general(base, val_grad, batch_seq, batch_dims + (feature_dim,)), 1, None)
 
-            base_grad = shard(dot_general(key_grad, k_p, (sequence_dim, feature_dim), (1, 2), tp, tp), None)
-            base_grad += shard(dot_general(qry_grad, q_p, (sequence_dim, feature_dim), (1, 2), tp, tp), None)
-            base_grad += shard(dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2), tp, tp), None)
+            base_grad = shard(dot_general(key_grad, k_p, (sequence_dim, feature_dim), (1, 2)), None)
+            base_grad += shard(dot_general(qry_grad, q_p, (sequence_dim, feature_dim), (1, 2)), None)
+            base_grad += shard(dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2)), None)
 
-            base_grad = jnp.where(base > 0, base_grad, shard(jnp.zeros_like(base_grad), None))
-            inp_grad = shard(dot_general(base_grad, b_p, (head_dim,), (2,), tp, tp))
-            b_p_grad = shard(dot_general(inp, base_grad, batch_seq, batch_seq, tp, tp), 0, None)
+            base_grad = base_grad * jnp.greater(base, 0).astype(ctx.model.dtype)
+            inp_grad = shard(dot_general(base_grad, b_p, (head_dim,), (2,)))
+            b_p_grad = shard(dot_general(inp, base_grad, batch_seq, batch_seq), 0, None)
 
             return inp_grad, b_p_grad, k_p_grad, q_p_grad, v_p_grad
 
         return out, grad_fn
 
-    return _fn(src, base_param, key_param, qry_param, val_param)
-
-
-def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("attention")
-    feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward])
-    attn_params = [get_param(ctx, name, [ctx.dims.intermediate_feed_forward] + feature_dims)
-                   for name in ("key", "query", "value")]
-    if ctx.is_initializing:
-        return inp
-    return shard(attention_op(inp, base_param, *attn_params, ctx.model.masked_attention))
+    return shard(_fn(src, base_param, *attn_params))
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
