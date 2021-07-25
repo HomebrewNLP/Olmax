@@ -67,7 +67,6 @@ class Optimizer(DataClass):
         self.gradient_clip = 0.1
         self.nesterov_momentum = True
         self.momentum_beta = 0.9
-        self.warmup_start = 0
         self.warmup_end = 4096
         self.exponential_decay = 1e-4
 

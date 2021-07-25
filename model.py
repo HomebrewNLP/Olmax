@@ -436,8 +436,8 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
 def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
-    learning_rate *= jnp.minimum(current_step, opt.warmup_end) / opt.warmup_end
-    learning_rate *= (1 - opt.exponential_decay) ** relu(current_step - opt.warmup_end)
+    learning_rate *= jnp.minimum(current_step, opt.warmup_end).astype(jnp.float32) / opt.warmup_end
+    learning_rate *= (1 - opt.exponential_decay) ** relu(current_step.astype(jnp.float32) - opt.warmup_end)
     return learning_rate.astype(ctx.model.dtype)
 
 
@@ -535,7 +535,7 @@ def main():
             if idx % ctx.training.print_interval == 0:
                 print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
                       f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
-                      f'LearningRate: {get_current_lr(ctx, wctx.current_step):.5f} - '
+                      f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} - '
                       f'Took: {time.time() - start_time:10.6f}s')
                 start_time = time.time()
             if ctx.training.trace.do_trace:
