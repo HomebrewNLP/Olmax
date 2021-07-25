@@ -14,9 +14,9 @@ class DataContext(DataClass):
     def __init__(self):
         self.path = "gs://obst-euw4a-aa/the-small-chunk-char-pile/*"
         self.shuffle_buffer = 0
-        self.parallel_workers = 64
-        self.interleaved_datasets = 128
-        self.prefetch_buffer = 1
+        self.parallel_workers = 128
+        self.interleaved_datasets = 1024
+        self.prefetch_buffer = 16
         self.seed = 0
         self.vocab_size = 256  # should be divisible by 128
 
@@ -50,7 +50,7 @@ class Dims(DataClass):
 class Optimizer(DataClass):
     def __init__(self):
         self.learning_rate = -1e-3
-        self.gradient_clip = 5e-3
+        self.gradient_clip = 0.1
         self.nesterov_momentum = True
         self.momentum_beta = 0.9
 
@@ -74,7 +74,7 @@ class Model(DataClass):
 
 class Training(DataClass):
     def __init__(self):
-        self.device_steps = 256
+        self.device_steps = 1024
         self.steps = 2 ** 16
         self.model_parallel = 8
         self.data_parallel = 1
