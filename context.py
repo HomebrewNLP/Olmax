@@ -66,7 +66,7 @@ class Model(DataClass):
     def __init__(self):
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
-        self.depth = 4
+        self.depth = 32
         self.masked_attention = True
         self.dtype = jnp.bfloat16
         self.initializer = Initializer()
