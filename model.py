@@ -201,7 +201,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             r_mid = relu(mid)
             o_w_grad = dot_general(r_mid, dy, batch_seq_1, batch_seq, (0,), (2,))
-            d_mid = dot_general(dy, out_weight, (ndim - 1,), (2,), (ndim - 2,), (0,))
+            d_mid = dot_general(dy, o_w, (ndim - 1,), (2,), (ndim - 2,), (0,))
             d_mid = d_mid * jnp.greater(mid, 0).astype(ctx.model.dtype)
             i_w_grad = dot_general(src, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,))
             d_src = dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,))
