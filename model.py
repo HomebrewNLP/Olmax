@@ -11,7 +11,6 @@ from jax import lax, numpy as jnp, random
 from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
-from jax.scipy.special import expit as sigmoid
 
 from context import Context, WhileTrainContext
 from data import text_dataset
