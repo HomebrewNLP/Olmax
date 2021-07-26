@@ -255,15 +255,6 @@ REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.nd
 def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     name_cache = copy.deepcopy(ctx.name_cache)
 
-    def base(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> jnp.ndarray:
-        params, inp = inp
-        ctx.name_cache = copy.deepcopy(name_cache)
-        new_ctx = ctx.add_to_prefix("reversible")
-        new_ctx.parameters = params
-        out = fn(new_ctx, inp)
-        ctx.name_cache = new_ctx.name_cache
-        return out
-
     if ctx.is_initializing:
         def _fn(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
             params, x00, x01, x10, x11 = inp
@@ -277,6 +268,15 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
             return new_ctx.parameters, x10, x11, out, x01
 
         return _fn
+
+    def base(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> jnp.ndarray:
+        params, inp = inp
+        ctx.name_cache = copy.deepcopy(name_cache)
+        new_ctx = ctx.add_to_prefix("reversible")
+        new_ctx.parameters = params
+        out = fn(new_ctx, inp)
+        ctx.name_cache = new_ctx.name_cache
+        return out
 
     @jax.custom_vjp
     def reversible_half_residual(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
