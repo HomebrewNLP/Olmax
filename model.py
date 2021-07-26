@@ -419,7 +419,8 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     src = input_embed(ctx, src)
-    src = (ctx.parameters, src, src, src, src)
+    zero = jnp.zeros_like(src)
+    src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.model.depth):
         is_last = (i + 1) == ctx.model.depth
         src = reversible(ctx, exec_fn(instance_norm, attention), is_last)(src)
