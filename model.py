@@ -293,7 +293,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             norm_out = (src - mean) * scale
             e_w_grad = shard(dot_general(norm_out, dy, batch_dims, batch_dims), 0, None)
-            inp_grad = shard(dot_general(dy, e_w, (ndim - 1,), (1,)))
+            inp_grad = shard(dot_general(dy, e_w, (ndim - 2,), (2,)))
             inp_grad = instance_norm_backward(inp_grad, src, norm_out)
             return inp_grad, e_w_grad
 
