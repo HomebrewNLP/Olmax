@@ -192,7 +192,7 @@ def instance_norm_backward(dy: jnp.ndarray, src: jnp.ndarray, out: jnp.ndarray) 
     out_scaled = out * (-1 / src.shape[-1])
 
     dx = dy
-    dx += shard(out.sum(-1, keepdims=True), -2)
+    dx += shard(out_scaled.sum(-1, keepdims=True), -2)
     tmp = shard(dot_general(dy, out_scaled, (ndim - 1,), (ndim - 1,), batch_dims, batch_dims), -1)
     dx += dy * shard(lax.broadcast_in_dim(tmp, tmp.shape + (1,), batch_dims))
     dx *= src
