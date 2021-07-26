@@ -185,18 +185,10 @@ def instance_norm_forward(ctx: Context, src: jnp.ndarray) -> typing.Tuple[jnp.nd
     return mid * scale, mean, scale
 
 
-def instance_norm_backward(dy: jnp.ndarray, src: jnp.ndarray, out: jnp.ndarray) -> jnp.ndarray:
-    ndim = src.ndim
-    batch_dims = tuple(range(0, ndim - 1))
-
-    out_scaled = out * (-1 / src.shape[-1])
-
-    dx = dy
-    dx += shard(out_scaled.sum(-1, keepdims=True), -2)
-    tmp = shard(dot_general(dy, out_scaled, (ndim - 1,), (ndim - 1,), batch_dims, batch_dims), -1)
-    dx += dy * shard(lax.broadcast_in_dim(tmp, tmp.shape + (1,), batch_dims))
-    dx *= src
-    return dx
+def instance_norm_backward(dy: jnp.ndarray, src: jnp.ndarray, x_mean: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
+    dy *= scale / src.shape[-1]
+    dx1 = dy - x_mean / src.shape[-1] * scale ** 2 * jnp.sum(dy * x_mean, -1, keepdims=True)
+    return dx1 - jnp.sum(dx1, -1, keepdims=True)
 
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -218,15 +210,15 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         mid = relu(shard(dot_general(mid, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
 
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            norm_out = (src - mean) * scale
+            x_mean = src - mean
 
             o_w_grad = dot_general(mid, dy, batch_seq_1, batch_seq, (0,), (2,))
             d_mid = dot_general(dy, o_w, (ndim - 1,), (2,), (ndim - 2,), (0,))
             d_mid = d_mid * jnp.greater(mid, 0).astype(ctx.model.dtype)
-            i_w_grad = dot_general(norm_out, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,))
+            i_w_grad = dot_general(x_mean * scale, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,))
             d_mid = dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,))
             d_mid = d_mid.transpose(transpose)
-            return instance_norm_backward(d_mid, src, norm_out), i_w_grad, o_w_grad
+            return instance_norm_backward(d_mid, src, x_mean, scale), i_w_grad, o_w_grad
 
         out = shard(dot_general(relu(mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
         out = shard(out.transpose(transpose))
@@ -291,10 +283,10 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         out, mean, scale = instance_norm_forward(ctx, src)
 
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            norm_out = (src - mean) * scale
-            e_w_grad = shard(dot_general(norm_out, dy, batch_dims, batch_dims), 0, None)
+            x_mean = src - mean
+            e_w_grad = shard(dot_general(x_mean * scale, dy, batch_dims, batch_dims), 0, None)
             inp_grad = shard(dot_general(dy, e_w, (ndim - 2,), (2,)))
-            inp_grad = instance_norm_backward(inp_grad, src, norm_out)
+            inp_grad = instance_norm_backward(inp_grad, src, x_mean, scale)
             return inp_grad, e_w_grad
 
         return shard(dot_product(out, e_w, -2, 0, -1, 1), None), _grad_fn
@@ -420,10 +412,10 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
 
             base_grad = base_grad * jnp.greater(base, 0).astype(ctx.model.dtype)
 
-            norm_out = (inp - mean) * scale
-            b_p_grad = shard(dot_general(norm_out, base_grad, batch_seq, batch_seq), 0, None)
+            x_mean = inp - mean
+            b_p_grad = shard(dot_general(x_mean * scale, base_grad, batch_seq, batch_seq), 0, None)
             inp_grad = shard(dot_general(base_grad, b_p, (head_dim,), (2,)))
-            inp_grad = instance_norm_backward(inp_grad, inp, norm_out)
+            inp_grad = instance_norm_backward(inp_grad, inp, x_mean, scale)
 
             return inp_grad, b_p_grad, k_p_grad, q_p_grad, v_p_grad
 
