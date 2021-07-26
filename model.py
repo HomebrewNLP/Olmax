@@ -194,12 +194,11 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, i_w: jnp.ndarray, o_w: jnp.ndarray):
-        mid = shard(dot_general(src, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1)
+        mid = relu(shard(dot_general(src, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
         out = shard(dot_general(relu(mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
         out = shard(out.transpose(transpose))
 
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            r_mid = relu(mid)
             o_w_grad = dot_general(r_mid, dy, batch_seq_1, batch_seq, (0,), (2,))
             d_mid = dot_general(dy, o_w, (ndim - 1,), (2,), (ndim - 2,), (0,))
             d_mid = d_mid * jnp.greater(mid, 0).astype(ctx.model.dtype)
