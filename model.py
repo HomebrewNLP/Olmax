@@ -225,20 +225,34 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
                          [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head])
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
+    batch_dims = inp.shape
+    ndim = inp.ndim + 2
 
-    out = shard(dot_product(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd, -1, 0), None)
-    out = shard(dot_product(relu(out), out_embd, -1, 0))
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray, i_e: jnp.ndarray, o_e: jnp.ndarray):
+        mid = relu(shard(dot_product(one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype), i_e, -1, 0), None))
 
-    position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
-    feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
-    position_count = util.prod(position_shape)
-    feature_count = util.prod(feature_shape)
-    positions = jnp.reshape(jnp.arange(0, position_shape), (-1, 1, 1))
-    features = jnp.arange(0, feature_count)
-    features = shard(jnp.reshape(features, [1] + feature_shape) * 4 / feature_count, 1, None)
-    features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 1))
-    pos_embd = lax.stop_gradient(jnp.sin(features * positions) * ctx.model.initializer.embedding_std).astype(out.dtype)
-    return out + pos_embd
+        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[None, jnp.ndarray, jnp.ndarray]:
+            one_hot_src = one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype)
+            o_e_grad = dot_general(mid, dy, batch_dims, batch_dims)
+            mid_grad = dot_general(dy, o_e, (1, 2), (ndim - 1, ndim - 2)) * jnp.greater(mid, 0)
+            i_e_grad = dot_general(one_hot_src, mid_grad, batch_dims, batch_dims)
+            return None, i_e_grad, o_e_grad
+
+        out = shard(dot_product(mid, o_e, -1, 0))
+        position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
+        feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
+        position_count = util.prod(position_shape)
+        feature_count = util.prod(feature_shape)
+        positions = jnp.reshape(jnp.arange(0, position_shape), (-1, 1, 1))
+        features = jnp.arange(0, feature_count)
+        features = shard(jnp.reshape(features, [1] + feature_shape) * 4 / feature_count, 1, None)
+        features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 1))
+        pos_embd = jnp.sin(features * positions) * ctx.model.initializer.embedding_std
+
+        return out + pos_embd.astype(out.dtype), _grad_fn
+
+    return _fn(inp, inp_embd, out_embd)
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
