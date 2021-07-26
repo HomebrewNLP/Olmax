@@ -186,8 +186,10 @@ def instance_norm_forward(ctx: Context, src: jnp.ndarray) -> typing.Tuple[jnp.nd
 
 
 def instance_norm_backward(dy: jnp.ndarray, src: jnp.ndarray, x_mean: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-    dy *= scale / src.shape[-1]
-    dx1 = dy - x_mean / src.shape[-1] * scale ** 2 * jnp.sum(dy * x_mean, -1, keepdims=True)
+    scale_n = scale / src.shape[-1]
+    scale_n_square = scale_n * scale
+    dy *= scale_n
+    dx1 = dy - x_mean * scale_n_square * jnp.sum(dy * x_mean, -1, keepdims=True)
     return dx1 - jnp.sum(dx1, -1, keepdims=True)
 
 
