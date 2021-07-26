@@ -258,7 +258,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[None, jnp.ndarray, jnp.ndarray]:
             one_hot_src = one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype)
             o_e_grad = dot_general(mid, dy, batch_dims, batch_dims)
-            mid_grad = dot_general(dy, o_e, (ndim - 1, ndim - 2), (1, 2)) * jnp.greater(mid, 0)
+            mid_grad = dot_general(dy, o_e, (ndim - 2, ndim - 1), (1, 2)) * jnp.greater(mid, 0)
             i_e_grad = dot_general(one_hot_src, mid_grad, batch_dims, batch_dims)
             return None, i_e_grad, o_e_grad
 
