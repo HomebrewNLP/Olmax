@@ -395,7 +395,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
             dx = dy
             dx += shard(out.sum(-1, keepdims=True), -2)
             tmp = shard(dot_general(dy, out_scaled, (ndim - 1,), (ndim - 1,), batch_dims, batch_dims), -1)
-            dx += dy * shard(lax.broadcast(tmp, tmp.shape + (1,)))
+            dx += dy * shard(lax.broadcast_in_dim(tmp, tmp.shape + (1,), tuple(range(ndim))))
             dx *= src
             return dx
 
