@@ -376,16 +376,32 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("instance_norm")
-    shape = ["one"] * (inp.ndim - 2) + [ctx.dims.heads, ctx.dims.features_per_head]
-    scale = get_param(ctx, "scale", shape, ctx.model.initializer.norm_std, 1)
-    shift = get_param(ctx, "shift", shape, ctx.model.initializer.norm_std)
     if ctx.is_initializing:
         return inp
 
-    inp = inp - shard(inp.mean(-1, keepdims=True), None)
-    inp = inp * scale * lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(inp).mean(-1, keepdims=True), None))
-    return inp + shift
+    ndim = inp.ndim
+    batch_dims = tuple(range(0, ndim - 1))
+
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray):
+        mean = shard(src.mean(-1, keepdims=True), None)
+        mid = src - mean
+        scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(mid).mean(-1, keepdims=True), None))
+
+        def _grad_fn(dy: jnp.ndarray) -> jnp.ndarray:
+            out = (src - mean) * scale
+            out_scaled = out * (-1 / src.shape[-1])
+
+            dx = dy
+            dx += shard(out.sum(-1, keepdim=True))
+            tmp = dot_general(dy, out_scaled, (ndim - 1,), (ndim - 1,), batch_dims, batch_dims)
+            dx += dy * lax.broadcast(tmp, tmp.shape + (1,))
+            dx *= src
+            return dx
+
+        return mid * scale, _grad_fn
+
+    return _fn(inp)
 
 
 def exec_fn(*fns: typing.Callable) -> typing.Callable:
