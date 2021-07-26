@@ -248,7 +248,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
                          [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head])
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
-    batch_dims = inp.shape
+    batch_dims = range(inp.ndim)
     ndim = inp.ndim + 2
 
     @jax.custom_gradient
