@@ -284,7 +284,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
     ndim = inp.ndim
-    batch_dims = range(ndim - 1)
+    batch_dims = tuple(range(ndim - 2))
 
     @jax.custom_gradient
     def _fn(src, e_w):
