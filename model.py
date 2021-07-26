@@ -179,6 +179,27 @@ def relu(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.maximum(inp, 0)
 
 
+def instance_norm_forward(ctx: Context, src: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    mean = shard(src.mean(-1, keepdims=True), None)
+    mid = src - mean
+    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(mid).mean(-1, keepdims=True), None))
+    return mid * scale, mean, scale
+
+
+def instance_norm_backward(dy: jnp.ndarray, src: jnp.ndarray, out: jnp.ndarray) -> jnp.ndarray:
+    ndim = src.ndim
+    batch_dims = tuple(range(0, ndim - 1))
+
+    out_scaled = out * (-1 / src.shape[-1])
+
+    dx = dy
+    dx += shard(out.sum(-1, keepdims=True), -2)
+    tmp = shard(dot_general(dy, out_scaled, (ndim - 1,), (ndim - 1,), batch_dims, batch_dims), -1)
+    dx += dy * shard(lax.broadcast_in_dim(tmp, tmp.shape + (1,), batch_dims))
+    dx *= src
+    return dx
+
+
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     ndim = inp.ndim
@@ -194,19 +215,22 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, i_w: jnp.ndarray, o_w: jnp.ndarray):
-        mid = relu(shard(dot_general(src, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-        out = shard(dot_general(relu(mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
-        out = shard(out.transpose(transpose))
+        mid, mean, scale = instance_norm_forward(ctx, src)
+        mid = relu(shard(dot_general(mid, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
 
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+            norm_out = (src - mean) * scale
+
             o_w_grad = dot_general(mid, dy, batch_seq_1, batch_seq, (0,), (2,))
             d_mid = dot_general(dy, o_w, (ndim - 1,), (2,), (ndim - 2,), (0,))
             d_mid = d_mid * jnp.greater(mid, 0).astype(ctx.model.dtype)
-            i_w_grad = dot_general(src, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,))
-            d_src = dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,))
-            d_src = d_src.transpose(transpose)
-            return d_src, i_w_grad, o_w_grad
+            i_w_grad = dot_general(norm_out, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,))
+            d_mid = dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,))
+            d_mid = d_mid.transpose(transpose)
+            return instance_norm_backward(d_mid, src, norm_out), i_w_grad, o_w_grad
 
+        out = shard(dot_general(relu(mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+        out = shard(out.transpose(transpose))
         return out, _grad_fn
 
     return _fn(inp, inp_weight, out_weight)
@@ -260,7 +284,23 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab])
     if ctx.is_initializing:
         return inp
-    return shard(dot_product(inp, embd, -2, 0, -1, 1), None)
+    ndim = inp.ndim
+    batch_dims = range(ndim - 1)
+
+    @jax.custom_gradient
+    def _fn(src, e_w):
+        out, mean, scale = instance_norm_forward(ctx, src)
+
+        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+            norm_out = (src - mean) * scale
+            e_w_grad = shard(dot_general(norm_out, dy, batch_dims, batch_dims), 0, None)
+            inp_grad = shard(dot_general(dy, e_w, (ndim - 1,), (1,)))
+            inp_grad = instance_norm_backward(inp_grad, src, norm_out)
+            return inp_grad, e_w_grad
+
+        return shard(dot_product(out, e_w, -2, 0, -1, 1), None), _grad_fn
+
+    return _fn(inp, embd)
 
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
@@ -338,7 +378,8 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, b_p: jnp.ndarray, k_p: jnp.ndarray, q_p: jnp.ndarray, v_p: jnp.ndarray):
-        base = relu(shard(dot_product(inp, b_p, -2, 0, -1, 1), None))  # batch, seq, feat
+        base, mean, scale = instance_norm_forward(ctx, inp)
+        base = relu(shard(dot_product(base, b_p, -2, 0, -1, 1), None))  # batch, seq, feat
         key = shard(dot_product(base, k_p, -1, 0))
         qry = shard(dot_product(base, q_p, -1, 0))
         val = shard(dot_product(base, v_p, -1, 0))
@@ -379,43 +420,17 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
             base_grad += shard(dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2)), None)
 
             base_grad = base_grad * jnp.greater(base, 0).astype(ctx.model.dtype)
+
+            norm_out = (inp - mean) * scale
+            b_p_grad = shard(dot_general(norm_out, base_grad, batch_seq, batch_seq), 0, None)
             inp_grad = shard(dot_general(base_grad, b_p, (head_dim,), (2,)))
-            b_p_grad = shard(dot_general(inp, base_grad, batch_seq, batch_seq), 0, None)
+            inp_grad = instance_norm_backward(inp_grad, inp, norm_out)
 
             return inp_grad, b_p_grad, k_p_grad, q_p_grad, v_p_grad
 
         return out, grad_fn
 
     return shard(_fn(src, base_param, *attn_params))
-
-
-def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    if ctx.is_initializing:
-        return inp
-
-    ndim = inp.ndim
-    batch_dims = tuple(range(0, ndim - 1))
-
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
-        mean = shard(src.mean(-1, keepdims=True), None)
-        mid = src - mean
-        scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(mid).mean(-1, keepdims=True), None))
-
-        def _grad_fn(dy: jnp.ndarray) -> jnp.ndarray:
-            out = (src - mean) * scale
-            out_scaled = out * (-1 / src.shape[-1])
-
-            dx = dy
-            dx += shard(out.sum(-1, keepdims=True), -2)
-            tmp = shard(dot_general(dy, out_scaled, (ndim - 1,), (ndim - 1,), batch_dims, batch_dims), -1)
-            dx += dy * shard(lax.broadcast_in_dim(tmp, tmp.shape + (1,), batch_dims))
-            dx *= src
-            return dx
-
-        return mid * scale, _grad_fn
-
-    return _fn(inp)
 
 
 def exec_fn(*fns: typing.Callable) -> typing.Callable:
@@ -452,10 +467,9 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.model.depth):
         is_last = (i + 1) == ctx.model.depth
-        src = reversible(ctx, exec_fn(instance_norm, attention), is_last)(src)
-        src = reversible(ctx, exec_fn(instance_norm, group_feed_forward), is_last)(src)
+        src = reversible(ctx, attention, is_last)(src)
+        src = reversible(ctx, group_feed_forward, is_last)(src)
     src = src[1] + src[3]
-    src = instance_norm(ctx, src)
     return output_embed(ctx, src)
 
 
