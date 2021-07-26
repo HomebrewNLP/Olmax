@@ -294,8 +294,8 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
         if is_last:
             y00 = inp[4]
             x10 = inp[2]
-        x00 = y00 - base((params, x10))
-        _, grad_fn = jax.vjp(base, (params, x10))
+        x00, grad_fn = jax.vjp(base, (params, x10))
+        x00 = y00 - x00
         d_params, dx00 = grad_fn(dy00)[0]
         d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
         return (d_params, dy00, x00, dx00 + dx10, x10),
