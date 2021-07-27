@@ -334,16 +334,16 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
         return out, out
 
     def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX]:
-        d_params_old, dx10, x10, dy00, y00 = dy
+        d_params_old, dy0, y0, dy1, y1 = dy
         params = inp[0]
         if is_last:
-            y00 = inp[4]
-            x10 = inp[2]
-        x00, grad_fn = jax.vjp(base, (params, x10))
-        x00 = y00 - x00
-        d_params, dx00 = grad_fn(dy00)[0]
+            y1 = inp[3]
+            y0 = inp[1]
+
+        x0, grad_fn = jax.vjp(base, (params, y0))
+        d_params, dx0 = grad_fn(dy1)[0]
         d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
-        return (d_params, dy00, x00, dx00 + dx10, x10),
+        return (d_params, dy1, y1 - x0, dx0 + dy0, y0),
 
     reversible_half_residual.defvjp(reversible_forward, reversible_backward)
     return reversible_half_residual
