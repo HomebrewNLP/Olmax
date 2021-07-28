@@ -152,6 +152,31 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     return grad * optimizer_rsqrt(weight_update)
 
 
+def weighted_add(x1, x2, alpha):
+    return x1 * alpha + x2 * (1 - alpha)
+
+
+def debias(x: jnp.ndarray, current_step: jnp.ndarray, beta: float):
+    return x * (1 - beta ** current_step)
+
+
+def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("adam", count=False)
+    dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
+    exp_avg = zero_param(ctx, "exp_avg", one_shape(grad.ndim, dims, 0))
+    exp_avg_sq = zero_param(ctx, "exp_avg_sq", one_shape(grad.ndim, dims, 0))
+
+    exp_avg = weighted_add(exp_avg, grad, ctx.optimizer.adam_beta1)
+    exp_avg_sq = weighted_add(exp_avg_sq, jnp.square(grad), ctx.optimizer.adam_beta2)
+
+    ctx.parameters[ctx.add_to_prefix("exp_avg", count=False).global_prefix] = exp_avg
+    ctx.parameters[ctx.add_to_prefix("exp_avg", count=False).global_prefix] = exp_avg_sq
+
+    exp_avg = debias(exp_avg, current_step, ctx.optimizer.adam_beta1)
+    exp_avg_sq = debias(exp_avg_sq, current_step, ctx.optimizer.adam_beta2)
+    return exp_avg * optimizer_rsqrt(exp_avg_sq)
+
+
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
     wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
@@ -166,7 +191,6 @@ def momentum(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp
     new_state = ctx.optimizer.momentum_beta * state + grad * (1 - ctx.optimizer.momentum_beta)
     ctx.parameters[ctx.add_to_prefix("momentum_buffer", count=False).global_prefix] = new_state
     return new_state / (1 - ctx.optimizer.momentum_beta ** current_step)
-
 
 
 def base_spec(inp: jnp.ndarray) -> str:
@@ -470,7 +494,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         if "optimizer" in param_name:
             continue
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        grad = sm3(inner_ctx, param_name, grad)
+        # grad = sm3(inner_ctx, param_name, grad)
+        grad = adam(inner_ctx, param_name, grad, current_step)
         grad = momentum(inner_ctx, param_name, grad, current_step)
         ctx.parameters[param_name] = ctx.parameters[param_name] + grad * lr
 

@@ -66,6 +66,8 @@ class Optimizer(DataClass):
         self.learning_rate = 1e-3
         self.gradient_clip = 0.1
         self.momentum_beta = 0.9
+        self.adam_beta1 = 0.9
+        self.adam_beta2 = 0.99
         self.warmup_end = 4096
         self.exponential_decay = 1e-4
 
