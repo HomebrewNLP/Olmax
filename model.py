@@ -495,8 +495,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             continue
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         # grad = sm3(inner_ctx, param_name, grad)
+        # grad = momentum(inner_ctx, param_name, grad, current_step)
         grad = adam(inner_ctx, param_name, grad, current_step)
-        grad = momentum(inner_ctx, param_name, grad, current_step)
         ctx.parameters[param_name] = ctx.parameters[param_name] + grad * lr
 
 
