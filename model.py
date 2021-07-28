@@ -160,14 +160,13 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
     return clipped * do_clip + grad * (1 - do_clip)
 
 
-def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+def momentum(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("momentum", count=False)
     state = zero_param(ctx, "momentum_buffer", ctx.parameter_dims.get(param_name))
-    new_state = ctx.optimizer.momentum_beta * state + grad
+    new_state = ctx.optimizer.momentum_beta * state + grad * (1 - ctx.optimizer.momentum_beta)
     ctx.parameters[ctx.add_to_prefix("momentum_buffer", count=False).global_prefix] = new_state
-    if not ctx.optimizer.nesterov_momentum:
-        return new_state
-    return grad + ctx.optimizer.momentum_beta * new_state
+    return new_state / (1 - ctx.optimizer.momentum_beta ** current_step)
+
 
 
 def base_spec(inp: jnp.ndarray) -> str:
@@ -472,7 +471,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             continue
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         grad = sm3(inner_ctx, param_name, grad)
-        grad = momentum(inner_ctx, param_name, grad)
+        grad = momentum(inner_ctx, param_name, grad, current_step)
         ctx.parameters[param_name] = ctx.parameters[param_name] + grad * lr
 
 
@@ -539,7 +538,7 @@ def main():
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
     timeit("Acquiring optimizer parameters", update, ctx,
            {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()},
-           jnp.zeros([], dtype=ctx.model.dtype))
+           jnp.ones([], dtype=ctx.model.dtype))
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
