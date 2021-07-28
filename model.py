@@ -275,23 +275,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab])
     if ctx.is_initializing:
         return inp
-    ndim = inp.ndim
-    batch_dims = tuple(range(ndim - 2))
-
-    @jax.custom_gradient
-    def _fn(src, e_w):
-        out, mean, scale = instance_norm_forward(ctx, src)
-
-        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            norm_out = (src - mean) * scale
-            e_w_grad = shard(dot_general(norm_out, dy, batch_dims, batch_dims), 0, None)
-            inp_grad = shard(dot_general(dy, e_w, (ndim - 2,), (2,)))
-            inp_grad = instance_norm_backward(inp_grad, src, norm_out, scale)
-            return inp_grad, e_w_grad
-
-        return shard(dot_product(out, e_w, -2, 0, -1, 1), None), _grad_fn
-
-    return _fn(inp, embd)
+    return shard(dot_product(inp, embd, -2, 0, -1, 1), None)
 
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
