@@ -454,7 +454,7 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
     del spec, tgt, shifted, exp_shifted, sum_exp, src
 
     def grad_fn(g: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None]:
-        return g * grad, None
+        return jnp.expand_dims(g, axis=-1) * grad, None
 
     return loss, grad_fn
 
