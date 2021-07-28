@@ -163,8 +163,8 @@ def debias(x: jnp.ndarray, current_step: jnp.ndarray, beta: float):
 def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("adam", count=False)
     dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
-    exp_avg = zero_param(ctx, "exp_avg", one_shape(grad.ndim, dims, 0))
-    exp_avg_sq = zero_param(ctx, "exp_avg_sq", one_shape(grad.ndim, dims, 0))
+    exp_avg = zero_param(ctx, "exp_avg", dims)
+    exp_avg_sq = zero_param(ctx, "exp_avg_sq", dims)
 
     exp_avg = weighted_add(exp_avg, grad, ctx.optimizer.adam_beta1)
     exp_avg_sq = weighted_add(exp_avg_sq, jnp.square(grad), ctx.optimizer.adam_beta2)
