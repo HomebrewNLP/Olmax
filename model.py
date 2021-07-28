@@ -170,7 +170,7 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
     exp_avg_sq = weighted_add(exp_avg_sq, jnp.square(grad), ctx.optimizer.adam_beta2)
 
     ctx.parameters[ctx.add_to_prefix("exp_avg", count=False).global_prefix] = exp_avg
-    ctx.parameters[ctx.add_to_prefix("exp_avg", count=False).global_prefix] = exp_avg_sq
+    ctx.parameters[ctx.add_to_prefix("exp_avg_sq", count=False).global_prefix] = exp_avg_sq
 
     exp_avg = debias(exp_avg, current_step, ctx.optimizer.adam_beta1)
     exp_avg_sq = debias(exp_avg_sq, current_step, ctx.optimizer.adam_beta2)
