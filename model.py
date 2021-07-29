@@ -373,6 +373,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     key_permute = batch_dims + (head_dim, sequence_dim, feature_dim)
     qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
     batch_seq = batch_dims + (sequence_dim,)
+    attn_scale = src.shape[-1] ** -0.5
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, b_p: jnp.ndarray, k_p: jnp.ndarray, q_p: jnp.ndarray, v_p: jnp.ndarray):
@@ -382,7 +383,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
         qry = shard(dot_product(base, q_p, -1, 0))
         val = shard(dot_product(base, v_p, -1, 0))
 
-        key = shard(key.transpose(key_permute), -3) * (inp.shape[-1] ** -0.5)
+        key = shard(key.transpose(key_permute), -3) * attn_scale
         val = shard(val.transpose(key_permute), -3)
         qry = shard(qry.transpose(qry_permute), -3)
 
@@ -408,6 +409,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
 
             qry_grad = shard(dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq), -3)
             key_grad = shard(dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq), -3)
+            key_grad *= attn_scale
 
             k_p_grad = shard(dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,)), 1, None)
             q_p_grad = shard(dot_general(base, qry_grad, batch_seq, batch_dims + (head_dim,)), 1, None)
