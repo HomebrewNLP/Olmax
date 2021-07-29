@@ -382,7 +382,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
         qry = shard(dot_product(base, q_p, -1, 0))
         val = shard(dot_product(base, v_p, -1, 0))
 
-        key = shard(key.transpose(key_permute), -3)
+        key = shard(key.transpose(key_permute), -3) * (inp.shape[-1] ** -0.5)
         val = shard(val.transpose(key_permute), -3)
         qry = shard(qry.transpose(qry_permute), -3)
 
