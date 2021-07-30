@@ -275,8 +275,8 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
             prod = lgt * d_logit
             lgt_grad = prod - shard(prod.sum(-1, keepdims=True), -3) * lgt
 
-            qry_grad = shard(dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq), -3)
-            key_grad = shard(dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq), -3)
+            qry_grad = shard(dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq), -3)
+            key_grad = shard(dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq), -3)
             key_grad *= attn_scale
 
             k_p_grad = shard(dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,)), 1, None)
