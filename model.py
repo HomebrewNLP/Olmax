@@ -14,42 +14,14 @@ from jax.experimental.maps import mesh
 
 from context import Context, WhileTrainContext
 from data import text_dataset
+from backend import default, get_param, shard, base_spec, dims_to_shape
+from optimizer import adaptive_gradient_clipping, adam
 
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
 
 
 # jax.config.update("jax_disable_jit", True)
 
-def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
-    return [ctx.dims.sizes[d] for d in dims]
-
-
-def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
-    return inp.shape[-1] != ctx.dims.sizes.features_per_head
-
-
-def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return ctx.dims.intermediate_feed_forward if is_intermediate(ctx, inp) else ctx.dims.features_per_head
-
-
-def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0):
-    spec: typing.List[typing.Optional[str]] = [None] * tensor.ndim
-    if isinstance(batch, int):
-        spec[batch] = "data_parallel"
-    if isinstance(head, int):
-        spec[head] = "model_parallel"
-    try:
-        return pjit.with_sharding_constraint(tensor, PartitionSpec(*spec))
-    except ValueError as e:
-        e_str = str(e)
-        if ("One of with_sharding_constraint arguments was given the resource assignment of PartitionSpec(" in e_str and
-                ", but resource axis " in e_str and "is undefined. Did you forget to declare the mesh?" in e_str):
-            return tensor
-        raise e
-
-
-def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
-    return default_value if value is None else value
 
 
 def dot_general(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: typing.Sequence[int],
@@ -87,119 +59,14 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
                        tuple(range(r_ndim - r_start, r_ndim - r_start - min_start, -1)))
 
 
-def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
-    axes = tuple([shape[c] for c in column_axes])
-    n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
-    matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
-    out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.dtype))
-    out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim) * ctx.model.initializer.scale
-    if n_rows < n_cols:
-        out = out.T
-    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
+
+def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
+    return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
 
 
-def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
-              std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
-              column_axes: typing.Sequence[int] = tuple()) -> jnp.ndarray:
-    name = ctx.add_to_prefix(name, count=False).global_prefix
-    if name not in ctx.parameters:
-        ctx.parameter_dims[name] = shape
-        shape = dims_to_shape(ctx, shape)
-        if std is None and mean is None:
-            ctx.parameters[name] = orthogonal_init(ctx, shape, column_axes if column_axes else (-1,))
-        else:
-            ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.model.dtype)
-            if std is not None:
-                ctx.parameters[name] *= std
-            if mean is not None:
-                ctx.parameters[name] += mean
-    return ctx.parameters[name]
-
-
-def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
-    return get_param(ctx, name, shape, 0, 0)
-
-
-def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
-    base = ["one"] * ndim
-    base[dim_idx] = dim_name
-    return base
-
-
-def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
-    return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
-
-
-def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("sm3", count=False)
-    dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
-    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
-    buffer = [weight_update]
-    head_index = dims.index(ctx.dims.heads) if ctx.dims.heads in dims else -1
-
-    for i, d in enumerate(dims[1:], 1):
-        buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i)))
-        weight_update = jnp.minimum(weight_update, buffer[-1])
-
-        if i >= head_index >= 0:
-            weight_update = shard(weight_update, head_index, None)
-
-    weight_update = weight_update + jnp.square(grad)
-
-    for i in range(grad.ndim):
-        new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
-        ctx.parameters[ctx.add_to_prefix(f"dim{i}", count=False).global_prefix] = new
-
-    return grad * optimizer_rsqrt(weight_update)
-
-
-def weighted_add(x1, x2, alpha):
-    return x1 * alpha + x2 * (1 - alpha)
-
-
-def debias(x: jnp.ndarray, current_step: jnp.ndarray, beta: float):
-    return x * (1 - beta ** current_step)
-
-
-def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("adam", count=False)
-    dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
-    exp_avg = zero_param(ctx, "exp_avg", dims)
-    exp_avg_sq = zero_param(ctx, "exp_avg_sq", dims)
-
-    exp_avg = weighted_add(exp_avg, grad, ctx.optimizer.adam_beta1)
-    exp_avg_sq = weighted_add(exp_avg_sq, jnp.square(grad), ctx.optimizer.adam_beta2)
-
-    ctx.parameters[ctx.add_to_prefix("exp_avg", count=False).global_prefix] = exp_avg
-    ctx.parameters[ctx.add_to_prefix("exp_avg_sq", count=False).global_prefix] = exp_avg_sq
-
-    exp_avg = debias(exp_avg, current_step, ctx.optimizer.adam_beta1)
-    exp_avg_sq = debias(exp_avg_sq, current_step, ctx.optimizer.adam_beta2)
-    return exp_avg * optimizer_rsqrt(exp_avg_sq)
-
-
-def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
-    wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
-    do_clip = jnp.greater(grd_norm * jnp.reciprocal(wgt_norm), ctx.optimizer.gradient_clip)
-    clipped = wgt_norm * jnp.reciprocal(grd_norm) * ctx.optimizer.gradient_clip * grad
-    return clipped * do_clip + grad * (1 - do_clip)
-
-
-def momentum(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("momentum", count=False)
-    state = zero_param(ctx, "momentum_buffer", ctx.parameter_dims.get(param_name))
-    new_state = ctx.optimizer.momentum_beta * state + grad * (1 - ctx.optimizer.momentum_beta)
-    ctx.parameters[ctx.add_to_prefix("momentum_buffer", count=False).global_prefix] = new_state
-    return new_state / (1 - ctx.optimizer.momentum_beta ** current_step)
-
-
-def base_spec(inp: jnp.ndarray) -> str:
-    return ''.join(chr(ord('a') + i) for i in range(inp.ndim))
-
-
-def relu(inp: jnp.ndarray) -> jnp.ndarray:
-    return jnp.maximum(inp, 0)
+def activation_backward(ctx: Context, dy: jnp.ndarray, inp: jnp.ndarray) -> jnp.ndarray:
+    scale = (1 - ctx.model.leaky_relu_slope) * jnp.greater(inp, 0).astype(ctx.model.dtype) + ctx.model.leaky_relu_slope
+    return dy * scale
 
 
 def instance_norm_forward(ctx: Context, src: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
@@ -231,20 +98,20 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, i_w: jnp.ndarray, o_w: jnp.ndarray):
         mid, mean, scale = instance_norm_forward(ctx, src)
-        mid = relu(shard(dot_general(mid, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
+        mid = activate(ctx, shard(dot_general(mid, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
 
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             norm_out = (src - mean) * scale
 
             o_w_grad = dot_general(mid, dy, batch_seq_1, batch_seq, (0,), (2,))
             d_mid = dot_general(dy, o_w, (ndim - 1,), (2,), (ndim - 2,), (0,))
-            d_mid = d_mid * jnp.greater(mid, 0).astype(ctx.model.dtype)
+            d_mid = activation_backward(ctx, d_mid, mid)
             i_w_grad = dot_general(norm_out, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,))
             d_mid = dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,))
             d_mid = d_mid.transpose(transpose)
             return instance_norm_backward(d_mid, src, norm_out, scale), i_w_grad, o_w_grad
 
-        out = shard(dot_general(relu(mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+        out = shard(dot_general(activate(ctx, mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
         out = shard(out.transpose(transpose))
         return out, _grad_fn
 
@@ -259,7 +126,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
-                         ctx.model.initializer.embedding_std)
+                         ctx.model.initializer.embedding_std, scale=ctx.model.depth ** -0.5)
     out_embd = get_param(ctx, "out_embd",
                          [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head],
                          column_axes=(1, 2))
@@ -270,12 +137,13 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, i_e: jnp.ndarray, o_e: jnp.ndarray):
-        mid = relu(shard(dot_product(one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype), i_e, -1, 0), None))
+        mid = activate(ctx, shard(dot_product(one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype),
+                                              i_e, -1, 0), None))
 
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[None, jnp.ndarray, jnp.ndarray]:
             one_hot_src = one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype)
             o_e_grad = dot_general(mid, dy, batch_dims, batch_dims)
-            mid_grad = dot_general(dy, o_e, (ndim - 2, ndim - 1), (1, 2)) * jnp.greater(mid, 0)
+            mid_grad = activation_backward(ctx, dot_general(dy, o_e, (ndim - 2, ndim - 1), (1, 2)), mid)
             i_e_grad = dot_general(one_hot_src, mid_grad, batch_dims, batch_dims)
             return None, i_e_grad, o_e_grad
 
@@ -380,7 +248,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, b_p: jnp.ndarray, k_p: jnp.ndarray, q_p: jnp.ndarray, v_p: jnp.ndarray):
         base, mean, scale = instance_norm_forward(ctx, inp)
-        base = relu(shard(dot_product(base, b_p, -2, 0, -1, 1), None))  # batch, seq, feat
+        base = activate(ctx, shard(dot_product(base, b_p, -2, 0, -1, 1), None))  # batch, seq, feat
         key = shard(dot_product(base, k_p, -1, 0))
         qry = shard(dot_product(base, q_p, -1, 0))
         val = shard(dot_product(base, v_p, -1, 0))
@@ -421,7 +289,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
             base_grad += shard(dot_general(qry_grad, q_p, (sequence_dim, feature_dim), (1, 2)), None)
             base_grad += shard(dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2)), None)
 
-            base_grad = base_grad * jnp.greater(base, 0).astype(ctx.model.dtype)
+            base_grad = activation_backward(ctx, base_grad, base)
 
             norm_out = (inp - mean) * scale
             b_p_grad = shard(dot_general(norm_out, base_grad, batch_seq, batch_seq), 0, None)
@@ -486,7 +354,7 @@ def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
     learning_rate *= jnp.minimum(current_step, opt.warmup_end).astype(jnp.float32) / opt.warmup_end
-    learning_rate *= (1 - opt.exponential_decay) ** relu(current_step.astype(jnp.float32) - opt.warmup_end)
+    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(current_step.astype(jnp.float32) - opt.warmup_end)
     return learning_rate.astype(ctx.model.dtype)
 
 
