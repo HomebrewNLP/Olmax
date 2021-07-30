@@ -7,21 +7,20 @@ import warnings
 import jax
 import jax._src.util as util
 import numpy as np
-from jax import lax, numpy as jnp, random
+from jax import lax, numpy as jnp
 from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
+from backend import default, get_param, shard, base_spec, dims_to_shape
 from context import Context, WhileTrainContext
 from data import text_dataset
-from backend import default, get_param, shard, base_spec, dims_to_shape
-from optimizer import adaptive_gradient_clipping, adam
+from optimizer import get_current_lr, update
 
 warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
 
 
 # jax.config.update("jax_disable_jit", True)
-
 
 
 def dot_general(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: typing.Sequence[int],
@@ -57,7 +56,6 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
     return dot_general(left, right, tuple(range(l_start, l_end)), tuple(range(r_start, r_end)),
                        tuple(range(l_ndim - l_start, l_ndim - l_start - min_start, -1)),
                        tuple(range(r_ndim - r_start, r_ndim - r_start - min_start, -1)))
-
 
 
 def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
@@ -314,14 +312,13 @@ def exec_fn(*fns: typing.Callable) -> typing.Callable:
 
 @jax.custom_gradient
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
-    spec = base_spec(src)
     normalization = tgt.size
     tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
-    loss = jnp.einsum(f"{spec},{spec}->", jnp.log(sum_exp) - shifted, tgt)
-    loss = loss / normalization
+    loss = (jnp.log(sum_exp) - shifted) * tgt
+    loss = loss.sum() / normalization
     grad = (exp_shifted / sum_exp - tgt) / normalization
     del spec, tgt, shifted, exp_shifted, sum_exp, src
 
@@ -348,28 +345,6 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
     ctx.parameters = params
     src, tgt = inp
     return cross_entropy_loss(body_ctx(ctx, src), tgt)
-
-
-def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
-    opt = ctx.optimizer
-    learning_rate = opt.learning_rate
-    learning_rate *= jnp.minimum(current_step, opt.warmup_end).astype(jnp.float32) / opt.warmup_end
-    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(current_step.astype(jnp.float32) - opt.warmup_end)
-    return learning_rate.astype(ctx.model.dtype)
-
-
-def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
-    ctx = ctx.add_to_prefix("optimizer")
-    lr = -get_current_lr(ctx, current_step)
-    for param_name, grad in grads.items():
-        inner_ctx = ctx.add_to_prefix(param_name, count=False)
-        if "optimizer" in param_name:
-            continue
-        grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        # grad = sm3(inner_ctx, param_name, grad)
-        # grad = momentum(inner_ctx, param_name, grad, current_step)
-        grad = adam(inner_ctx, param_name, grad, current_step)
-        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * lr
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:

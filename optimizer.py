@@ -1,3 +1,6 @@
+import typing
+
+import jax
 from jax import numpy as jnp
 
 from backend import zero_param, one_shape, shard
@@ -70,3 +73,25 @@ def momentum(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp
     new_state = ctx.optimizer.momentum_beta * state + grad * (1 - ctx.optimizer.momentum_beta)
     ctx.parameters[ctx.add_to_prefix("momentum_buffer", count=False).global_prefix] = new_state
     return new_state / (1 - ctx.optimizer.momentum_beta ** current_step)
+
+
+def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
+    opt = ctx.optimizer
+    learning_rate = opt.learning_rate
+    learning_rate *= jnp.minimum(current_step, opt.warmup_end).astype(jnp.float32) / opt.warmup_end
+    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(current_step.astype(jnp.float32) - opt.warmup_end)
+    return learning_rate.astype(ctx.model.dtype)
+
+
+def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
+    ctx = ctx.add_to_prefix("optimizer")
+    lr = -get_current_lr(ctx, current_step)
+    for param_name, grad in grads.items():
+        inner_ctx = ctx.add_to_prefix(param_name, count=False)
+        if "optimizer" in param_name:
+            continue
+        grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
+        # grad = sm3(inner_ctx, param_name, grad)
+        # grad = momentum(inner_ctx, param_name, grad, current_step)
+        grad = adam(inner_ctx, param_name, grad, current_step)
+        ctx.parameters[param_name] = ctx.parameters[param_name] + grad * lr
