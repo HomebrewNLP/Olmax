@@ -87,25 +87,26 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
                        tuple(range(r_ndim - r_start, r_ndim - r_start - min_start, -1)))
 
 
-def orthogonal_init(ctx: Context, shape: typing.List[int], column_axis=-1) -> jnp.ndarray:
-    n_rows, n_cols = util.prod(shape) // shape[column_axis], shape[column_axis]
+def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
+    axes = tuple([shape[c] for c in column_axes])
+    n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
     out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.dtype))
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim) * ctx.model.initializer.scale
     if n_rows < n_cols:
         out = out.T
-    return jnp.moveaxis(jnp.reshape(out, tuple(np.delete(shape, column_axis)) + (shape[column_axis],)), -1, column_axis)
+    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
 
 
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
-              column_axis: typing.Optional[int] = None) -> jnp.ndarray:
+              column_axes: typing.Sequence[int] = tuple()) -> jnp.ndarray:
     name = ctx.add_to_prefix(name, count=False).global_prefix
     if name not in ctx.parameters:
         ctx.parameter_dims[name] = shape
         shape = dims_to_shape(ctx, shape)
         if std is None and mean is None:
-            ctx.parameters[name] = orthogonal_init(ctx, shape, -1 if column_axis is None else column_axis)
+            ctx.parameters[name] = orthogonal_init(ctx, shape, column_axes if column_axes else (-1,))
         else:
             ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:
@@ -260,7 +261,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
                          ctx.model.initializer.embedding_std)
     out_embd = get_param(ctx, "out_embd",
-                         [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head])
+                         [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head],
+                         column_axes=(1, 2))
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
     batch_dims = range(inp.ndim)
@@ -360,7 +362,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
     base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward])
-    attn_params = [get_param(ctx, name, [ctx.dims.intermediate_feed_forward] + feature_dims)
+    attn_params = [get_param(ctx, name, [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2))
                    for name in ("key", "query", "value")]
     if ctx.is_initializing:
         return src
@@ -492,7 +494,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
     for param_name, grad in grads.items():
-        inner_ctx = ctx.add_to_prefix(param_name)
+        inner_ctx = ctx.add_to_prefix(param_name, count=False)
         if "optimizer" in param_name:
             continue
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
