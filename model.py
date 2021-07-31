@@ -12,15 +12,12 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
-from backend import default, get_param, shard, base_spec, dims_to_shape
+from backend import default, get_param, shard, dims_to_shape
 from context import Context, WhileTrainContext
 from data import text_dataset
 from optimizer import get_current_lr, update
 
-warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
-
-
-# jax.config.update("jax_disable_jit", True)
+REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
 
 def dot_general(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: typing.Sequence[int],
@@ -169,9 +166,6 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(dot_product(inp, embd, -2, 0, -1, 1), None)
 
 
-REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
-
-
 def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     name_cache = copy.deepcopy(ctx.name_cache)
 
@@ -301,16 +295,6 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     return shard(_fn(src, base_param, *attn_params))
 
 
-def exec_fn(*fns: typing.Callable) -> typing.Callable:
-    def _run(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-        for f in fns:
-            inp = f(ctx, inp)
-        return inp
-
-    return _run
-
-
-@jax.custom_gradient
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
     normalization = tgt.size
     tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
@@ -319,13 +303,7 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
     loss = (jnp.log(sum_exp) - shifted) * tgt
     loss = loss.sum() / normalization
-    grad = (exp_shifted / sum_exp - tgt) / normalization
-    del tgt, shifted, exp_shifted, sum_exp, src
-
-    def grad_fn(g: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None]:
-        return g * grad, None
-
-    return loss, grad_fn
+    return loss
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
@@ -333,11 +311,9 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.model.depth):
-        is_last = (i + 1) == ctx.model.depth
-        src = reversible(ctx, attention, is_last)(src)
-        src = reversible(ctx, group_feed_forward, is_last)(src)
-    src = src[1] + src[3]
-    return output_embed(ctx, src)
+        src = reversible(ctx, attention, (i + 1) == ctx.model.depth)(src)
+        src = reversible(ctx, group_feed_forward, (i + 1) == ctx.model.depth)(src)
+    return output_embed(ctx, src[1] + src[3])
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
@@ -400,6 +376,8 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
 
 
 def main():
+    warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
+    # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
     ctx = wctx.ctx
     ctx.is_initializing = True
