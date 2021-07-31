@@ -9,10 +9,7 @@
   },
 
   "model": {
-    "depth": 8,
-    "initializer": {
-      "scale": 0.25
-    }
+    "depth": 8
   },
 
   "dims": {
