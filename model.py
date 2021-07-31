@@ -56,7 +56,16 @@ def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, righ
 
 
 def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
-    return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray):
+        out = jax.nn.leaky_relu(src, ctx.model.leaky_relu_slope)
+
+        def _grad_fn(dy: jnp.ndarray):
+            return activation_backward(ctx, dy, out)
+
+        return out, _grad_fn
+
+    return _fn(inp)
 
 
 def activation_backward(ctx: Context, dy: jnp.ndarray, inp: jnp.ndarray) -> jnp.ndarray:
@@ -64,17 +73,30 @@ def activation_backward(ctx: Context, dy: jnp.ndarray, inp: jnp.ndarray) -> jnp.
     return dy * scale
 
 
-def instance_norm_forward(ctx: Context, src: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    mean = shard(src.mean(-1, keepdims=True), None)
-    mid = src - mean
-    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(mid).mean(-1, keepdims=True), None))
-    return mid * scale, mean, scale
+def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    mean = shard(inp.mean(-1, keepdims=True), None)
+    out = inp - mean
+    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(out).mean(-1, keepdims=True), None))
+    return out * scale, mean, scale
 
 
-def instance_norm_backward(dy: jnp.ndarray, src: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-    dy *= scale / src.shape[-1]
-    dx1 = dy + out * jnp.sum(dy * out, -1, keepdims=True) / (- src.shape[-1] ** 2)
+def instance_norm_backward(dy: jnp.ndarray, inp: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
+    dy *= scale / inp.shape[-1]
+    dx1 = dy + out * jnp.sum(dy * out, -1, keepdims=True) / (- inp.shape[-1] ** 2)
     return dx1 - jnp.sum(dx1, -1, keepdims=True)
+
+
+def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray):
+        out, mean, scale = instance_norm_forward(ctx, src)
+
+        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+            return instance_norm_backward(dy, out / scale + mean, out, scale)
+
+        return out, _grad
+
+    return _fn(inp)
 
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -218,7 +240,27 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     return reversible_half_residual
 
 
-def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
+def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    @jax.custom_gradient
+    def _fn(lgt: jnp.ndarray):
+        if ctx.model.masked_attention:
+            ones = (1,) * (lgt.ndim - 2)
+            arange = jnp.arange(0, lgt.shape[-1])
+            mask: jnp.ndarray = jnp.greater(jnp.reshape(arange, ones + (1, -1)), jnp.reshape(arange, ones + (-1, 1)))
+            lgt += (-1e30 * mask).astype(lgt.dtype)
+        lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
+        lgt /= lgt.sum(-1, keepdims=True)
+
+        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+            prod = lgt * dy
+            return prod - shard(prod.sum(-1, keepdims=True), -3) * lgt
+
+        return lgt, _grad
+
+    return _fn(inp)
+
+
+def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
     base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward],
@@ -228,74 +270,31 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     val_param = get_param(ctx, "val", [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2),
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
-        return src
+        return inp
 
-    batch_dims = tuple(range(src.ndim - 3))
-    head_dim = src.ndim - 2
-    feature_dim = src.ndim - 1
-    sequence_dim = src.ndim - 3
+    batch_dims = tuple(range(inp.ndim - 3))
+    head_dim = inp.ndim - 2
+    feature_dim = inp.ndim - 1
+    sequence_dim = inp.ndim - 3
 
     key_permute = batch_dims + (head_dim, sequence_dim, feature_dim)
     qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
     batch_seq = batch_dims + (sequence_dim,)
-    attn_scale = src.shape[-1] ** -0.5
 
-    @jax.custom_gradient
-    def _fn(inp: jnp.ndarray, b_p: jnp.ndarray, k_p: jnp.ndarray, q_p: jnp.ndarray, v_p: jnp.ndarray):
-        base, mean, scale = instance_norm_forward(ctx, inp)
-        base = activate(ctx, shard(dot_product(base, b_p, -2, 0, -1, 1), None))  # batch, seq, feat
-        key = shard(dot_product(base, k_p, -1, 0))
-        qry = shard(dot_product(base, q_p, -1, 0))
-        val = shard(dot_product(base, v_p, -1, 0))
+    base, mean, scale = instance_norm(ctx, inp)
+    base = activate(ctx, shard(dot_product(base, base_param, -2, 0, -1, 1), None))
+    key = shard(dot_product(base, key_param, -1, 0))
+    qry = shard(dot_product(base, qry_param, -1, 0))
+    val = shard(dot_product(base, val_param, -1, 0))
 
-        key = shard(key.transpose(key_permute), -3) * attn_scale
-        val = shard(val.transpose(key_permute), -3)
-        qry = shard(qry.transpose(qry_permute), -3)
+    key = shard(key.transpose(key_permute), -3) * inp.shape[-1] ** -0.5
+    val = shard(val.transpose(key_permute), -3)
+    qry = shard(qry.transpose(qry_permute), -3)
+    lgt = shard(dot_general(key, qry, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
+    lgt = softmax(ctx, lgt)
 
-        lgt = shard(dot_general(key, qry, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
-        if ctx.model.masked_attention:
-            ones = (1,) * (lgt.ndim - 2)
-            arange = jnp.arange(0, lgt.shape[-1])
-            mask: jnp.ndarray = jnp.greater(jnp.reshape(arange, ones + (1, -1)), jnp.reshape(arange, ones + (-1, 1)))
-            lgt += (-1e30 * mask).astype(lgt.dtype)
-        lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
-        lgt /= lgt.sum(-1, keepdims=True)
-        out = shard(dot_general(lgt, val, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
-        out = shard(out.transpose(key_permute))
-
-        def grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            dy = shard(dy.transpose(qry_permute), -3)
-
-            val_grad = shard(dot_general(dy, lgt, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
-
-            d_logit = shard(dot_general(val, dy, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
-            prod = lgt * d_logit
-            lgt_grad = prod - shard(prod.sum(-1, keepdims=True), -3) * lgt
-
-            qry_grad = shard(dot_general(lgt_grad, key, (head_dim,), (head_dim,), batch_seq, batch_seq), -3)
-            key_grad = shard(dot_general(lgt_grad, qry, (feature_dim,), (feature_dim,), batch_seq, batch_seq), -3)
-            key_grad *= attn_scale
-
-            k_p_grad = shard(dot_general(base, key_grad, batch_seq, batch_dims + (head_dim,)), 1, None)
-            q_p_grad = shard(dot_general(base, qry_grad, batch_seq, batch_dims + (head_dim,)), 1, None)
-            v_p_grad = shard(dot_general(base, val_grad, batch_seq, batch_dims + (feature_dim,)), 1, None)
-
-            base_grad = shard(dot_general(key_grad, k_p, (sequence_dim, feature_dim), (1, 2)), None)
-            base_grad += shard(dot_general(qry_grad, q_p, (sequence_dim, feature_dim), (1, 2)), None)
-            base_grad += shard(dot_general(val_grad, v_p, (sequence_dim, head_dim), (1, 2)), None)
-
-            base_grad = activation_backward(ctx, base_grad, base)
-
-            norm_out = (inp - mean) * scale
-            b_p_grad = shard(dot_general(norm_out, base_grad, batch_seq, batch_seq), 0, None)
-            inp_grad = shard(dot_general(base_grad, b_p, (head_dim,), (2,)))
-            inp_grad = instance_norm_backward(inp_grad, inp, norm_out, scale)
-
-            return inp_grad, b_p_grad, k_p_grad, q_p_grad, v_p_grad
-
-        return out, grad_fn
-
-    return shard(_fn(src, base_param, key_param, qry_param, val_param))
+    out = shard(dot_general(lgt, val, (feature_dim,), (head_dim,), batch_seq, batch_seq), -3)
+    return shard(out.transpose(key_permute))
 
 
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
