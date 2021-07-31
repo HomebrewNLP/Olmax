@@ -72,22 +72,15 @@ class Optimizer(DataClass):
         self.exponential_decay = 1e-4
 
 
-class Initializer(DataClass):
-    def __init__(self):
-        self.scale = 1.0
-        self.embedding_std = 0.004
-        self.norm_std = 0.02
-
-
 class Model(DataClass):
     def __init__(self):
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
         self.depth = 32
         self.leaky_relu_slope = 0.02
+        self.activation_std = 0.5893595616022745
         self.masked_attention = True
         self.dtype = jnp.bfloat16
-        self.initializer = Initializer()
 
 
 class Training(DataClass):

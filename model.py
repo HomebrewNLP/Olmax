@@ -81,8 +81,8 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     ndim = inp.ndim
     features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1])
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
 
@@ -120,7 +120,8 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward], 1)
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
+                         1 / ctx.model.activation_std)
     out_embd = get_param(ctx, "out_embd",
                          [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head],
                          column_axes=(1, 2))
@@ -150,7 +151,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         features = jnp.arange(0, feature_count)
         features = shard(jnp.reshape(features, [1] + feature_shape) * 4 / feature_count, 1, None)
         features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 1))
-        pos_embd = jnp.sin(features * positions) * ctx.model.initializer.embedding_std
+        pos_embd = jnp.sin(features * positions)
 
         return out + pos_embd.astype(out.dtype), _grad_fn
 
@@ -220,9 +221,12 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
 def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward])
-    attn_params = [get_param(ctx, name, [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2))
-                   for name in ("key", "query", "value")]
+    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward],
+                           scale=1 / ctx.model.activation_std)
+    key_param = get_param(ctx, "key", [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2))
+    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2))
+    val_param = get_param(ctx, "val", [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2),
+                          scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return src
 
@@ -291,7 +295,7 @@ def attention(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
 
         return out, grad_fn
 
-    return shard(_fn(src, base_param, *attn_params))
+    return shard(_fn(src, base_param, key_param, qry_param, val_param))
 
 
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):

@@ -42,7 +42,7 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
     out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.dtype))
-    out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim) * ctx.model.initializer.scale
+    out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
     if n_rows < n_cols:
         out = out.T
     return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
