@@ -120,8 +120,7 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
-                         ctx.model.initializer.embedding_std, scale=ctx.model.depth ** -0.5)
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward], 1)
     out_embd = get_param(ctx, "out_embd",
                          [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head],
                          column_axes=(1, 2))
