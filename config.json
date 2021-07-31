@@ -9,7 +9,10 @@
   },
 
   "model": {
-    "depth": 4
+    "depth": 8,
+    "initializer": {
+      "scale": 0.25
+    }
   },
 
   "dims": {
@@ -18,7 +21,19 @@
     }
   },
 
+
+  "optimizer": {
+    "gradient_clip": 0.005,
+    "learning_rate": 0.0005,
+    "warmup_end": 4096,
+    "exponential_decay": 0.00002
+  },
+
   "data": {
-    "prefetch_buffer": 32
+    "prefetch_buffer": 16,
+    "parallel_workers": 128,
+    "interleaved_datasets": 1024,
+    "datasets_used_per_step": 128
   }
 }
+
