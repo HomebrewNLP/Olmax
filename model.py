@@ -281,7 +281,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
     batch_seq = batch_dims + (sequence_dim,)
 
-    base, mean, scale = instance_norm(ctx, inp)
+    base = instance_norm(ctx, inp)
     base = activate(ctx, shard(dot_product(base, base_param, -2, 0, -1, 1), None))
     key = shard(dot_product(base, key_param, -1, 0))
     qry = shard(dot_product(base, qry_param, -1, 0))
