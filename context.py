@@ -79,6 +79,7 @@ class Model(DataClass):
         self.depth = 32
         self.leaky_relu_slope = 0.02
         self.activation_std = 0.5893595616022745
+        self.space_norm_context = 3
         self.masked_attention = True
         self.dtype = jnp.bfloat16
 

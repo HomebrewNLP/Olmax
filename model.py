@@ -86,7 +86,12 @@ def instance_norm_backward(dy: jnp.ndarray, inp: jnp.ndarray, out: jnp.ndarray, 
     return dx1 - jnp.sum(dx1, -1, keepdims=True)
 
 
-def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def space_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    if ctx.model.space_norm_context > 1:
+        inp += lax.reduce_window(inp, -jnp.inf, lax.max,
+                                 (1, ctx.model.space_norm_context) + (1,) * (inp.ndim - 2), (1,) * inp.ndim,
+                                 ((0, 0), (ctx.model.space_norm_context - 1, 0)) + ((0, 0),) * (inp.ndim - 2))
+
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         out, mean, scale = instance_norm_forward(ctx, src)
@@ -108,31 +113,11 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
-    transpose = tuple(range(1, ndim - 1)) + (0, ndim - 1)
-    batch_seq = tuple(range(ndim - 2))
-    batch_seq_1 = tuple(range(1, ndim - 1))
-
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray, i_w: jnp.ndarray, o_w: jnp.ndarray):
-        mid, mean, scale = instance_norm_forward(ctx, src)
-        mid = activate(ctx, shard(dot_general(mid, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-
-        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            norm_out = (src - mean) * scale
-
-            o_w_grad = dot_general(mid, dy, batch_seq_1, batch_seq, (0,), (2,))
-            d_mid = dot_general(dy, o_w, (ndim - 1,), (2,), (ndim - 2,), (0,))
-            d_mid = activation_backward(ctx, d_mid, mid)
-            i_w_grad = dot_general(norm_out, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,))
-            d_mid = dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,))
-            d_mid = d_mid.transpose(transpose)
-            return instance_norm_backward(d_mid, src, norm_out, scale), i_w_grad, o_w_grad
-
-        out = shard(dot_general(activate(ctx, mid), o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
-        out = shard(out.transpose(transpose))
-        return out, _grad_fn
-
-    return _fn(inp, inp_weight, out_weight)
+    mid, mean, scale = space_norm(ctx, inp)
+    mid = activate(ctx, shard(dot_general(mid, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
+    out = shard(dot_general(activate(ctx, mid), out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+    out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
+    return out
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
@@ -281,7 +266,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
     batch_seq = batch_dims + (sequence_dim,)
 
-    base = instance_norm(ctx, inp)
+    base = space_norm(ctx, inp)
     base = activate(ctx, shard(dot_product(base, base_param, -2, 0, -1, 1), None))
     key = shard(dot_product(base, key_param, -1, 0))
     qry = shard(dot_product(base, qry_param, -1, 0))
