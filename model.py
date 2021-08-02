@@ -7,6 +7,7 @@ import warnings
 import jax
 import jax._src.util as util
 import numpy as np
+import yaml
 from jax import lax, numpy as jnp
 from jax.experimental import PartitionSpec
 from jax.experimental import pjit
@@ -303,19 +304,26 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     return output_embed(ctx, src[1] + src[3])
 
 
-def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
+def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    return cross_entropy_loss(body_ctx(ctx, shard(src, None)), shard(tgt, None))
+    top_loss = loss = cross_entropy_loss(body_ctx(ctx, shard(src, None)), shard(tgt, None))
+    if ctx.training.loss_top_p < 1:
+        top_k = round(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
+        top_k *= ctx.training.loss_top_snap
+        top_loss, _ = lax.top_k(loss, top_k)
+    return top_loss, loss
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
-    grad_fn = jax.value_and_grad(compute, 0)
-    loss, grads = grad_fn(wctx.ctx.parameters, wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
+    grad_fn = jax.value_and_grad(compute, 0, True)
+    (top_loss, loss), grads = grad_fn(wctx.ctx.parameters,
+                                      wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
+    wctx.top_loss += top_loss
     wctx.current_step += 1
     return wctx.serialize()
 
@@ -367,6 +375,7 @@ def main():
     # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
     ctx = wctx.ctx
+    print(yaml.dump(ctx.config(), indent=4))
     ctx.is_initializing = True
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
@@ -383,6 +392,7 @@ def main():
     step = train_loop(wctx, timeit("JITing model", pjit.pjit, jitless_step, (partition,), partition))
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
+    global_start = time.time()
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
         timeit("Compiling model and performing first step", step, next(data))
         print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
@@ -391,10 +401,13 @@ def main():
         for idx, dat in enumerate(data):
             wctx = step(dat)
             if idx % ctx.training.print_interval == 0:
+                millions_processed = ctx.training.device_steps * ctx.dims.sequence * ctx.dims.sizes.batch * idx
                 print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
                       f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
-                      f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} - '
-                      f'Took: {time.time() - start_time:10.6f}s')
+                      f'TopLoss: {wctx.top_loss / ctx.training.device_steps:6.3f} | '
+                      f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
+                      f'StepTime: {time.time() - start_time:10.6f}s - '
+                      f'Rate: {millions_processed / (time.time() - global_start) * 2 ** -20:,6.1f} Million Tokens/s')
                 start_time = time.time()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:

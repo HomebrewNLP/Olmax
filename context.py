@@ -1,8 +1,7 @@
 import copy
 import sys
 import typing
-
-import jsonpickle
+import yaml
 from jax import numpy as jnp, random
 
 
@@ -88,6 +87,8 @@ class Model(DataClass):
 
 class Training(DataClass):
     def __init__(self):
+        self.loss_top_p = 0.4
+        self.loss_top_snap = 128  # snap top_p * batch to closest multiple
         self.device_steps = 1024
         self.steps = 2 ** 16
         self.model_parallel = 8
@@ -114,10 +115,10 @@ class Context(DataClass):
         self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
         self.training = Training()
 
-        if len(sys.argv) > 1 and sys.argv[1].endswith('.json'):
+        if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
                 cfg = f.read()
-            init_class(self, jsonpickle.loads(cfg))
+            init_class(self, yaml.safe_load(cfg))
 
         self.seed = 0
         self.global_prefix = ''
@@ -144,6 +145,11 @@ class Context(DataClass):
         self.name_cache[name] += 1
         return f'{name}:{self.name_cache[name]:d}'
 
+    def config(self) -> dict:
+        cfg = self.__dict__.copy()
+        del cfg['name_cache'], cfg['parameters'], cfg['parameter_dims'], cfg['prng_key'], cfg['is_initializing']
+        return cfg
+
 
 class WhileContext(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
@@ -169,13 +175,16 @@ class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
         self.loss = jnp.zeros([])
+        self.top_loss = jnp.zeros([])
 
         if self.config is not None:
             self.loss = config['loss']
+            self.top_loss = config['top_loss']
 
     def serialize(self):
         serialized = self._serialize()
         serialized['loss'] = self.loss
+        serialized['top_loss'] = self.top_loss
         return serialized
 
 

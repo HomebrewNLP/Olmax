@@ -1,0 +1,21 @@
+data:
+    datasets_used_per_step: 128
+    interleaved_datasets: 1024
+    parallel_workers: 128
+    prefetch_buffer: 16
+dims:
+    sizes:
+        batch: 2048
+model:
+    depth: 8
+optimizer:
+    exponential_decay: 2.0e-05
+    gradient_clip: 0.005
+    learning_rate: 0.0005
+    warmup_end: 4096
+training:
+    device_steps: 128
+    trace:
+        do_trace: false
+        start_step: 2
+        stop_step: 8
