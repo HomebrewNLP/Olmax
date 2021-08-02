@@ -74,16 +74,16 @@ def activation_backward(ctx: Context, dy: jnp.ndarray, inp: jnp.ndarray) -> jnp.
 
 
 def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    mean = shard(inp.mean(-1, keepdims=True), None)
+    mean = shard(inp.mean(-1, keepdims=True))
     out = inp - mean
-    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(out).mean(-1, keepdims=True), None))
+    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(out).mean(-1, keepdims=True)))
     return out * scale, mean, scale
 
 
 def instance_norm_backward(dy: jnp.ndarray, inp: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
     dy *= scale / inp.shape[-1]
-    dx1 = dy + out * jnp.sum(dy * out, -1, keepdims=True) / (- inp.shape[-1] ** 2)
-    return dx1 - jnp.sum(dx1, -1, keepdims=True)
+    dx1 = dy + out * shard(jnp.sum(dy * out, -1, keepdims=True)) / (- inp.shape[-1] ** 2)
+    return dx1 - shard(jnp.sum(dx1, -1, keepdims=True))
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -233,8 +233,8 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
             arange = jnp.arange(0, lgt.shape[-1])
             mask: jnp.ndarray = jnp.greater(jnp.reshape(arange, ones + (1, -1)), jnp.reshape(arange, ones + (-1, 1)))
             lgt += (-1e30 * mask).astype(lgt.dtype)
-        lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
-        lgt /= lgt.sum(-1, keepdims=True)
+        lgt = jnp.exp(lgt - shard(lgt.max(-1, keepdims=True), -3))
+        lgt /= shard(lgt.sum(-1, keepdims=True), -3)
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
             prod = lgt * dy
@@ -284,7 +284,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
     normalization = tgt.size
-    tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
+    tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
@@ -295,7 +295,7 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     src = input_embed(ctx, src)
-    zero = jnp.zeros_like(src)
+    zero = shard(jnp.zeros_like(src))
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.model.depth):
         src = reversible(ctx, attention, (i + 1) == ctx.model.depth)(src)
@@ -307,7 +307,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndar
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    return cross_entropy_loss(body_ctx(ctx, src), tgt)
+    return cross_entropy_loss(body_ctx(ctx, shard(src, None)), shard(tgt, None))
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
