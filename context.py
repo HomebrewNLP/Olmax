@@ -23,29 +23,31 @@ class DataContext(DataClass):
 
 
 class DimSizes(DataClass):
-    def __init__(self, data: DataContext, group_linear_factor):
+    def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
         self.batch = 256
         self.features_per_head = 512
         self.heads = 8
         self.sequence = 256
         self.vocab = data.vocab_size
         self.one = 1
-        self.intermediate_feed_forward = self.features_per_head * group_linear_factor
+        self.intermediate_attention = int(self.features_per_head * group_linear_factor)
+        self.intermediate_feed_forward = int(self.intermediate_attention * feed_forward_factor)
 
     def __getitem__(self, item: str):
         return getattr(self, item)
 
 
 class Dims(DataClass):
-    def __init__(self, data: DataContext, group_linear_factor: int):
+    def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
         self.batch = "batch"
         self.features_per_head = "features_per_head"
         self.heads = "heads"
         self.sequence = "sequence"
+        self.intermediate_attention = "intermediate_attention"
         self.intermediate_feed_forward = "intermediate_feed_forward"
         self.one = "one"
         self.vocab = "vocab"
-        self.sizes = DimSizes(data, group_linear_factor)
+        self.sizes = DimSizes(data, group_linear_factor, feed_forward_factor)
 
 
 class TensorboardTrace(DataClass):
@@ -79,8 +81,8 @@ class Model(DataClass):
         self.depth = 32
         self.leaky_relu_slope = 0.02
         self.activation_std = 0.5893595616022745
-        self.space_norm_context = 3
         self.masked_attention = True
+        self.feed_forward_factor = 2
         self.dtype = jnp.bfloat16
 
 
@@ -109,7 +111,7 @@ class Context(DataClass):
         self.data = DataContext()
         self.optimizer = Optimizer()
         self.model = Model()
-        self.dims = Dims(self.data, self.model.group_linear_factor)
+        self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
         self.training = Training()
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.json'):

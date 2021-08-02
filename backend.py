@@ -18,7 +18,7 @@ def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
 
 
 def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return ctx.dims.intermediate_feed_forward if is_intermediate(ctx, inp) else ctx.dims.features_per_head
+    return ctx.dims.intermediate_attention if is_intermediate(ctx, inp) else ctx.dims.features_per_head
 
 
 def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0):

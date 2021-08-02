@@ -86,12 +86,7 @@ def instance_norm_backward(dy: jnp.ndarray, inp: jnp.ndarray, out: jnp.ndarray, 
     return dx1 - jnp.sum(dx1, -1, keepdims=True)
 
 
-def space_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    if ctx.model.space_norm_context > 1:
-        inp += lax.reduce_window(inp, -jnp.inf, lax.max,
-                                 (1, ctx.model.space_norm_context) + (1,) * (inp.ndim - 2), (1,) * inp.ndim,
-                                 ((0, 0), (ctx.model.space_norm_context - 1, 0)) + ((0, 0),) * (inp.ndim - 2))
-
+def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         out, mean, scale = instance_norm_forward(ctx, src)
@@ -107,7 +102,7 @@ def space_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     ndim = inp.ndim
-    features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
+    features = [ctx.dims.features_per_head, ctx.dims.intermediate_attention]
     inp_weight0 = get_param(ctx, "inp_weight0", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
     inp_weight1 = get_param(ctx, "inp_weight1", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
     out_weight0 = get_param(ctx, "out_weight0", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
@@ -115,7 +110,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
-    normed = space_norm(ctx, inp)
+    normed = instance_norm(ctx, inp)
     mid0 = activate(ctx, shard(dot_general(normed, inp_weight0, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
     mid1 = activate(ctx, shard(dot_general(normed, inp_weight1, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
     out0 = shard(dot_general(activate(ctx, mid0), out_weight0, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
@@ -132,10 +127,10 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_feed_forward],
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_attention],
                          1 / ctx.model.activation_std)
     out_embd = get_param(ctx, "out_embd",
-                         [ctx.dims.intermediate_feed_forward, ctx.dims.heads, ctx.dims.features_per_head],
+                         [ctx.dims.intermediate_attention, ctx.dims.heads, ctx.dims.features_per_head],
                          column_axes=(1, 2))
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
@@ -253,11 +248,11 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_feed_forward],
+    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_attention],
                            scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2))
-    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2))
-    val_param = get_param(ctx, "val", [ctx.dims.intermediate_feed_forward] + feature_dims, column_axes=(1, 2),
+    key_param = get_param(ctx, "key", [ctx.dims.intermediate_attention] + feature_dims, column_axes=(1, 2))
+    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_attention] + feature_dims, column_axes=(1, 2))
+    val_param = get_param(ctx, "val", [ctx.dims.intermediate_attention] + feature_dims, column_axes=(1, 2),
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
@@ -271,7 +266,7 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
     batch_seq = batch_dims + (sequence_dim,)
 
-    base = space_norm(ctx, inp)
+    base = instance_norm(ctx, inp)
     base = activate(ctx, shard(dot_product(base, base_param, -2, 0, -1, 1), None))
     key = shard(dot_product(base, key_param, -1, 0))
     qry = shard(dot_product(base, qry_param, -1, 0))
