@@ -103,8 +103,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     ndim = inp.ndim
     features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
-    inp_weight0 = get_param(ctx, "inp_weight0", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
-    inp_weight1 = get_param(ctx, "inp_weight1", [ctx.dims.heads] + features)
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
@@ -114,31 +113,25 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     batch_seq_1 = tuple(range(1, ndim - 1))
 
     @jax.custom_gradient
-    def _fn(src: jnp.ndarray, i_w0: jnp.ndarray, i_w1: jnp.ndarray, o_w: jnp.ndarray):
+    def _fn(src: jnp.ndarray, i_w: jnp.ndarray, o_w: jnp.ndarray):
         normed, mean, scale = instance_norm_forward(ctx, src)  # B S H F
-        mid0 = activate(ctx, shard(dot_general(normed, i_w0, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-        mid1 = shard(dot_general(normed, i_w1, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1)  # H B S G
+        mid = activate(ctx, shard(dot_general(normed, i_w, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
 
-        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             norm_out = (src - mean) * scale  # B S H F
-            mid = mid0 * mid1  # H B S G
             o_w_grad = shard(dot_general(mid, dy, batch_seq_1, batch_seq, (0,), (2,)), 0, None)  # H G F
             d_mid = shard(dot_general(dy, o_w, (ndim - 1,), (2,), (ndim - 2,), (0,)), 0, 1)  # H B S G
-            d_mid0 = d_mid * mid0  # H B S G
-            d_mid1 = d_mid * mid1  # H B S G
-            d_mid0 = activation_backward(ctx, d_mid0, mid0)  # H B S G
-            i_w0_grad = shard(dot_general(norm_out, d_mid0, batch_seq, batch_seq_1, (ndim - 2,), (0,)), 0, None)  # HFG
-            i_w1_grad = shard(dot_general(norm_out, d_mid1, batch_seq, batch_seq_1, (ndim - 2,), (0,)), 0, None)
-            d_mid = shard(dot_general(d_mid0, i_w0, (d_mid.ndim - 1,), (2,), (0,), (0,)), 0, 1)  # H B S F
-            d_mid += shard(dot_general(d_mid1, i_w1, (d_mid.ndim - 1,), (2,), (0,), (0,)), 0, 1)  # H B S F
+            d_mid = activation_backward(ctx, d_mid, mid)  # H B S G
+            i_w_grad = shard(dot_general(norm_out, d_mid, batch_seq, batch_seq_1, (ndim - 2,), (0,)), 0, None)  # HFG
+            d_mid = shard(dot_general(d_mid, i_w, (d_mid.ndim - 1,), (2,), (0,), (0,)), 0, 1)  # H B S F
             d_mid = shard(d_mid.transpose(transpose))  # B S H F
-            return instance_norm_backward(d_mid, src, norm_out, scale), i_w0_grad, i_w1_grad, o_w_grad
+            return instance_norm_backward(d_mid, src, norm_out, scale), i_w_grad, o_w_grad
 
-        out = shard(dot_general(mid0 * mid1, o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+        out = shard(dot_general(mid, o_w, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
         out = shard(out.transpose(transpose))  # B S H F
         return out, _grad_fn
 
-    return _fn(inp, inp_weight0, inp_weight1, out_weight)
+    return _fn(inp, inp_weight, out_weight)
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
