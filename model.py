@@ -102,7 +102,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     ndim = inp.ndim
-    features = [ctx.dims.features_per_head, ctx.dims.intermediate_attention]
+    features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
     inp_weight0 = get_param(ctx, "inp_weight0", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
     inp_weight1 = get_param(ctx, "inp_weight1", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
     out_weight0 = get_param(ctx, "out_weight0", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
@@ -218,7 +218,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
 
         x0, grad_fn = jax.vjp(base, (params, y0))
         d_params, dx0 = grad_fn(dy1)[0]
-        d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
+        d_params = d_params if is_last else {k: d_params_old[k] + d_params[k] for k in d_params.keys()}
         return (d_params, dy1, y1 - x0, dx0 + dy0, y0),
 
     reversible_half_residual.defvjp(reversible_forward, reversible_backward)
