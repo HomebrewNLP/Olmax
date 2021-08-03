@@ -302,9 +302,9 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     src, tgt = inp
     unreduced_loss = cross_entropy_loss(body_ctx(ctx, shard(src, None)), shard(tgt, None))
     top_loss = loss = unreduced_loss.sum() / tgt.size
-    if ctx.training.loss_top_p < 1:
-        top_k = round(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
-        top_k *= ctx.training.loss_top_snap
+    top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
+    top_k *= ctx.training.loss_top_snap
+    if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
         top_loss, _ = lax.top_k(unreduced_loss, top_k)
         top_loss = top_loss.sum() / top_k
     return top_loss, loss
