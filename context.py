@@ -84,7 +84,7 @@ class Model(DataClass):
         self.activation_std = 0.5893595616022745
         self.masked_attention = True
         self.feed_forward_factor = 2
-        self.dtype = jnp.bfloat16
+        self.dtype = "bfloat16"  # valid jax.numpy.dtype
 
 
 class Training(DataClass):
