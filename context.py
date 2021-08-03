@@ -109,6 +109,12 @@ def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
         setattr(instance, name, config[name])
 
 
+def serialize(instance: typing.Union[typing.Dict[str, DataClass], DataClass]):
+    if isinstance(instance, DataClass):
+        return serialize(instance.__dict__)
+    return {k: serialize(v) if isinstance(v, DataClass) else v for k, v in instance.items()}
+
+
 class Context(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.data = DataContext()
@@ -150,7 +156,7 @@ class Context(DataClass):
     def config(self) -> dict:
         cfg = self.__dict__.copy()
         del cfg['name_cache'], cfg['parameters'], cfg['parameter_dims'], cfg['prng_key'], cfg['is_initializing']
-        return cfg
+        return serialize(cfg)
 
 
 class WhileContext(DataClass):
