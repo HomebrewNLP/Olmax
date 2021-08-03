@@ -1,6 +1,7 @@
 import copy
 import sys
 import typing
+
 import yaml
 from jax import numpy as jnp, random
 
@@ -69,6 +70,7 @@ class Optimizer(DataClass):
         self.momentum_beta = 0.9
         self.adam_beta1 = 0.9
         self.adam_beta2 = 0.99
+        self.weight_decay = 1e-3
         self.warmup_end = 4096
         self.exponential_decay = 1e-4
 
