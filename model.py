@@ -104,19 +104,14 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     ndim = inp.ndim
     features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
-    inp_weight0 = get_param(ctx, "inp_weight0", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
-    inp_weight1 = get_param(ctx, "inp_weight1", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
-    out_weight0 = get_param(ctx, "out_weight0", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
-    out_weight1 = get_param(ctx, "out_weight1", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid0 = activate(ctx, shard(dot_general(normed, inp_weight0, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-    mid1 = activate(ctx, shard(dot_general(normed, inp_weight1, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-    out0 = shard(dot_general(activate(ctx, mid0), out_weight0, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
-    out1 = shard(dot_general(activate(ctx, mid1), out_weight1, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
-    out = out0 * out1
+    mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
+    out = shard(dot_general(activate(ctx, mid), out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
     out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
     return out
 
