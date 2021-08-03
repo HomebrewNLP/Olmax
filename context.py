@@ -43,6 +43,7 @@ class Dims(DataClass):
         self.features_per_head = "features_per_head"
         self.heads = "heads"
         self.sequence = "sequence"
+        self.anonymous_sequence = "anonymous_sequence"
         self.intermediate_attention = "intermediate_attention"
         self.intermediate_feed_forward = "intermediate_feed_forward"
         self.one = "one"
@@ -79,6 +80,7 @@ class Model(DataClass):
     def __init__(self):
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
+        self.experts = 1  # TODO: Add dense MoE
         self.depth = 32
         self.leaky_relu_slope = 0.02
         self.activation_std = 0.5893595616022745

@@ -241,6 +241,22 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
+def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("spatial_mixing")
+    features = [ctx.dims.heads, ctx.dims.sequence] * 2
+    inp_weight = get_param(ctx, "inp_weight", features, scale=1 / ctx.model.activation_std)
+    out_weight = get_param(ctx, "out_weight", features, scale=ctx.model.depth ** -0.5)
+    if ctx.is_initializing:
+        return inp
+    ndim = inp.ndim
+
+    normed = instance_norm(ctx, inp)
+    mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 3,), (1,), (ndim - 2,), (0,)), 0, 1))  # HBFS
+    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+    out = shard(out.transpose((ndim - 2,) + tuple(range(1, ndim - 3)), ndim - 1, ndim - 3))  # B S H F
+    return out
+
+
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
@@ -291,7 +307,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     zero = shard(jnp.zeros_like(src))
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.model.depth):
-        src = reversible(ctx, attention, (i + 1) == ctx.model.depth)(src)
+        src = reversible(ctx, spatial_mixing, (i + 1) == ctx.model.depth)(src)
         src = reversible(ctx, group_feed_forward, (i + 1) == ctx.model.depth)(src)
     return output_embed(ctx, src[1] + src[3])
 
