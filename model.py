@@ -397,13 +397,13 @@ def main():
         for idx, dat in enumerate(data):
             wctx = step(dat)
             if idx % ctx.training.print_interval == 0:
-                millions_processed = ctx.training.device_steps * ctx.dims.sizes.sequence * ctx.dims.sizes.batch * idx
+                millions_processed = ctx.training.device_steps * ctx.dims.sizes.sequence * ctx.dims.sizes.batch
                 print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
                       f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
-                      f'TopLoss: {wctx.top_loss / ctx.training.device_steps:6.3f} | '
+                      f'TopLoss: {wctx.top_loss / ctx.training.device_steps:8.3f} | '
                       f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
                       f'StepTime: {time.time() - start_time:10.6f}s - '
-                      f'Rate: {millions_processed / (time.time() - global_start) * 2 ** -20:6,.1f} Million Tokens/s')
+                      f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):6,.1f} Tokens/s')
                 start_time = time.time()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
