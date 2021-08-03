@@ -279,14 +279,11 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
-    normalization = tgt.size
     tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
-    loss = (jnp.log(sum_exp) - shifted) * tgt
-    loss = loss.sum() / normalization
-    return loss
+    return ((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim)))
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
@@ -303,11 +300,13 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    top_loss = loss = cross_entropy_loss(body_ctx(ctx, shard(src, None)), shard(tgt, None))
+    unreduced_loss = cross_entropy_loss(body_ctx(ctx, shard(src, None)), shard(tgt, None))
+    top_loss = loss = unreduced_loss.sum() / tgt.size
     if ctx.training.loss_top_p < 1:
         top_k = round(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
         top_k *= ctx.training.loss_top_snap
         top_loss, _ = lax.top_k(loss, top_k)
+        top_loss = top_loss.sum() / top_k
     return top_loss, loss
 
 
