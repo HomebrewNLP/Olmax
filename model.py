@@ -283,7 +283,7 @@ def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
-    return ((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim)))
+    return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None)
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
