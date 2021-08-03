@@ -111,7 +111,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-    out = shard(dot_general(activate(ctx, mid), out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
+    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
     out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
     return out
 
