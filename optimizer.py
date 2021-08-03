@@ -86,6 +86,10 @@ def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
+
+    arange = jnp.arange(0, ctx.dims.sizes.sequence)
+    mask = jnp.less_equal(jnp.reshape(arange, (1, 1, -1)), jnp.reshape(arange, (1, -1, 1))).astype(ctx.model.dtype)
+
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
         if "optimizer" in param_name:
@@ -95,3 +99,5 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         # grad = momentum(inner_ctx, param_name, grad, current_step)
         grad = adam(inner_ctx, param_name, grad, current_step)
         ctx.parameters[param_name] = (1 - ctx.optimizer.weight_decay) * ctx.parameters[param_name] + grad * lr
+        if "spatial_mixing" in param_name:
+            ctx.parameters[param_name] *= mask
