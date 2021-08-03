@@ -357,6 +357,7 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
     def _fn(dat: jnp.ndarray) -> WhileTrainContext:
         w = ctx[0](dat)
         w.loss = jnp.zeros_like(w.loss)
+        w.top_loss = jnp.zeros_like(w.loss)
         w.current_step = w.current_step + 1
         ctx[0] = WhileTrainContext(step(w.serialize()))
         return ctx[0]
