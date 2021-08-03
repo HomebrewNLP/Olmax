@@ -305,7 +305,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     if ctx.training.loss_top_p < 1:
         top_k = round(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
         top_k *= ctx.training.loss_top_snap
-        top_loss, _ = lax.top_k(loss, top_k)
+        top_loss, _ = lax.top_k(unreduced_loss, top_k)
         top_loss = top_loss.sum() / top_k
     return top_loss, loss
 
@@ -396,13 +396,13 @@ def main():
         for idx, dat in enumerate(data):
             wctx = step(dat)
             if idx % ctx.training.print_interval == 0:
-                millions_processed = ctx.training.device_steps * ctx.dims.sequence * ctx.dims.sizes.batch * idx
+                millions_processed = ctx.training.device_steps * ctx.dims.sizes.sequence * ctx.dims.sizes.batch * idx
                 print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
                       f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
                       f'TopLoss: {wctx.top_loss / ctx.training.device_steps:6.3f} | '
                       f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
                       f'StepTime: {time.time() - start_time:10.6f}s - '
-                      f'Rate: {millions_processed / (time.time() - global_start) * 2 ** -20:,6.1f} Million Tokens/s')
+                      f'Rate: {millions_processed / (time.time() - global_start) * 2 ** -20:6,.1f} Million Tokens/s')
                 start_time = time.time()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
