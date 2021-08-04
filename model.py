@@ -76,8 +76,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def feed_forward_features(ctx: Context, in_dim: str, out_dim: str,
-                          reduced=False) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5)
     return inp_weight, out_weight
@@ -130,7 +129,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     features = jnp.arange(0, feature_count)
     features = shard(jnp.reshape(features, [1] + feature_shape) * 4 / feature_count, 1, None)
     features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 1))
-    pos_embd = jnp.sin(features * positions)
+    pos_embd = jnp.sin(features * positions).astype(ctx.model.dtype)
     return out + lax.stop_gradient(pos_embd)
 
 
