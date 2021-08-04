@@ -30,8 +30,8 @@ class DimSizes(DataClass):
         self.sequence = 256
         self.vocab = data.vocab_size
         self.one = 1
-        self.intermediate_attention = int(self.features_per_head * group_linear_factor)
-        self.intermediate_feed_forward = int(self.intermediate_attention * feed_forward_factor)
+        self.intermediate_replicated = int(self.features_per_head * group_linear_factor)
+        self.intermediate_parallel = int(self.intermediate_replicated * feed_forward_factor)
 
     def __getitem__(self, item: str):
         return getattr(self, item)
