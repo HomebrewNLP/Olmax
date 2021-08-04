@@ -44,8 +44,8 @@ class Dims(DataClass):
         self.heads = "heads"
         self.sequence = "sequence"
         self.anonymous_sequence = "anonymous_sequence"
-        self.intermediate_attention = "intermediate_attention"
-        self.intermediate_feed_forward = "intermediate_feed_forward"
+        self.intermediate_replicated = "intermediate_replicated"
+        self.intermediate_parallel = "intermediate_parallel"
         self.one = "one"
         self.vocab = "vocab"
         self.sizes = DimSizes(data, group_linear_factor, feed_forward_factor)

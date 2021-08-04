@@ -13,7 +13,7 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
-from backend import default, get_param, shard, dims_to_shape
+from backend import get_param, shard, dims_to_shape
 from context import Context, WhileTrainContext
 from data import text_dataset
 from optimizer import get_current_lr, update
@@ -28,32 +28,8 @@ def dot_general(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: typin
     return lax.dot_general(left, right, dims, "fastest")
 
 
-def dot_product(left: jnp.ndarray, right: jnp.ndarray, left_sum_start: int, right_sum_start: int,
-                left_sum_end: typing.Optional[int] = None, right_sum_end: typing.Optional[int] = None) -> jnp.ndarray:
-    """
-    Performs a basic dot product across two tensors. All dimensions in front of left_sum_start and behind right_sum_end
-    are kept. All dimensions in front of right_sum_start are batch dimensions. left_sum_end has to be the true end.
-    While _start is inclusive, _end is inclusive. Example: 1, 3 gives (1, 2, 3), as it is shifted internally.
-    If _end is not set, _start is used as the only value (equal to setting end to start + 1)
-
-    :param left: tensor that's dot-product-ed. left in left@right
-    :param right: right tensor from left@right
-    :param left_sum_start: start/only summed dim in left tensor
-    :param right_sum_start: stort/only summed dim in right tensor
-    :param left_sum_end: optional end if multiple dims are used
-    :param right_sum_end: optional end if multiple dims are used
-    :return: tensor containing left@right
-    """
-    l_ndim = left.ndim
-    r_ndim = right.ndim
-    l_start = left_sum_start % l_ndim
-    r_start = right_sum_start % r_ndim
-    l_end = default(left_sum_end, left_sum_start) % l_ndim + 1
-    r_end = default(right_sum_end, right_sum_start) % r_ndim + 1
-    min_start = min(r_start, l_start)
-    return dot_general(left, right, tuple(range(l_start, l_end)), tuple(range(r_start, r_end)),
-                       tuple(range(l_ndim - l_start, l_ndim - l_start - min_start, -1)),
-                       tuple(range(r_ndim - r_start, r_ndim - r_start - min_start, -1)))
+def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
+    return dot_general(left, right, tuple(range(left.ndim - reduced_dims, left.ndim)), tuple(range(reduced_dims)))
 
 
 def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
@@ -100,19 +76,35 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
+def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
+    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim, ctx.dims.heads], scale=ctx.model.depth ** -0.5)
+    return inp_weight, out_weight
+
+
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
+    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel)
+    if ctx.is_initializing:
+        return inp
+
     ndim = inp.ndim
-    features = [ctx.dims.features_per_head, ctx.dims.intermediate_feed_forward]
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads] + features, scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads] + features[::-1], scale=ctx.model.depth ** -0.5)
+    normed = instance_norm(ctx, inp)
+    mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
+    out = shard(dot_general(mid, out_weight, (ndim - 1,), (0,), (0,), (2,)), 0, 1)
+    out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
+    return out
+
+
+def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("feed_forward")
+    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
-    out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
+    mid = activate(ctx, shard(matmul(normed, inp_weight, 2), None))
+    out = shard(matmul(mid, out_weight, 1))
     return out
 
 
@@ -123,10 +115,10 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_attention],
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_replicated],
                          1 / ctx.model.activation_std)
     out_embd = get_param(ctx, "out_embd",
-                         [ctx.dims.intermediate_attention, ctx.dims.heads, ctx.dims.features_per_head],
+                         [ctx.dims.intermediate_replicated, ctx.dims.heads, ctx.dims.features_per_head],
                          column_axes=(1, 2))
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
@@ -135,8 +127,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, i_e: jnp.ndarray, o_e: jnp.ndarray):
-        mid = activate(ctx, shard(dot_product(one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype),
-                                              i_e, -1, 0), None))
+        mid = activate(ctx, shard(matmul(one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype), i_e), None))
 
         def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[None, jnp.ndarray, jnp.ndarray]:
             one_hot_src = one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype)
@@ -145,7 +136,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
             i_e_grad = dot_general(one_hot_src, mid_grad, batch_dims, batch_dims)
             return None, i_e_grad, o_e_grad
 
-        out = shard(dot_product(mid, o_e, -1, 0))
+        out = shard(matmul(mid, o_e))
         position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
         feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
         position_count = util.prod(position_shape)
@@ -166,7 +157,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], 0, 0)
     if ctx.is_initializing:
         return inp
-    return shard(dot_product(inp, embd, -2, 0, -1, 1), None)
+    return shard(matmul(inp, embd, 2), None)
 
 
 def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
@@ -221,6 +212,11 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     return reversible_half_residual
 
 
+def mean_gate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("mean_gate")
+    return feed_forward(ctx, inp.mean(1, keepdims=True))
+
+
 def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(lgt: jnp.ndarray):
@@ -243,9 +239,7 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("spatial_mixing")
-    features = [ctx.dims.heads] + [ctx.dims.sequence] * 2
-    inp_weight = get_param(ctx, "inp_weight", features, scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", features, scale=ctx.model.depth ** -0.5)
+    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.sequence, ctx.dims.sequence)
     if ctx.is_initializing:
         return inp
     ndim = inp.ndim
@@ -260,11 +254,11 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_attention],
+    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_replicated],
                            scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.intermediate_attention] + feature_dims, column_axes=(1, 2))
-    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_attention] + feature_dims, column_axes=(1, 2))
-    val_param = get_param(ctx, "val", [ctx.dims.intermediate_attention] + feature_dims, column_axes=(1, 2),
+    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=(1, 2))
+    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=(1, 2))
+    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=(1, 2),
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
@@ -279,10 +273,10 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     batch_seq = batch_dims + (sequence_dim,)
 
     base = instance_norm(ctx, inp)
-    base = activate(ctx, shard(dot_product(base, base_param, -2, 0, -1, 1), None))
-    key = shard(dot_product(base, key_param, -1, 0))
-    qry = shard(dot_product(base, qry_param, -1, 0))
-    val = shard(dot_product(base, val_param, -1, 0))
+    base = activate(ctx, shard(matmul(base, base_param, 2), None))
+    key = shard(matmul(base, key_param, 2))
+    qry = shard(matmul(base, qry_param, 2))
+    val = shard(matmul(base, val_param, 2))
 
     key = shard(key.transpose(key_permute), -3) * inp.shape[-1] ** -0.5
     val = shard(val.transpose(key_permute), -3)
