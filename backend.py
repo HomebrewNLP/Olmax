@@ -54,13 +54,13 @@ def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
 
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
-              column_axes: typing.Sequence[int] = tuple(), scale: float = 1.) -> jnp.ndarray:
+              column_axes: int = 1, scale: float = 1.) -> jnp.ndarray:
     name = ctx.add_to_prefix(name, count=False).global_prefix
     if name not in ctx.parameters:
         ctx.parameter_dims[name] = shape
         shape = dims_to_shape(ctx, shape)
         if std is None and mean is None:
-            ctx.parameters[name] = orthogonal_init(ctx, shape, column_axes if column_axes else (-1,)) * scale
+            ctx.parameters[name] = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
         else:
             ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:

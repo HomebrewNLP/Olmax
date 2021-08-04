@@ -79,8 +79,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str,
                           reduced=False) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5,
-                           column_axes=(1, 2) if reduced else (1,))
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5)
     return inp_weight, out_weight
 
 
@@ -118,41 +117,21 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.intermediate_replicated],
-                         1 / ctx.model.activation_std)
-    out_embd = get_param(ctx, "out_embd",
-                         [ctx.dims.intermediate_replicated, ctx.dims.heads, ctx.dims.features_per_head],
-                         column_axes=(1, 2))
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head])
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
-    batch_dims = range(inp.ndim)
-    ndim = inp.ndim + 2
 
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray, i_e: jnp.ndarray, o_e: jnp.ndarray):
-        mid = activate(ctx, shard(matmul(one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype), i_e), None))
-
-        def _grad_fn(dy: jnp.ndarray) -> typing.Tuple[None, jnp.ndarray, jnp.ndarray]:
-            one_hot_src = one_hot(src, ctx.data.vocab_size).astype(ctx.model.dtype)
-            o_e_grad = dot_general(mid, dy, batch_dims, batch_dims)
-            mid_grad = activation_backward(ctx, dot_general(dy, o_e, (ndim - 2, ndim - 1), (1, 2)), mid)
-            i_e_grad = dot_general(one_hot_src, mid_grad, batch_dims, batch_dims)
-            return None, i_e_grad, o_e_grad
-
-        out = shard(matmul(mid, o_e))
-        position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
-        feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
-        position_count = util.prod(position_shape)
-        feature_count = util.prod(feature_shape)
-        positions = jnp.reshape(jnp.arange(0, position_shape), (-1, 1, 1))
-        features = jnp.arange(0, feature_count)
-        features = shard(jnp.reshape(features, [1] + feature_shape) * 4 / feature_count, 1, None)
-        features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 1))
-        pos_embd = jnp.sin(features * positions)
-
-        return out + pos_embd.astype(out.dtype), _grad_fn
-
-    return _fn(inp, inp_embd, out_embd)
+    out = shard(matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd))
+    position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
+    feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
+    position_count = util.prod(position_shape)
+    feature_count = util.prod(feature_shape)
+    positions = jnp.reshape(jnp.arange(0, position_shape), (-1, 1, 1))
+    features = jnp.arange(0, feature_count)
+    features = shard(jnp.reshape(features, [1] + feature_shape) * 4 / feature_count, 1, None)
+    features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 1))
+    pos_embd = jnp.sin(features * positions)
+    return out + lax.stop_gradient(pos_embd)
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -259,9 +238,9 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
     base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_replicated],
                            scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=(1, 2))
-    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=(1, 2))
-    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=(1, 2),
+    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
