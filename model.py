@@ -79,7 +79,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str,
                           reduced=False) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim, ctx.dims.heads], scale=ctx.model.depth ** -0.5,
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5,
                            column_axes=(1, 2) if reduced else (1,))
     return inp_weight, out_weight
 
@@ -93,7 +93,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ndim = inp.ndim
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 1,), (1,), (ndim - 2,), (0,)), 0, 1))
-    out = shard(dot_general(mid, out_weight, (ndim - 1,), (0,), (0,), (2,)), 0, 1)
+    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
     out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
     return out
 
@@ -104,9 +104,10 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
+    ndim = inp.ndim
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(matmul(normed, inp_weight, 2), None))
-    out = shard(matmul(mid, out_weight, 1))
+    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,)))
     return out
 
 
@@ -248,7 +249,7 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 3,), (1,), (ndim - 2,), (0,)), 0, 1))  # HBFS
-    out = shard(dot_general(mid, out_weight, (ndim - 1,), (0,), (0,), (2,)), 0, 1)
+    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
     out = shard(out.transpose(tuple(range(1, ndim - 2)) + (ndim - 1, 0, ndim - 2)))  # B S H F
     return out
 
