@@ -243,7 +243,7 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("spatial_mixing")
-    features = [ctx.dims.heads, ctx.dims.sequence] * 2
+    features = [ctx.dims.heads] + [ctx.dims.sequence] * 2
     inp_weight = get_param(ctx, "inp_weight", features, scale=1 / ctx.model.activation_std)
     out_weight = get_param(ctx, "out_weight", features, scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
@@ -253,7 +253,7 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot_general(normed, inp_weight, (ndim - 3,), (1,), (ndim - 2,), (0,)), 0, 1))  # HBFS
     out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,), (0,), (0,)), 0, 1)
-    out = shard(out.transpose((ndim - 2,) + tuple(range(1, ndim - 3)), ndim - 1, ndim - 3))  # B S H F
+    out = shard(out.transpose(tuple(range(1, ndim - 2)) + (ndim - 1, 0, ndim - 2)))  # B S H F
     return out
 
 
