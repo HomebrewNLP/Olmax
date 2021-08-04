@@ -322,7 +322,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     top_k *= ctx.training.loss_top_snap
     if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
         top_loss, _ = lax.top_k(unreduced_loss, top_k)
-        top_loss = top_loss.sum() / top_k
+        top_loss = top_loss.sum() / (top_k / ctx.dims.sizes.batch * tgt.size)
     return top_loss, loss
 
 
