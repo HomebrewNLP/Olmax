@@ -102,10 +102,9 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
-    ndim = inp.ndim
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(matmul(normed, inp_weight, 2), None))
-    out = shard(dot_general(mid, out_weight, (ndim - 1,), (1,)))
+    out = shard(dot_general(mid, out_weight, (mid.ndim - 1,), (1,)))
     return out
 
 
