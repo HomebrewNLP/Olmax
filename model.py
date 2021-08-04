@@ -302,7 +302,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.model.depth):
         src = reversible(ctx, spatial_mixing, (i + 1) == ctx.model.depth)(src)
-        src = reversible(ctx, group_feed_forward, (i + 1) == ctx.model.depth)(src)
+        src = reversible(ctx, feed_forward, (i + 1) == ctx.model.depth)(src)
     return output_embed(ctx, src[1] + src[3])
 
 
