@@ -76,9 +76,11 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def feed_forward_features(ctx: Context, in_dim: str, out_dim: str,
+                          reduced=False) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim, ctx.dims.heads], scale=ctx.model.depth ** -0.5)
+    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim, ctx.dims.heads], scale=ctx.model.depth ** -0.5,
+                           column_axes=(1, 2) if reduced else (1,))
     return inp_weight, out_weight
 
 
