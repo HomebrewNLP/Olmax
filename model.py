@@ -63,10 +63,14 @@ def activation_backward(ctx: Context, dy: jnp.ndarray, inp: jnp.ndarray) -> jnp.
     return dy * scale
 
 
+def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False):
+    return lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(inp).mean(dims, keepdims=keepdims)))
+
+
 def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     mean = shard(inp.mean(-1, keepdims=True))
     out = inp - mean
-    scale = lax.rsqrt(ctx.model.norm_eps + shard(jnp.square(out).mean(-1, keepdims=True)))
+    scale = norm(ctx, out, -1, True)
     return out * scale, mean, scale
 
 
@@ -288,11 +292,11 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def contrastive_loss(ctx: Context, out: jnp.ndarray, proj: jnp.ndarray) -> jnp.ndarray:
     """Cosine similarity of output and projection https://arxiv.org/abs/2011.10566"""
-    out = out / (lax.sqrt(jnp.square(out).sum((2, 3), keepdims=True)) + ctx.model.norm_eps)
-    proj = proj / (lax.sqrt(jnp.square(proj).sum((2, 3), keepdims=True)) + ctx.model.norm_eps)
+    out = out * norm(ctx, proj, (-2, -1), True)
+    proj = proj * norm(ctx, proj, (-2, -1), True)
 
-    norm = -1 / ctx.dims.sizes.sequence ** 2
-    return jnp.sum(dot(out, shard(jnp.sum(proj, -3)), (-2, -1), (-2, -1)), tuple(range(1, out.ndim - 2))) * norm
+    normalization = -1 / ctx.dims.sizes.sequence ** 2
+    return dot(out, shard(jnp.sum(proj, -3)), (-2, -1), (-2, -1)).sum(tuple(range(1, out.ndim - 2))) * normalization
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
