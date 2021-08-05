@@ -44,7 +44,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     batch_size = ctx.dims.sizes.batch
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
-    sequence_length_1 = sequence_length + ctx.training.contrastive
+    sequence_length_1 = sequence_length + 1 - ctx.training.contrastive
     assert not (full_batch % ctx.data.datasets_used_per_step)
 
     def _slice_target(x):
