@@ -296,7 +296,7 @@ def contrastive_loss(ctx: Context, out: jnp.ndarray, proj: jnp.ndarray) -> jnp.n
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
-    norm = tgt.size / ctx.dims.batch
+    norm = tgt.size / ctx.dims.sizes.batch
     tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
@@ -325,7 +325,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     else:
         src, tgt = inp
         unreduced_loss = cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
-    top_loss = loss = unreduced_loss.sum() / ctx.dims.batch
+    top_loss = loss = unreduced_loss.sum() / ctx.dims.sizes.batch
     top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
     top_k *= ctx.training.loss_top_snap
     if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
