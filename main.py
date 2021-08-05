@@ -11,10 +11,10 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
-from context import Context, WhileTrainContext
-from data import text_dataset
-from model import compute, body_ctx,
-from optimizer import get_current_lr, update
+from src.context import Context, WhileTrainContext
+from src.data import text_dataset
+from src.model import compute, body_ctx,
+from src.optimizer import get_current_lr, update
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
