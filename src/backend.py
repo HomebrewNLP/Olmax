@@ -8,9 +8,38 @@ from jax.experimental import pjit
 
 from .context import Context
 
+INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
+
+
+def pos_dim(inp: jnp.ndarray, dims: typing.Sequence[int]) -> typing.Sequence[int]:
+    return tuple([d % inp.ndim for d in dims])
+
+
+def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
+    if isinstance(obj, (tuple, list)):
+        return tuple(obj)
+    if isinstance(obj, int):
+        return (obj,)
+    raise ValueError
+
+
+def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
+        left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jnp.ndarray:
+    dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
+            (pos_dim(left, tuple_int(left_batch_dims)), pos_dim(right, tuple_int(right_batch_dims))))
+    return lax.dot_general(left, right, dims, "fastest")
+
+
+def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
+    return dot(left, right, tuple(range(-reduced_dims, 0)), tuple(range(reduced_dims)))
+
 
 def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
     return [ctx.dims.sizes[d] for d in dims]
+
+
+def transpose(inp: jnp.ndarray, dims: INT_OR_TUPLE) -> jnp.ndarray:
+    return inp.transpose(pos_dim(inp, dims))
 
 
 def is_intermediate(ctx, inp: jnp.ndarray) -> bool:

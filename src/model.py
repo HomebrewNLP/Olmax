@@ -6,34 +6,10 @@ import jax
 import jax._src.util as util
 from jax import lax, numpy as jnp
 
-from .backend import get_param, shard, dims_to_shape
+from .backend import get_param, shard, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose
 from .context import Context
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
-INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
-
-
-def pos_dim(inp: jnp.ndarray, dims: typing.Sequence[int]) -> typing.Sequence[int]:
-    return tuple([d % inp.ndim for d in dims])
-
-
-def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
-    if isinstance(obj, (tuple, list)):
-        return tuple(obj)
-    if isinstance(obj, int):
-        return (obj,)
-    raise ValueError
-
-
-def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
-        left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jnp.ndarray:
-    dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
-            (pos_dim(left, tuple_int(left_batch_dims)), pos_dim(right, tuple_int(right_batch_dims))))
-    return lax.dot_general(left, right, dims, "fastest")
-
-
-def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
-    return dot(left, right, tuple(range(-reduced_dims, 0)), tuple(range(reduced_dims)))
 
 
 def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
@@ -87,7 +63,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot(normed, inp_weight, -1, 1, -2, 0), 0, 1))
     out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
-    out = shard(out.transpose(tuple(range(1, inp.ndim - 1)) + (0, -1)))
+    out = shard(transpose(out, tuple(range(1, inp.ndim - 1)) + (0, -1)))
     return out
 
 
@@ -226,7 +202,7 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot(normed, inp_weight, -3, 1, -2, 0), 0, 1))  # HBFS
     out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
-    out = shard(out.transpose(tuple(range(1, inp.ndim - 2)) + (-1, 0, -2)))  # B S H F
+    out = shard(transpose(out, tuple(range(1, inp.ndim - 2)) + (-1, 0, -2)))  # B S H F
     return out
 
 
@@ -257,14 +233,14 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     qry = shard(matmul(base, qry_param, 2))
     val = shard(matmul(base, val_param, 2))
 
-    key = shard(key.transpose(key_permute), -3) * inp.shape[-1] ** -0.5
-    val = shard(val.transpose(key_permute), -3)
-    qry = shard(qry.transpose(qry_permute), -3)
+    key = shard(transpose(key, key_permute), -3) * inp.shape[-1] ** -0.5
+    val = shard(transpose(val, key_permute), -3)
+    qry = shard(transpose(qry, qry_permute), -3)
     lgt = shard(dot(key, qry, feature_dim, head_dim, batch_seq, batch_seq), -3)
     lgt = softmax(ctx, lgt)
 
     out = shard(dot(lgt, val, feature_dim, head_dim, batch_seq, batch_seq), -3)
-    return shard(out.transpose(key_permute))
+    return shard(transpose(out, key_permute))
 
 
 def contrastive_loss(ctx: Context, out: jnp.ndarray, proj: jnp.ndarray) -> jnp.ndarray:
