@@ -84,11 +84,10 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
-    ndim = inp.ndim
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot(normed, inp_weight, -1, 1, -2, 0), 0, 1))
     out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
-    out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
+    out = shard(out.transpose(tuple(range(1, inp.ndim - 1)) + (0, -1)))
     return out
 
 
@@ -223,12 +222,11 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.sequence, ctx.dims.sequence)
     if ctx.is_initializing:
         return inp
-    ndim = inp.ndim
 
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(dot(normed, inp_weight, -3, 1, -2, 0), 0, 1))  # HBFS
     out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
-    out = shard(out.transpose(tuple(range(1, ndim - 2)) + (ndim - 1, 0, ndim - 2)))  # B S H F
+    out = shard(out.transpose(tuple(range(1, inp.ndim - 2)) + (-1, 0, -2)))  # B S H F
     return out
 
 
