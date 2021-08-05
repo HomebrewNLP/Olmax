@@ -46,21 +46,7 @@ def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
 
 
 def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
-        out = jax.nn.leaky_relu(src, ctx.model.leaky_relu_slope)
-
-        def _grad_fn(dy: jnp.ndarray):
-            return activation_backward(ctx, dy, out)
-
-        return out, _grad_fn
-
-    return _fn(inp)
-
-
-def activation_backward(ctx: Context, dy: jnp.ndarray, inp: jnp.ndarray) -> jnp.ndarray:
-    scale = (1 - ctx.model.leaky_relu_slope) * jnp.greater(inp, 0).astype(ctx.model.dtype) + ctx.model.leaky_relu_slope
-    return dy * scale
+    return jax.nn.leaky_relu(src, ctx.model.leaky_relu_slope)
 
 
 def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
