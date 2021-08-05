@@ -44,7 +44,8 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     batch_size = ctx.dims.sizes.batch
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
-    assert not(full_batch % ctx.data.datasets_used_per_step)
+    sequence_length_1 = sequence_length + ctx.training.contrastive
+    assert not (full_batch % ctx.data.datasets_used_per_step)
 
     def _slice_target(x):
         """
@@ -55,13 +56,16 @@ def text_dataset(ctx: Context) -> NumpyIterator:
         :param x: tensor that's sliced
         :return: src/tgt
         """
-        x = tf.reshape(x, (batch_size, device_steps, sequence_length + 1))
+        x = tf.reshape(x, (batch_size, device_steps, sequence_length_1))
         x = tf.cast(x, tf.int32)
         x = tf.transpose(x, (1, 0, 2))
+        if ctx.training.contrastive:
+            return x
+
         return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
 
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x,
-                                             (sequence_length + 1) * full_batch // ctx.data.datasets_used_per_step),
+                                             sequence_length_1 * full_batch // ctx.data.datasets_used_per_step),
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_workers)
     if ctx.data.shuffle_buffer > 0:

@@ -315,6 +315,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
+    if ctx.training.contrastive:
+        return (contrastive_loss(body_ctx(ctx, shard(inp, None))),) * 2
     src, tgt = inp
     return cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
 

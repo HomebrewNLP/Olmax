@@ -97,6 +97,7 @@ class Training(DataClass):
         self.steps = 2 ** 16
         self.model_parallel = 8
         self.data_parallel = 1
+        self.contrastive = False
         self.print_interval = 1
         self.trace = TensorboardTrace()
 
