@@ -294,11 +294,11 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def contrastive_loss(ctx: Context, out: jnp.ndarray, proj: jnp.ndarray) -> jnp.ndarray:
     """Cosine similarity of output and projection https://arxiv.org/abs/2011.10566"""
-    out = out * norm(ctx, proj, (-2, -1), True, None)
-    proj = proj * norm(ctx, proj, (-2, -1), True, None)
+    out = shard(dot(out, norm(ctx, out, (-2, -1), False, None), -3, -1, 0, 0))
+    proj = shard(dot(proj, norm(ctx, proj, (-2, -1), False, None), -3, -1, 0, 0))
 
     normalization = -1 / ctx.dims.sizes.sequence ** 2
-    return shard(dot(shard(jnp.sum(out, -3)), shard(jnp.sum(proj, -3)), (-2, -1), (-2, -1)), None) * normalization
+    return shard(dot(out, proj, (-2, -1), (-2, -1)), None) * normalization
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
