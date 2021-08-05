@@ -103,8 +103,8 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     ndim = inp.ndim
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight, - 1, 1, - 2, 0), 0, 1))
-    out = shard(dot(mid, out_weight, - 1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight, -1, 1, -2, 0), 0, 1))
+    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
     out = shard(out.transpose(tuple(range(1, ndim - 1)) + (0, ndim - 1)))
     return out
 
@@ -117,7 +117,7 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     normed = instance_norm(ctx, inp)
     mid = activate(ctx, shard(matmul(normed, inp_weight, 2), None))
-    out = shard(dot(mid, out_weight, - 1, 1))
+    out = shard(dot(mid, out_weight, -1, 1))
     return out
 
 
@@ -238,8 +238,8 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ndim = inp.ndim
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight, - 3, 1, - 2, 0), 0, 1))  # HBFS
-    out = shard(dot(mid, out_weight, - 1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight, -3, 1, -2, 0), 0, 1))  # HBFS
+    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
     out = shard(out.transpose(tuple(range(1, ndim - 2)) + (ndim - 1, 0, ndim - 2)))  # B S H F
     return out
 
@@ -282,16 +282,24 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def contrastive_loss(src: jnp.ndarray) -> jnp.ndarray:
-    positive = jnp.sum(dot(src, shard(jnp.sum(src, 1)), (0, - 2, - 1), (0, 1, 2)))
-    return 2 * positive - jnp.sum(shard(dot(src, shard(jnp.sum(src, (0, 1)), None), (- 2, - 1), (0, 1)), None))
+    positive = jnp.sum(dot(src, shard(jnp.sum(src, -3)), (0, -2, -1), (0, -2, -1)))
+    negative = jnp.sum(shard(dot(src, shard(jnp.sum(src, (0, 1)), None), (-2, -1), (0, 1)), None))
+    return positive * (2 / src.size) - negative / src.size
 
 
-def cross_entropy_loss(src: jnp.ndarray, tgt: jnp.ndarray):
+def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
-    return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None)
+    unreduced_loss = shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None)
+    top_loss = loss = unreduced_loss.sum() / tgt.size
+    top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
+    top_k *= ctx.training.loss_top_snap
+    if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
+        top_loss, _ = lax.top_k(unreduced_loss, top_k)
+        top_loss = top_loss.sum() / (top_k / ctx.dims.sizes.batch * tgt.size)
+    return top_loss, loss
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
@@ -308,14 +316,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    unreduced_loss = cross_entropy_loss(body_ctx(ctx, shard(src, None)), shard(tgt, None))
-    top_loss = loss = unreduced_loss.sum() / tgt.size
-    top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
-    top_k *= ctx.training.loss_top_snap
-    if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
-        top_loss, _ = lax.top_k(unreduced_loss, top_k)
-        top_loss = top_loss.sum() / (top_k / ctx.dims.sizes.batch * tgt.size)
-    return top_loss, loss
+    return cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
