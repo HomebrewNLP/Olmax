@@ -65,7 +65,7 @@ def activation_backward(ctx: Context, dy: jnp.ndarray, inp: jnp.ndarray) -> jnp.
 
 def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
          model_parallel_dim: typing.Optional[int] = -2, data_parallel_dim: typing.Optional[int] = 0) -> jnp.ndarray:
-    square = shard(jnp.square(inp).mean(dims, keepdims=keepdims), model_parallel_dim, data_parallel_dim)
+    square = shard(jnp.square(inp).sum(dims, keepdims=keepdims), model_parallel_dim, data_parallel_dim)
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
@@ -73,7 +73,7 @@ def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.nd
     mean = shard(inp.mean(-1, keepdims=True))
     out = inp - mean
     scale = norm(ctx, out, -1, True)
-    return out * scale, mean, scale
+    return out * scale * inp.shape[-1] ** -0.5, mean, scale
 
 
 def instance_norm_backward(dy: jnp.ndarray, inp: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
