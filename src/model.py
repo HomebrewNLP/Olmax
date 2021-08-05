@@ -1,22 +1,13 @@
 import copy
 import math
-import time
 import typing
-import warnings
 
 import jax
 import jax._src.util as util
-import numpy as np
-import yaml
 from jax import lax, numpy as jnp
-from jax.experimental import PartitionSpec
-from jax.experimental import pjit
-from jax.experimental.maps import mesh
 
 from backend import get_param, shard, dims_to_shape
-from context import Context, WhileTrainContext
-from data import text_dataset
-from optimizer import get_current_lr, update
+from context import Context
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
@@ -46,7 +37,7 @@ def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
 
 
 def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
-    return jax.nn.leaky_relu(src, ctx.model.leaky_relu_slope)
+    return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
 
 
 def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
@@ -58,8 +49,8 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
 def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     mean = shard(inp.mean(-1, keepdims=True))
     out = inp - mean
-    scale = norm(ctx, out, -1, True)
-    return out * scale * inp.shape[-1] ** -0.5, mean, scale
+    scale = norm(ctx, out, -1, True) * inp.shape[-1] ** -0.5
+    return out * scale, mean, scale
 
 
 def instance_norm_backward(dy: jnp.ndarray, inp: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
@@ -325,4 +316,3 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
         top_loss, _ = lax.top_k(unreduced_loss, top_k)
         top_loss = top_loss.sum() / top_k
     return top_loss, loss
-
