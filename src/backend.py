@@ -42,6 +42,10 @@ def transpose(inp: jnp.ndarray, dims: INT_OR_TUPLE) -> jnp.ndarray:
     return inp.transpose(pos_dim(inp, dims))
 
 
+def assign(ctx: Context, name: str, inp: jnp.ndarray):
+    ctx.parameters[ctx.add_to_prefix(name, count=False).global_prefix] = inp
+
+
 def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
     return inp.shape[-1] != ctx.dims.sizes.features_per_head
 
@@ -89,13 +93,14 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] 
         ctx.parameter_dims[name] = shape
         shape = dims_to_shape(ctx, shape)
         if std is None and mean is None:
-            ctx.parameters[name] = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
+            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
         else:
-            ctx.parameters[name] = random.normal(ctx.prng_key, shape, ctx.model.dtype)
+            param = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:
-                ctx.parameters[name] *= std
+                param *= std
             if mean is not None:
-                ctx.parameters[name] += mean
+                param += mean
+        assign(ctx, name, param)
     return ctx.parameters[name]
 
 
