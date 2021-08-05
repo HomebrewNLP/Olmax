@@ -298,16 +298,16 @@ def contrastive_loss(ctx: Context, out: jnp.ndarray, proj: jnp.ndarray) -> jnp.n
     proj = proj * norm(ctx, proj, (-2, -1), True, None)
 
     normalization = -1 / ctx.dims.sizes.sequence ** 2
-    return dot(out, shard(jnp.sum(proj, -3)), (-2, -1), (-2, -1)).sum(tuple(range(1, out.ndim - 2))) * normalization
+    return shard(dot(shard(jnp.sum(out, -3)), shard(jnp.sum(proj, -3)), (-2, -1), (-2, -1)), None) * normalization
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
-    norm = tgt.size / ctx.dims.sizes.batch
+    normalization = ctx.dims.sizes.batch / tgt.size
     tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
-    return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None) / norm
+    return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None) * normalization
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
