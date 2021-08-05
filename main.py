@@ -98,6 +98,7 @@ def main():
     global_start = time.time()
     with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
         timeit("Compiling model and performing first step", step, next(data))
+        timeit("Running second step", step, next(data))
         print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
 
         start_time = time.time()
