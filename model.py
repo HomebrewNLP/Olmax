@@ -281,10 +281,12 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(out.transpose(key_permute))
 
 
-def contrastive_loss(src: jnp.ndarray) -> jnp.ndarray:
+def contrastive_loss(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
+    """Algorithm by https://github.com/blenderfreaky"""
+    normalization = 1 / ctx.dims.sizes.batch / ctx.dims.sizes.sequence
     positive = jnp.sum(dot(src, shard(jnp.sum(src, -3)), (0, -2, -1), (0, -2, -1)))
     negative = jnp.sum(shard(dot(src, shard(jnp.sum(src, (0, 1)), None), (-2, -1), (0, 1)), None))
-    return positive * (2 / src.size) - negative / src.size
+    return positive * (2 * normalization) - negative * normalization
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
