@@ -294,9 +294,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = reversible(ctx, spatial_mixing, (i + 1) == ctx.model.depth)(src)
         src = reversible(ctx, feed_forward, (i + 1) == ctx.model.depth)(src)
     src = src[1] + src[3]
-    if ctx.training.contrastive:
-        return contrastive_output_embed(ctx, src)
-    return output_embed(ctx, src[1] + src[3])
+    return contrastive_output_embed(ctx, src) if ctx.training.contrastive else output_embed(ctx, src)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
