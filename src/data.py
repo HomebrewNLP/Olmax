@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
 from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
-from context import Context
+from .context import Context
 
 tf1 = tf.compat.v1
 

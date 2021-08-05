@@ -6,8 +6,8 @@ import jax
 import jax._src.util as util
 from jax import lax, numpy as jnp
 
-from backend import get_param, shard, dims_to_shape
-from context import Context
+from .backend import get_param, shard, dims_to_shape
+from .context import Context
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]

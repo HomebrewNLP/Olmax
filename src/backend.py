@@ -6,7 +6,7 @@ from jax import lax, numpy as jnp, random
 from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 
-from context import Context
+from .context import Context
 
 
 def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:

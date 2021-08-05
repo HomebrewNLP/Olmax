@@ -7,8 +7,8 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
-from context import Context, WhilePredictContext
-from model import body_ctx, sharding, one_hot
+from .context import Context, WhilePredictContext
+from .model import body_ctx, sharding, one_hot
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:

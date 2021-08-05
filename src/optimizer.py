@@ -3,8 +3,8 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from backend import zero_param, one_shape, shard
-from context import Context
+from .backend import zero_param, one_shape, shard
+from .context import Context
 
 
 def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
