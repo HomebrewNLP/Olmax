@@ -13,7 +13,7 @@ from jax.experimental.maps import mesh
 
 from src.context import Context, WhileTrainContext
 from src.data import text_dataset
-from src.model import compute, body_ctx,
+from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
 
 
