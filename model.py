@@ -286,28 +286,22 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(out.transpose(key_permute))
 
 
-def contrastive_loss(ctx: Context, out: jnp.ndarray, proj:jnp.ndarray) -> jnp.ndarray:
+def contrastive_loss(ctx: Context, out: jnp.ndarray, proj: jnp.ndarray) -> jnp.ndarray:
     """Cosine similarity of output and projection https://arxiv.org/abs/2011.10566"""
     out = out / (lax.sqrt(jnp.square(out).sum((2, 3), keepdims=True)) + ctx.model.norm_eps)
     proj = proj / (lax.sqrt(jnp.square(proj).sum((2, 3), keepdims=True)) + ctx.model.norm_eps)
 
-    normalization = -1 / ctx.dims.sizes.batch / ctx.dims.sizes.sequence ** 2
-    return jnp.sum(dot(out, shard(jnp.sum(proj, -3)), (0, -2, -1), (0, -2, -1))) * normalization
+    norm = -1 / ctx.dims.sizes.sequence ** 2
+    return jnp.sum(dot(out, shard(jnp.sum(proj, -3)), (-2, -1), (-2, -1)), tuple(range(1, out.ndim - 2))) * norm
 
 
-def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
+    norm = tgt.size / ctx.dims.batch
     tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
     shifted = src - shard(src.max(axis=-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
     sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
-    unreduced_loss = shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None)
-    top_loss = loss = unreduced_loss.sum() / tgt.size
-    top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
-    top_k *= ctx.training.loss_top_snap
-    if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
-        top_loss, _ = lax.top_k(unreduced_loss, top_k)
-        top_loss = top_loss.sum() / (top_k / ctx.dims.sizes.batch * tgt.size)
-    return top_loss, loss
+    return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None) / norm
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
@@ -327,9 +321,17 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     ctx = Context()
     ctx.parameters = params
     if ctx.training.contrastive:
-        return contrastive_loss(ctx, body_ctx(ctx, shard(inp, None)))
-    src, tgt = inp
-    return cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
+        unreduced_loss = contrastive_loss(ctx, *body_ctx(ctx, shard(inp, None)))
+    else:
+        src, tgt = inp
+        unreduced_loss = cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
+    top_loss = loss = unreduced_loss.sum() / ctx.dims.batch
+    top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
+    top_k *= ctx.training.loss_top_snap
+    if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
+        top_loss, _ = lax.top_k(unreduced_loss, top_k)
+        top_loss = top_loss.sum() / top_k
+    return top_loss, loss
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
