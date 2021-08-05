@@ -153,6 +153,11 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(matmul(inp, embd, 2), None)
 
 
+def contrastive_output_embed(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    ctx.add_to_prefix("contrastive_output_embed")
+    return lax.stop_gradient(inp), group_feed_forward(ctx, inp)
+
+
 def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     name_cache = copy.deepcopy(ctx.name_cache)
 
@@ -281,12 +286,13 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(out.transpose(key_permute))
 
 
-def contrastive_loss(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
-    """Algorithm by https://github.com/blenderfreaky"""
-    normalization = 1 / ctx.dims.sizes.batch / ctx.dims.sizes.sequence
-    positive = jnp.sum(dot(src, shard(jnp.sum(src, -3)), (0, -2, -1), (0, -2, -1)))
-    negative = jnp.sum(shard(dot(src, shard(jnp.sum(src, (0, 1)), None), (-2, -1), (0, 1)), None))
-    return positive * (2 * normalization) - negative * normalization
+def contrastive_loss(ctx: Context, out: jnp.ndarray, proj:jnp.ndarray) -> jnp.ndarray:
+    """Cosine similarity of output and projection https://arxiv.org/abs/2011.10566"""
+    out = out / (lax.sqrt(jnp.square(out).sum((2, 3), keepdims=True)) + ctx.model.norm_eps)
+    proj = proj / (lax.sqrt(jnp.square(proj).sum((2, 3), keepdims=True)) + ctx.model.norm_eps)
+
+    normalization = -1 / ctx.dims.sizes.batch / ctx.dims.sizes.sequence ** 2
+    return jnp.sum(dot(out, shard(jnp.sum(proj, -3)), (0, -2, -1), (0, -2, -1))) * normalization
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
@@ -304,7 +310,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     return top_loss, loss
 
 
-def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
+def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
     src = (ctx.parameters, src, zero, src, zero)
@@ -313,7 +319,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
         src = reversible(ctx, feed_forward, (i + 1) == ctx.model.depth)(src)
     src = src[1] + src[3]
     if ctx.training.contrastive:
-        return src
+        return contrastive_output_embed(ctx, src)
     return output_embed(ctx, src[1] + src[3])
 
 
@@ -321,7 +327,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     ctx = Context()
     ctx.parameters = params
     if ctx.training.contrastive:
-        return (contrastive_loss(body_ctx(ctx, shard(inp, None))),) * 2
+        return contrastive_loss(ctx, body_ctx(ctx, shard(inp, None)))
     src, tgt = inp
     return cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
 
