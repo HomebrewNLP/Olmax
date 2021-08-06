@@ -88,9 +88,8 @@ def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
               column_axes: int = 1, scale: float = 1.) -> jnp.ndarray:
-    name = ctx.add_to_prefix(name, count=False).global_prefix
     if name not in ctx.parameters:
-        ctx.parameter_dims[name] = shape
+        ctx.parameter_dims[ctx.add_to_prefix(name, count=False).global_prefix] = shape
         shape = dims_to_shape(ctx, shape)
         if std is None and mean is None:
             param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
@@ -101,7 +100,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] 
             if mean is not None:
                 param += mean
         assign(ctx, name, param)
-    return ctx.parameters[name]
+    return ctx.parameters[ctx.add_to_prefix(name, count=False).global_prefix]
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:

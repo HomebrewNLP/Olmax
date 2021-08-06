@@ -44,7 +44,7 @@ def debias(x: jnp.ndarray, current_step: jnp.ndarray, beta: float) -> jnp.ndarra
 
 
 def zero_param_like(ctx: Context, new_name: str, original_name: jnp.ndarray) -> jnp.ndarray:
-    return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name))
+    return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name, []))
 
 
 
@@ -64,9 +64,9 @@ def momentum(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp
         return ema(ctx, param_name, grad, current_step, ctx.optimizer.momentum_beta, "")
     state = zero_param_like(ctx, "momentum_buffer", param_name)
     new_state = grad + state * ctx.optimizer.momentum_beta
-    if ctx.optimizer.momentum_type == MomentumType.nesterov:
-        new_state = grad + new_state * ctx.optimizer.momentum_type
     assign(ctx, "momentum_buffer", new_state)
+    if ctx.optimizer.momentum_type == MomentumType.nesterov:
+        return grad + new_state * ctx.optimizer.momentum_type
     return new_state
 
 
@@ -105,9 +105,9 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         if "optimizer" in param_name:
             continue
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        # grad = sm3(inner_ctx, param_name, grad)
-        # grad = ema(inner_ctx, param_name, grad, current_step)
-        grad = adam(inner_ctx, param_name, grad, current_step)
-        assign(ctx, param_name, (1 - ctx.optimizer.weight_decay) * ctx.parameters[param_name] + grad * lr)
+        grad = sm3(inner_ctx, param_name, grad)
+        grad = momentum(inner_ctx, param_name, grad, current_step)
+        # grad = adam(inner_ctx, param_name, grad, current_step)
+        ctx.parameters[param_name] = (1 - ctx.optimizer.weight_decay) * ctx.parameters[param_name] + grad * lr
         if "spatial_mixing" in param_name:
             ctx.parameters[param_name] *= mask
