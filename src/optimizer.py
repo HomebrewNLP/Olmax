@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from .backend import zero_param, one_shape, shard, assign
+from .backend import zero_param, one_shape, shard, assign, prefixed_name
 from .constants import MomentumType
 from .context import Context
 
@@ -30,7 +30,7 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 
     for i in range(grad.ndim):
         new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
-        ctx.parameters[ctx.add_to_prefix(f"dim{i}", count=False).global_prefix] = new
+        ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
 
     return grad * optimizer_rsqrt(weight_update)
 

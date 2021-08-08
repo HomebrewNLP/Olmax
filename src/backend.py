@@ -42,8 +42,12 @@ def transpose(inp: jnp.ndarray, dims: INT_OR_TUPLE) -> jnp.ndarray:
     return inp.transpose(pos_dim(inp, dims))
 
 
+def prefixed_name(ctx: Context, name: str):
+    return ctx.add_to_prefix(name, count=False).global_prefix
+
+
 def assign(ctx: Context, name: str, inp: jnp.ndarray):
-    ctx.parameters[ctx.add_to_prefix(name, count=False).global_prefix] = inp
+    ctx.parameters[prefixed_name(ctx, name)] = inp
 
 
 def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
@@ -88,8 +92,9 @@ def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
               column_axes: int = 1, scale: float = 1.) -> jnp.ndarray:
-    if name not in ctx.parameters:
-        ctx.parameter_dims[ctx.add_to_prefix(name, count=False).global_prefix] = shape
+    prefix_name = prefixed_name(ctx, name)
+    if prefix_name not in ctx.parameters:
+        ctx.parameter_dims[prefix_name] = shape
         shape = dims_to_shape(ctx, shape)
         if std is None and mean is None:
             param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
@@ -100,7 +105,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] 
             if mean is not None:
                 param += mean
         assign(ctx, name, param)
-    return ctx.parameters[ctx.add_to_prefix(name, count=False).global_prefix]
+    return ctx.parameters[prefix_name]
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
