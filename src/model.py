@@ -235,12 +235,31 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
     return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None) * normalization
 
 
+def momentumnet_main(ctx: Context, fn: typing.Callable):
+    def _fn(*x: jnp.ndarray) -> jnp.ndarray:
+        *x, idx = x
+        return fn(*x, idx) * (1 - ctx.model.momentumnet_beta) / (ctx.model.momentumnet_beta ** idx)
+
+    return _fn
+
+
+def momentumnet_side(ctx):
+    def _fn(_ignored, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
+        return x * ctx.model.momentumnet_beta ** idx
+
+    return _fn
+
+
 def step(ctx: Context):
+    side = momentumnet_side(ctx)
+
     def _fn(carry: typing.Tuple[REVERSIBLE_CTX, jnp.ndarray],
             y: None) -> typing.Tuple[typing.Tuple[REVERSIBLE_CTX, jnp.ndarray], None]:
         src, idx = carry
-        src = reversible(ctx, spatial_mixing, idx)(src)
-        src = reversible(ctx, feed_forward, idx)(src)
+        src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
+        src = reversible(ctx, side, idx)(src)
+        src = reversible(ctx, momentumnet_main(ctx, feed_forward), idx)(src)
+        src = reversible(ctx, side, idx)(src)
         return (src, idx + 1), None
 
     return _fn

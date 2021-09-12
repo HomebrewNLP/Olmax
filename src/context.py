@@ -86,6 +86,7 @@ class Model(DataClass):
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
         self.experts = 1  # TODO: Add dense MoE
+        self.momentumnet_beta = 0.9
         self.depth = 32
         self.leaky_relu_slope = 0.02
         self.activation_std = 0.5893595616022745
