@@ -22,29 +22,21 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    mean = shard(inp.mean(-1, keepdims=True))
-    out = inp - mean
-    scale = norm(ctx, out, -1, True) * inp.shape[-1] ** -0.5
-    return out * scale, scale
-
-
-def instance_norm_backward(dy: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-    tmp_dy = dy
-    tmp_dy *= scale
-    tmp_dy -= tmp_dy.mean(-1, keepdims=True)
-    out = out / out.shape[-1]
-    tmp_dy -= (dy * out).sum(-1, keepdims=True) * scale ** 2 * (out - out.mean(-1, keepdims=True))
-    return tmp_dy
-
-
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
-        out, scale = instance_norm_forward(ctx, src)
+        mean = shard(src.mean(-1, keepdims=True))
+        out = src - mean
+        scale = norm(ctx, out, -1, True) * src.shape[-1] ** -0.5
+        out = out * scale
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
-            return instance_norm_backward(dy, out, scale)
+            tmp_dy = dy
+            tmp_dy *= scale
+            tmp_dy -= tmp_dy.mean(-1, keepdims=True)
+            normed = out / out.shape[-1]
+            tmp_dy -= (dy * normed).sum(-1, keepdims=True) * scale ** 2 * (normed - normed.mean(-1, keepdims=True))
+            return tmp_dy
 
         return out, _grad
 
