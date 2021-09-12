@@ -6,8 +6,8 @@ import jax
 import jax._src.util as util
 from jax import lax, numpy as jnp
 
-from .backend import get_param, shard, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose
-from .context import Context
+from src.backend import get_param, shard, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose
+from src.context import Context
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
@@ -22,26 +22,29 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+def instance_norm_forward(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     mean = shard(inp.mean(-1, keepdims=True))
     out = inp - mean
     scale = norm(ctx, out, -1, True) * inp.shape[-1] ** -0.5
-    return out * scale, mean, scale
+    return out * scale, scale
 
 
-def instance_norm_backward(dy: jnp.ndarray, inp: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-    dy *= scale / inp.shape[-1]
-    dx1 = dy + out * shard(jnp.sum(dy * out, -1, keepdims=True)) / (- inp.shape[-1] ** 2)
-    return dx1 - shard(jnp.sum(dx1, -1, keepdims=True))
+def instance_norm_backward(dy: jnp.ndarray, out: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
+    tmp_dy = dy
+    tmp_dy *= scale
+    tmp_dy -= tmp_dy.mean(-1, keepdims=True)
+    out = out / out.shape[-1]
+    tmp_dy -= (dy * out).sum(-1, keepdims=True) * scale ** 2 * (out - out.mean(-1, keepdims=True))
+    return tmp_dy
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
-        out, mean, scale = instance_norm_forward(ctx, src)
+        out, scale = instance_norm_forward(ctx, src)
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
-            return instance_norm_backward(dy, out / scale + mean, out, scale)
+            return instance_norm_backward(dy, out, scale)
 
         return out, _grad
 

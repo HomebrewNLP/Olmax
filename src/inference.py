@@ -7,8 +7,9 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
-from .context import Context, WhilePredictContext
-from .model import body_ctx, sharding, one_hot
+from main import sharding
+from src.context import Context, WhilePredictContext
+from src.model import body_ctx, one_hot
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
@@ -82,7 +83,7 @@ class Infrerence_Model():
         partition = {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()}
         self.step = pjit.pjit(jitless_prediction_step,
                               in_axis_resources=(
-                              partition, PartitionSpec("data_parallel", None), None, None, None, None),
+                                  partition, PartitionSpec("data_parallel", None), None, None, None, None),
                               out_axis_resources=(PartitionSpec(None, None), partition))
         self.mesh_devices = np.array(jax.devices()).reshape(ctx.data_parallel, ctx.model_parallel)
 
