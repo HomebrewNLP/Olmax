@@ -44,33 +44,35 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5)
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.depth, ctx.dims.heads, in_dim, out_dim],
+                           scale=1 / ctx.model.activation_std)
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.depth, ctx.dims.heads, out_dim, in_dim],
+                           scale=ctx.model.depth ** -0.5)
     return inp_weight, out_weight
 
 
-def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight, -1, 1, -2, 0), 0, 1))
-    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight[idx], -1, 1, -2, 0), 0, 1))
+    out = shard(dot(mid, out_weight[idx], -1, 1, 0, 0), 0, 1)
     out = shard(transpose(out, tuple(range(1, inp.ndim - 1)) + (0, -1)))
     return out
 
 
-def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(matmul(normed, inp_weight, 2), None))
-    out = shard(dot(mid, out_weight, -1, 1))
+    mid = activate(ctx, shard(matmul(normed, inp_weight[idx], 2), None))
+    out = shard(dot(mid, out_weight[idx], -1, 1))
     return out
 
 
@@ -106,12 +108,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(matmul(inp, embd, 2), None)
 
 
-def contrastive_output_embed(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    ctx.add_to_prefix("contrastive_output_embed")
-    return lax.stop_gradient(inp), group_feed_forward(ctx, inp)
-
-
-def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
+def reversible(ctx: Context, fn: typing.Callable, idx: jnp.ndarray):
     name_cache = copy.deepcopy(ctx.name_cache)
 
     if ctx.is_initializing:
@@ -119,7 +116,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
             params, x00, x01, x10, x11 = inp
             new_ctx = ctx.add_to_prefix("reversible")
             new_ctx.parameters = params
-            out = fn(new_ctx, x10)
+            out = fn(new_ctx, x10, idx)
             ctx.parameters = new_ctx.parameters
             ctx.parameter_dims = new_ctx.parameter_dims
             ctx.name_cache = new_ctx.name_cache
@@ -133,7 +130,7 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, inp)
+        out = fn(new_ctx, inp, idx)
         ctx.name_cache = new_ctx.name_cache
         return out
 
@@ -150,22 +147,13 @@ def reversible(ctx: Context, fn: typing.Callable, is_last: bool):
     def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX]:
         d_params_old, dy0, y0, dy1, y1 = dy
         params = inp[0]
-        if is_last:
-            y1 = inp[3]
-            y0 = inp[1]
-
         x0, grad_fn = jax.vjp(base, (params, y0))
         d_params, dx0 = grad_fn(dy1)[0]
-        d_params = d_params if is_last else {k: d_params_old[k] + d_params[k] for k in d_params.keys()}
+        d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
         return (d_params, dy1, y1 - x0, dx0 + dy0, y0),
 
     reversible_half_residual.defvjp(reversible_forward, reversible_backward)
     return reversible_half_residual
-
-
-def mean_gate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("mean_gate")
-    return feed_forward(ctx, inp.mean(1, keepdims=True))
 
 
 def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -188,27 +176,27 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def spatial_mixing(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("spatial_mixing")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.sequence, ctx.dims.sequence)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight, -3, 1, -2, 0), 0, 1))  # HBFS
-    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight[idx], -3, 1, -2, 0), 0, 1))  # HBFS
+    out = shard(dot(mid, out_weight[idx], -1, 1, 0, 0), 0, 1)
     out = shard(transpose(out, tuple(range(1, inp.ndim - 2)) + (-1, 0, -2)))  # B S H F
     return out
 
 
-def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def attention(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_replicated],
+    base_param = get_param(ctx, "base", [ctx.dims.depth] + feature_dims + [ctx.dims.intermediate_replicated],
                            scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
+    key_param = get_param(ctx, "key", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    qry_param = get_param(ctx, "qry", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    val_param = get_param(ctx, "val", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
@@ -223,10 +211,10 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     batch_seq = batch_dims + (sequence_dim,)
 
     base = instance_norm(ctx, inp)
-    base = activate(ctx, shard(matmul(base, base_param, 2), None))
-    key = shard(matmul(base, key_param, 2))
-    qry = shard(matmul(base, qry_param, 2))
-    val = shard(matmul(base, val_param, 2))
+    base = activate(ctx, shard(matmul(base, base_param[idx], 2), None))
+    key = shard(matmul(base, key_param[idx], 2))
+    qry = shard(matmul(base, qry_param[idx], 2))
+    val = shard(matmul(base, val_param[idx], 2))
 
     key = shard(transpose(key, key_permute), -3) * inp.shape[-1] ** -0.5
     val = shard(transpose(val, key_permute), -3)
@@ -238,44 +226,50 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(transpose(out, key_permute))
 
 
-def contrastive_loss(ctx: Context, out: jnp.ndarray, proj: jnp.ndarray) -> jnp.ndarray:
-    """Cosine similarity of output and projection https://arxiv.org/abs/2011.10566"""
-    batch_dims = tuple(range(out.ndim - 3))
-    out = shard(dot(out, norm(ctx, out, (-2, -1), False, None), -3, -1, batch_dims, batch_dims))
-    proj = shard(dot(proj, norm(ctx, proj, (-2, -1), False, None), -3, -1, batch_dims, batch_dims))
-
-    normalization = -1 / ctx.dims.sizes.sequence ** 2
-    return shard(dot(out, proj, (-2, -1), (-2, -1), batch_dims, batch_dims), None) * normalization
-
-
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     normalization = ctx.dims.sizes.batch / tgt.size
     tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
-    shifted = src - shard(src.max(axis=-1, keepdims=True), None)
+    shifted = src - shard(src.max(-1, keepdims=True), None)
     exp_shifted = jnp.exp(shifted)
-    sum_exp = shard(jnp.sum(exp_shifted, axis=-1, keepdims=True), None)
+    sum_exp = shard(exp_shifted.sum(-1, keepdims=True), None)
     return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None) * normalization
+
+
+def step(ctx: Context):
+    def _fn(carry: typing.Tuple[REVERSIBLE_CTX, jnp.ndarray],
+            y: None) -> typing.Tuple[typing.Tuple[REVERSIBLE_CTX, jnp.ndarray], None]:
+        src, idx = carry
+        src = reversible(ctx, spatial_mixing, idx)(src)
+        src = reversible(ctx, feed_forward, idx)(src)
+        return (src, idx + 1), None
+
+    return _fn
+
+
+def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
+    @jax.custom_gradient
+    def _fn(x0: jnp.ndarray, x0_back: jnp.ndarray, x1: jnp.ndarray, x1_back: jnp.ndarray):
+        def _grad(dy) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+            return dy, x0, dy, x1
+
+        return x0 + x1, _grad
+
+    return _fn(*src)
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
     src = (ctx.parameters, src, zero, src, zero)
-    for i in range(ctx.model.depth):
-        src = reversible(ctx, spatial_mixing, (i + 1) == ctx.model.depth)(src)
-        src = reversible(ctx, feed_forward, (i + 1) == ctx.model.depth)(src)
-    src = src[1] + src[3]
-    return contrastive_output_embed(ctx, src) if ctx.training.contrastive else output_embed(ctx, src)
+    src = lax.scan(step(ctx), (src, jnp.zeros([])), None, ctx.dims.sizes.depth, unroll=ctx.model.scan_unroll)
+    return output_embed(ctx, revnet_out(src[0][1:]))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
-    if ctx.training.contrastive:
-        unreduced_loss = contrastive_loss(ctx, *body_ctx(ctx, shard(inp, None)))
-    else:
-        src, tgt = inp
-        unreduced_loss = cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
+    src, tgt = inp
+    unreduced_loss = cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
     top_loss = loss = unreduced_loss.sum() / ctx.dims.sizes.batch
     top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
     top_k *= ctx.training.loss_top_snap

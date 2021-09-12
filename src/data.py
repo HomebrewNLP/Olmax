@@ -44,7 +44,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     batch_size = ctx.dims.sizes.batch
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
-    sequence_length_1 = sequence_length + 1 - ctx.training.contrastive
+    sequence_length_1 = sequence_length + 1
     assert not (full_batch % ctx.data.datasets_used_per_step)
 
     def _slice_target(x):
@@ -59,9 +59,6 @@ def text_dataset(ctx: Context) -> NumpyIterator:
         x = tf.reshape(x, (batch_size, device_steps, sequence_length_1))
         x = tf.cast(x, tf.int32)
         x = tf.transpose(x, (1, 0, 2))
-        if ctx.training.contrastive:
-            return x
-
         return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
 
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x,

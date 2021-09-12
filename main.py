@@ -90,7 +90,7 @@ def main():
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
-                 'data': PartitionSpec(None, *(() if ctx.training.contrastive else (None,)), "data_parallel", None),
+                 'data': PartitionSpec(None, (None,), "data_parallel", None),
                  'current_step': None, 'loss': None, 'top_loss': None}
     step = train_loop(wctx, timeit("JITing model", pjit.pjit, jitless_step, (partition,), partition))
 

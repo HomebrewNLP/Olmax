@@ -31,6 +31,7 @@ class DimSizes(DataClass):
         self.sequence = 256
         self.vocab = data.vocab_size
         self.one = 1
+        self.depth = 32
         self.intermediate_replicated = int(self.features_per_head * group_linear_factor)
         self.intermediate_parallel = int(self.intermediate_replicated * feed_forward_factor)
 
@@ -43,6 +44,7 @@ class Dims(DataClass):
         self.batch = "batch"
         self.features_per_head = "features_per_head"
         self.heads = "heads"
+        self.depth = "depth"
         self.sequence = "sequence"
         self.anonymous_sequence = "anonymous_sequence"
         self.intermediate_replicated = "intermediate_replicated"
@@ -80,6 +82,7 @@ class Optimizer(DataClass):
 
 class Model(DataClass):
     def __init__(self):
+        self.scan_unroll = 1
         self.norm_eps = 1e-5
         self.group_linear_factor = 2
         self.experts = 1  # TODO: Add dense MoE
@@ -99,7 +102,6 @@ class Training(DataClass):
         self.steps = 2 ** 16
         self.model_parallel = 8
         self.data_parallel = 1
-        self.contrastive = False
         self.print_interval = 1
         self.trace = TensorboardTrace()
 

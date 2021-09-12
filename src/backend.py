@@ -58,7 +58,7 @@ def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return ctx.dims.intermediate_replicated if is_intermediate(ctx, inp) else ctx.dims.features_per_head
 
 
-def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0):
+def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0) -> jnp.ndarray:
     spec: typing.List[typing.Optional[str]] = [None] * tensor.ndim
     if isinstance(batch, int):
         spec[batch] = "data_parallel"
