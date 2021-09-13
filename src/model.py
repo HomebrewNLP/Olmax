@@ -31,8 +31,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         out = out * scale
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
-            tmp_dy = dy
-            tmp_dy *= scale
+            tmp_dy = dy * scale
             tmp_dy -= tmp_dy.mean(-1, keepdims=True)
             normed = out / out.shape[-1]
             tmp_dy -= (dy * normed).sum(-1, keepdims=True) * scale ** 2 * (normed - normed.mean(-1, keepdims=True))
