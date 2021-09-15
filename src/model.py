@@ -34,7 +34,7 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
             tmp_dy = dy * scale
             tmp_dy -= tmp_dy.mean(-1, keepdims=True)
             normed = out / out.shape[-1]
-            tmp_dy -= (dy * normed).sum(-1, keepdims=True) * scale ** 2 * (normed - normed.mean(-1, keepdims=True))
+            tmp_dy += (dy * normed).sum(-1, keepdims=True) * scale ** 2 * (normed.mean(-1, keepdims=True) - normed)
             return tmp_dy
 
         return out, _grad
@@ -253,7 +253,7 @@ def step(ctx: Context):
     side = momentumnet_side(ctx)
 
     def _fn(carry: typing.Tuple[REVERSIBLE_CTX, jnp.ndarray],
-            y: None) -> typing.Tuple[typing.Tuple[REVERSIBLE_CTX, jnp.ndarray], None]:
+            _ignored: None) -> typing.Tuple[typing.Tuple[REVERSIBLE_CTX, jnp.ndarray], None]:
         src, idx = carry
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
         src = reversible(ctx, side, idx)(src)
