@@ -283,7 +283,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = step(ctx)((src, jnp.zeros([])), jnp.zeros([]))
     else:
         src = lax.scan(step(ctx), (src, jnp.zeros([])), None, ctx.dims.sizes.depth, unroll=ctx.model.scan_unroll)
-    return output_embed(ctx, revnet_out(src[0][1:]))
+    return output_embed(ctx, revnet_out(src[0][0][1:]))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
