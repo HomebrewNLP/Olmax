@@ -98,6 +98,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         shape = dims_to_shape(ctx, str_shape)
         if std is None and mean is None:
             if ctx.dims.depth in str_shape:
+                del shape[str_shape.index(ctx.dims.depth)]
                 param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
                                    for _ in range(ctx.dims.sizes.depth)], str_shape.index(ctx.dims.depth))
             else:
