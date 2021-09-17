@@ -251,13 +251,18 @@ def momentumnet_side(ctx):
 
 def step(ctx: Context):
     side = momentumnet_side(ctx)
-    ctx.parameters = {}
+    if not ctx.is_initializing:
+        ctx.parameters = {}
 
     def _fn(idx: int, src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+        if not ctx.is_initializing:
+            ctx.parameters = {}
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
         src = reversible(ctx, side, idx)(src)
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), idx)(src)
         src = reversible(ctx, side, idx)(src)
+        if not ctx.is_initializing:
+            ctx.parameters = {}
         return src
 
     return _fn
@@ -278,7 +283,9 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
     src = (ctx.parameters, src, zero, src, zero)
+    ctx.parameters = {}
     src = step(ctx)(0, src) if ctx.is_initializing else lax.fori_loop(0, ctx.dims.sizes.depth, step(ctx), src)
+    ctx.parameters = src[0]
     return output_embed(ctx, revnet_out(src[1:]))
 
 
