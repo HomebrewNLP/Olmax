@@ -278,11 +278,11 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
-    src = (ctx.parameters, src, zero, src, zero)
+    src = ((ctx.parameters, src, zero, src, zero), jnp.zeros([], dtype=jnp.int32))
     if ctx.is_initializing:
-        src = step(ctx)((src, jnp.zeros([])), jnp.zeros([]))
+        src = step(ctx)(src, None)
     else:
-        src = lax.scan(step(ctx), (src, jnp.zeros([])), None, ctx.dims.sizes.depth, unroll=ctx.model.scan_unroll)
+        src = lax.scan(step(ctx), src, None, ctx.dims.sizes.depth, unroll=ctx.model.scan_unroll)
     return output_embed(ctx, revnet_out(src[0][0][1:]))
 
 
