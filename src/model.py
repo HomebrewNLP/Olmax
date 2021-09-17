@@ -107,7 +107,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(matmul(inp, embd, 2), None)
 
 
-def reversible(ctx: Context, fn: typing.Callable, idx: jnp.ndarray):
+def reversible(ctx: Context, fn: typing.Callable, idx: int):
     name_cache = copy.deepcopy(ctx.name_cache)
 
     if ctx.is_initializing:
@@ -251,15 +251,14 @@ def momentumnet_side(ctx):
 
 def step(ctx: Context):
     side = momentumnet_side(ctx)
+    ctx.parameters = {}
 
-    def _fn(carry: typing.Tuple[REVERSIBLE_CTX, jnp.ndarray],
-            _ignored: None) -> typing.Tuple[typing.Tuple[REVERSIBLE_CTX, jnp.ndarray], None]:
-        src, idx = carry
+    def _fn(idx: int, src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
         src = reversible(ctx, side, idx)(src)
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), idx)(src)
         src = reversible(ctx, side, idx)(src)
-        return (src, idx + 1), None
+        return src
 
     return _fn
 
@@ -278,12 +277,9 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
-    src = ((ctx.parameters, src, zero, src, zero), jnp.zeros([], dtype=jnp.int32))
-    if ctx.is_initializing:
-        src = step(ctx)(src, None)
-    else:
-        src = lax.scan(step(ctx), src, None, ctx.dims.sizes.depth, unroll=ctx.model.scan_unroll)
-    return output_embed(ctx, revnet_out(src[0][0][1:]))
+    src = (ctx.parameters, src, zero, src, zero)
+    src = step(ctx)(0, src) if ctx.is_initializing else lax.fori_loop(0, ctx.dims.sizes.depth, step(ctx), src)
+    return output_embed(ctx, revnet_out(src[1:]))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
