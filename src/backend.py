@@ -89,15 +89,19 @@ def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
     return default_value if value is None else value
 
 
-def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[str]] = None,
+def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
               column_axes: int = 1, scale: float = 1.) -> jnp.ndarray:
     prefix_name = prefixed_name(ctx, name)
     if prefix_name not in ctx.parameters:
-        ctx.parameter_dims[prefix_name] = shape
-        shape = dims_to_shape(ctx, shape)
+        ctx.parameter_dims[prefix_name] = str_shape
+        shape = dims_to_shape(ctx, str_shape)
         if std is None and mean is None:
-            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
+            if ctx.dims.depth in str_shape:
+                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
+                                   for _ in range(ctx.dims.sizes.depth)], str_shape.index(ctx.dims.depth))
+            else:
+                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
         else:
             param = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:
