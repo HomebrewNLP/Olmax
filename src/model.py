@@ -110,7 +110,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def reversible(ctx: Context, fn: typing.Callable, idx: int):
     name_cache = copy.deepcopy(ctx.name_cache)
 
-    if ctx.is_initializing:
+    if True: #ctx.is_initializing:
         def _fn(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
             params, x00, x01, x10, x11 = inp
             new_ctx = ctx.add_to_prefix("reversible")
@@ -284,7 +284,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = shard(jnp.zeros_like(src))
     src = (ctx.parameters, src, zero, src, zero)
     ctx.parameters = {}
-    src = step(ctx)(0, src) if ctx.is_initializing else lax.fori_loop(0, ctx.dims.sizes.depth, step(ctx), src)
+    if ctx.is_initializing:
+        src = step(ctx)(0, src)
+    else:
+        for i in range(ctx.dims.sizes.depth):
+            src = step(ctx)(i, src)
     ctx.parameters = src[0]
     return output_embed(ctx, revnet_out(src[1:]))
 
