@@ -19,7 +19,7 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
     if isinstance(obj, (tuple, list)):
         return tuple(obj)
     if isinstance(obj, int):
-        return (obj,)
+        return obj,
     raise ValueError
 
 
