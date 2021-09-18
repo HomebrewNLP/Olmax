@@ -23,7 +23,7 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
 
 
 def get_item(inp: jnp.ndarray, idx: int) -> jnp.ndarray:
-    pad = (1,) * inp.ndim
+    pad = (1,) * (inp.ndim - 1)
     return lax.slice(inp, (idx,) + pad, (idx + 1,) + pad)
 
 
