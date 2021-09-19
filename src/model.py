@@ -23,9 +23,14 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
 
 
 def get_item(inp: jnp.ndarray, idx: int) -> jnp.ndarray:
-    return inp
-    print(idx, inp.shape)
-    return lax.slice(inp, (idx,) + (0,) * (inp.ndim - 1), (idx + 1,) + inp.shape[1:]).reshape(*inp.shape[1:])
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray):
+        def _grad(dy: jnp.ndarray):
+            return lax.pad(dy, 0, ((idx, inp.shape[0] - idx - 1, 0),) + ((0, 0, 0),) * (inp.ndim - 1))
+
+        return src[idx], _grad
+
+    return _fn(inp)
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -49,9 +54,9 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim],
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.depth, ctx.dims.heads, in_dim, out_dim],
                            scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim],
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.depth, ctx.dims.heads, out_dim, in_dim],
                            scale=ctx.model.depth ** -0.5)
     return inp_weight, out_weight
 
@@ -197,11 +202,11 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
 def attention(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_replicated],
+    base_param = get_param(ctx, "base", [ctx.dims.depth] + feature_dims + [ctx.dims.intermediate_replicated],
                            scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
+    key_param = get_param(ctx, "key", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    qry_param = get_param(ctx, "qry", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    val_param = get_param(ctx, "val", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
