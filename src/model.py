@@ -22,20 +22,6 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def get_item(inp: jnp.ndarray, idx: int) -> jnp.ndarray:
-    return inp[idx]
-
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
-        def _grad(dy: jnp.ndarray):
-            return lax.pad(dy.reshape(1, *dy.shape), jnp.zeros([], dtype=inp.dtype),
-                           ((idx, inp.shape[0] - idx - 1, 0),) + ((0, 0, 0),) * (inp.ndim - 1))
-
-        return src[idx], _grad
-
-    return _fn(inp)
-
-
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
@@ -71,8 +57,8 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, get_item(inp_weight, idx), -1, 1, -2, 0), 0, 1))
-    out = shard(dot(mid, get_item(out_weight, idx), -1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight[idx], -1, 1, -2, 0), 0, 1))
+    out = shard(dot(mid, out_weight[idx], -1, 1, 0, 0), 0, 1)
     out = shard(transpose(out, tuple(range(1, inp.ndim - 1)) + (0, -1)))
     return out
 
@@ -84,8 +70,8 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(matmul(normed, get_item(inp_weight, idx), 2), None))
-    out = shard(dot(mid, get_item(out_weight, idx), -1, 1))
+    mid = activate(ctx, shard(matmul(normed, inp_weight[idx], 2), None))
+    out = shard(dot(mid, out_weight[idx], -1, 1))
     return out
 
 
@@ -196,8 +182,8 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, get_item(inp_weight, idx), -3, 1, -2, 0), 0, 1))  # HBFS
-    out = shard(dot(mid, get_item(out_weight, idx), -1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight[idx], -3, 1, -2, 0), 0, 1))  # HBFS
+    out = shard(dot(mid, out_weight[idx], -1, 1, 0, 0), 0, 1)
     out = shard(transpose(out, tuple(range(1, inp.ndim - 2)) + (-1, 0, -2)))  # B S H F
     return out
 
@@ -224,10 +210,10 @@ def attention(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
     batch_seq = batch_dims + (sequence_dim,)
 
     base = instance_norm(ctx, inp)
-    base = activate(ctx, shard(matmul(base, get_item(base_param, idx), 2), None))
-    key = shard(matmul(base, get_item(key_param, idx), 2))
-    qry = shard(matmul(base, get_item(qry_param, idx), 2))
-    val = shard(matmul(base, get_item(val_param, idx), 2))
+    base = activate(ctx, shard(matmul(base, base_param[idx], 2), None))
+    key = shard(matmul(base, key_param[idx], 2))
+    qry = shard(matmul(base, qry_param[idx], 2))
+    val = shard(matmul(base, val_param[idx], 2))
 
     key = shard(transpose(key, key_permute), -3) * inp.shape[-1] ** -0.5
     val = shard(transpose(val, key_permute), -3)
