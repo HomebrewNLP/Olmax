@@ -43,35 +43,33 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.depth, ctx.dims.heads, in_dim, out_dim],
-                           scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.depth, ctx.dims.heads, out_dim, in_dim],
-                           scale=ctx.model.depth ** -0.5)
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5)
     return inp_weight, out_weight
 
 
-def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
+def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight[idx], -1, 1, -2, 0), 0, 1))
-    out = shard(dot(mid, out_weight[idx], -1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight, -1, 1, -2, 0), 0, 1))
+    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
     out = shard(transpose(out, tuple(range(1, inp.ndim - 1)) + (0, -1)))
     return out
 
 
-def feed_forward(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
+def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(matmul(normed, inp_weight[idx], 2), None))
-    out = shard(dot(mid, out_weight[idx], -1, 1))
+    mid = activate(ctx, shard(matmul(normed, inp_weight, 2), None))
+    out = shard(dot(mid, out_weight, -1, 1))
     return out
 
 
@@ -107,52 +105,44 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(matmul(inp, embd, 2), None)
 
 
-def reversible(ctx: Context, fn: typing.Callable, idx: int):
+def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
     name_cache = copy.deepcopy(ctx.name_cache)
 
-    if True:  # ctx.is_initializing:
-        def _fn(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
-            params, x00, x01, x10, x11 = inp
-            new_ctx = ctx.add_to_prefix("reversible")
-            new_ctx.parameters = params
-            out = fn(new_ctx, x10, idx)
-            ctx.parameters = new_ctx.parameters
-            ctx.parameter_dims = new_ctx.parameter_dims
-            ctx.name_cache = new_ctx.name_cache
-            ctx.prng_key = new_ctx.prng_key
-            return new_ctx.parameters, x10, x11, out, x01
-
-        return _fn
+    if ctx.is_initializing:
+        params, x00, x01, x10, x11 = src
+        new_ctx = ctx.add_to_prefix("reversible")
+        new_ctx.parameters = params
+        out = fn(new_ctx, x10)
+        ctx.parameters = new_ctx.parameters
+        ctx.parameter_dims = new_ctx.parameter_dims
+        ctx.name_cache = new_ctx.name_cache
+        ctx.prng_key = new_ctx.prng_key
+        return new_ctx.parameters, x10, x11, out, x01
 
     def base(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> jnp.ndarray:
         params, inp = inp
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, inp, idx)
+        out = fn(new_ctx, inp)
         ctx.name_cache = new_ctx.name_cache
         return out
 
-    @jax.custom_vjp
-    def reversible_half_residual(inp: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+    @jax.custom_gradient
+    def _fn(inp: REVERSIBLE_CTX):
         params, x00, x01, x10, x11 = inp
         out = base((params, x10)) + x00
-        return params, x10, x10, out, out
 
-    def reversible_forward(inp: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX, REVERSIBLE_CTX]:
-        out = reversible_half_residual(inp)
-        return out, out
+        def _grad(dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+            d_params_old, dy0, y0, dy1, y1 = dy
+            x0, grad_fn = jax.vjp(base, (params, y0))
+            d_params, dx0 = grad_fn(dy1)[0]
+            d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
+            return d_params, dy1, y1 - x0, dx0 + dy0, y0
 
-    def reversible_backward(inp: REVERSIBLE_CTX, dy: REVERSIBLE_CTX) -> typing.Tuple[REVERSIBLE_CTX]:
-        d_params_old, dy0, y0, dy1, y1 = dy
-        params = inp[0]
-        x0, grad_fn = jax.vjp(base, (params, y0))
-        d_params, dx0 = grad_fn(dy1)[0]
-        d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
-        return (d_params, dy1, y1 - x0, dx0 + dy0, y0),
+        return (params, x10, x10, out, out), _grad
 
-    reversible_half_residual.defvjp(reversible_forward, reversible_backward)
-    return reversible_half_residual
+    return _fn(src)
 
 
 def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -175,27 +165,27 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def spatial_mixing(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
+def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("spatial_mixing")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.sequence, ctx.dims.sequence)
     if ctx.is_initializing:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight[idx], -3, 1, -2, 0), 0, 1))  # HBFS
-    out = shard(dot(mid, out_weight[idx], -1, 1, 0, 0), 0, 1)
+    mid = activate(ctx, shard(dot(normed, inp_weight, -3, 1, -2, 0), 0, 1))  # HBFS
+    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
     out = shard(transpose(out, tuple(range(1, inp.ndim - 2)) + (-1, 0, -2)))  # B S H F
     return out
 
 
-def attention(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
+def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", [ctx.dims.depth] + feature_dims + [ctx.dims.intermediate_replicated],
+    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_replicated],
                            scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    qry_param = get_param(ctx, "qry", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    val_param = get_param(ctx, "val", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
+    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
@@ -210,10 +200,10 @@ def attention(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
     batch_seq = batch_dims + (sequence_dim,)
 
     base = instance_norm(ctx, inp)
-    base = activate(ctx, shard(matmul(base, base_param[idx], 2), None))
-    key = shard(matmul(base, key_param[idx], 2))
-    qry = shard(matmul(base, qry_param[idx], 2))
-    val = shard(matmul(base, val_param[idx], 2))
+    base = activate(ctx, shard(matmul(base, base_param, 2), None))
+    key = shard(matmul(base, key_param, 2))
+    qry = shard(matmul(base, qry_param, 2))
+    val = shard(matmul(base, val_param, 2))
 
     key = shard(transpose(key, key_permute), -3) * inp.shape[-1] ** -0.5
     val = shard(transpose(val, key_permute), -3)
@@ -249,25 +239,6 @@ def momentumnet_side(ctx):
     return _fn
 
 
-def step(ctx: Context):
-    side = momentumnet_side(ctx)
-    name_cache = copy.deepcopy(ctx.name_cache)
-
-    def _fn(src: typing.Tuple[int, typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]], _unused: None
-            ) -> typing.Tuple[typing.Tuple[int, typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]],
-                              None]:
-        idx, src = src
-        ctx.name_cache = name_cache
-        src = (ctx.parameters,) + src
-        src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
-        src = reversible(ctx, side, idx)(src)
-        src = reversible(ctx, momentumnet_main(ctx, feed_forward), idx)(src)
-        src = reversible(ctx, side, idx)(src)
-        return (idx + 1, src[1:]), None
-
-    return _fn
-
-
 def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(x0: jnp.ndarray, x0_back: jnp.ndarray, x1: jnp.ndarray, x1_back: jnp.ndarray):
@@ -282,11 +253,12 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
-    src = 0, (src, zero, src, zero)
-    if ctx.is_initializing:
-        src = step(ctx)(src, None)
-    else:
-        src = lax.scan(step(ctx), src, None, ctx.dims.sizes.depth, unroll=ctx.model.scan_unroll)
+    src = src, zero, src, zero
+    for _ in range(ctx.dims.sizes.depth):
+        src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), src)
+        src = reversible(ctx, momentumnet_side(ctx), src)
+        src = reversible(ctx, momentumnet_main(ctx, feed_forward), src)
+        src = reversible(ctx, momentumnet_side(ctx), src)
     return output_embed(ctx, revnet_out(src[0][1]))
 
 
