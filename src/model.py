@@ -264,7 +264,8 @@ def momentumnet_side(ctx):
 def step(ctx: Context):
     side = momentumnet_side(ctx)
 
-    def _fn(idx: int, src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+    def _fn(idx: int, src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+            ) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         src = (ctx.parameters,) + src
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
         src = reversible(ctx, side, idx)(src)
@@ -290,8 +291,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
     src = (src, zero, src, zero)
-    for i in range(ctx.dims.sizes.depth):
-        src = step(ctx)(i, src)
+    if ctx.is_initializing:
+        src = step(ctx)(0, src)
+    else:
+        for i in range(ctx.dims.sizes.depth):
+            src = step(ctx)(i, src)
     return output_embed(ctx, revnet_out(src))
 
 
