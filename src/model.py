@@ -23,8 +23,9 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
 
 
 def get_item(inp: jnp.ndarray, idx: int) -> jnp.ndarray:
-    pad = (1,) * (inp.ndim - 1)
-    return lax.slice(inp, (idx,) + pad, (idx + 1,) + pad)
+    return inp
+    print(idx, inp.shape)
+    return lax.slice(inp, (idx,) + (0,) * (inp.ndim - 1), (idx + 1,) + inp.shape[1:]).reshape(*inp.shape[1:])
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -48,9 +49,9 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.depth, ctx.dims.heads, in_dim, out_dim],
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim],
                            scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.depth, ctx.dims.heads, out_dim, in_dim],
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim],
                            scale=ctx.model.depth ** -0.5)
     return inp_weight, out_weight
 
@@ -196,11 +197,11 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
 def attention(ctx: Context, inp: jnp.ndarray, idx: int) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("attention")
     feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", [ctx.dims.depth] + feature_dims + [ctx.dims.intermediate_replicated],
+    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_replicated],
                            scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    qry_param = get_param(ctx, "qry", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    val_param = get_param(ctx, "val", [ctx.dims.depth, ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
+    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
+    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
                           scale=ctx.model.depth ** -0.5)
     if ctx.is_initializing:
         return inp
@@ -256,19 +257,14 @@ def momentumnet_side(ctx):
 
 def step(ctx: Context):
     side = momentumnet_side(ctx)
-    if not ctx.is_initializing:
-        ctx.parameters = {}
 
     def _fn(idx: int, src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
-        if not ctx.is_initializing:
-            ctx.parameters = {}
+        src = (ctx.parameters,) + src
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
         src = reversible(ctx, side, idx)(src)
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), idx)(src)
         src = reversible(ctx, side, idx)(src)
-        if not ctx.is_initializing:
-            ctx.parameters = {}
-        return src
+        return src[1:]
 
     return _fn
 
@@ -287,15 +283,10 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
-    src = (ctx.parameters, src, zero, src, zero)
-    ctx.parameters = {}
-    if ctx.is_initializing:
-        src = step(ctx)(0, src)
-    else:
-        for i in range(ctx.dims.sizes.depth):
-            src = step(ctx)(i, src)
-    ctx.parameters = src[0]
-    return output_embed(ctx, revnet_out(src[1:]))
+    src = (src, zero, src, zero)
+    for i in range(ctx.dims.sizes.depth):
+        src = step(ctx)(i, src)
+    return output_embed(ctx, revnet_out(src))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
