@@ -106,8 +106,6 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int) -> REVERSIBLE_CTX:
-    name_cache = copy.deepcopy(ctx.name_cache)
-
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
@@ -119,8 +117,9 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
         ctx.prng_key = new_ctx.prng_key
         return new_ctx.parameters, x10, x11, out, x01
 
-    def base(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> jnp.ndarray:
-        params, inp = inp
+    name_cache = copy.deepcopy(ctx.name_cache)
+
+    def base(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
@@ -129,20 +128,19 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
         return out
 
     @jax.custom_gradient
-    def _fn(inp: REVERSIBLE_CTX):
-        params, x00, x01, x10, x11 = inp
-        out = base((params, x10)) + x00
-
+    def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, back_x0: jnp.ndarray, x1: jnp.ndarray,
+            back_x1: jnp.ndarray):
         def _grad(dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
             d_params_old, dy0, y0, dy1, y1 = dy
-            x0, grad_fn = jax.vjp(base, (params, y0))
+            x0, grad_fn = jax.vjp(base, params, y0)
             d_params, dx0 = grad_fn(dy1)[0]
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
             return d_params, dy1, y1 - x0, dx0 + dy0, y0
 
-        return (params, x10, x10, out, out), _grad
+        out = base(params, x1) + x0
+        return (params, x1, x1, out, out), _grad
 
-    return _fn(src)
+    return _fn(*src)
 
 
 def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -232,7 +230,7 @@ def momentumnet_main(ctx: Context, fn: typing.Callable):
 
 
 def momentumnet_side(ctx):
-    def _fn(_ignored, x: jnp.ndarray, idx: int) -> jnp.ndarray:
+    def _fn(_ignored: Context, x: jnp.ndarray, idx: int) -> jnp.ndarray:
         return x * ctx.model.momentumnet_beta ** idx
 
     return _fn
