@@ -251,15 +251,19 @@ def momentumnet_side(ctx):
 
 def step(ctx: Context):
     side = momentumnet_side(ctx)
+    name_cache = copy.deepcopy(ctx.name_cache)
 
-    def _fn(idx: int, src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
-            ) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    def _fn(src: typing.Tuple[int, typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]], _unused: None
+            ) -> typing.Tuple[typing.Tuple[int, typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]],
+                              None]:
+        idx, src = src
+        ctx.name_cache = name_cache
         src = (ctx.parameters,) + src
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), idx)(src)
         src = reversible(ctx, side, idx)(src)
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), idx)(src)
         src = reversible(ctx, side, idx)(src)
-        return src[1:]
+        return (idx + 1, src[1:]), None
 
     return _fn
 
@@ -278,15 +282,12 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
-    src = (src, zero, src, zero)
+    src = 0, (src, zero, src, zero)
     if ctx.is_initializing:
-        src = step(ctx)(0, src)
+        src = step(ctx)(src, None)
     else:
-        name_cache = copy.deepcopy(ctx.name_cache)
-        for i in range(ctx.dims.sizes.depth):
-            src = step(ctx)(i, src)
-            ctx.name_cache = name_cache
-    return output_embed(ctx, revnet_out(src))
+        src = lax.scan(step(ctx), src, None, ctx.dims.sizes.depth, unroll=ctx.model.scan_unroll)
+    return output_embed(ctx, revnet_out(src[0][1]))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
