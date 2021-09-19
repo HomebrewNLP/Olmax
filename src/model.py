@@ -225,8 +225,8 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
 
 
 def momentumnet_main(ctx: Context, fn: typing.Callable):
-    def _fn(x: jnp.ndarray, idx: int) -> jnp.ndarray:
-        return fn(x) * (1 - ctx.model.momentumnet_beta) / (ctx.model.momentumnet_beta ** idx)
+    def _fn(sub_ctx: Context, x: jnp.ndarray, idx: int) -> jnp.ndarray:
+        return fn(sub_ctx, x) * (1 - ctx.model.momentumnet_beta) / (ctx.model.momentumnet_beta ** idx)
 
     return _fn
 
