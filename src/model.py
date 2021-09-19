@@ -23,6 +23,8 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
 
 
 def get_item(inp: jnp.ndarray, idx: int) -> jnp.ndarray:
+    return inp[idx]
+
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         def _grad(dy: jnp.ndarray):
@@ -294,8 +296,10 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     if ctx.is_initializing:
         src = step(ctx)(0, src)
     else:
+        name_cache = copy.deepcopy(ctx.name_cache)
         for i in range(ctx.dims.sizes.depth):
             src = step(ctx)(i, src)
+            ctx.name_cache = name_cache
     return output_embed(ctx, revnet_out(src))
 
 
