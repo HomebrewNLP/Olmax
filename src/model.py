@@ -105,14 +105,14 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return shard(matmul(inp, embd, 2), None)
 
 
-def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int) -> REVERSIBLE_CTX:
     name_cache = copy.deepcopy(ctx.name_cache)
 
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, x10)
+        out = fn(new_ctx, x10, idx)
         ctx.parameters = new_ctx.parameters
         ctx.parameter_dims = new_ctx.parameter_dims
         ctx.name_cache = new_ctx.name_cache
@@ -124,7 +124,7 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX) -> REVERS
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, inp)
+        out = fn(new_ctx, inp, idx)
         ctx.name_cache = new_ctx.name_cache
         return out
 
@@ -225,9 +225,8 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
 
 
 def momentumnet_main(ctx: Context, fn: typing.Callable):
-    def _fn(*x: jnp.ndarray) -> jnp.ndarray:
-        *x, idx = x
-        return fn(*x, idx) * (1 - ctx.model.momentumnet_beta) / (ctx.model.momentumnet_beta ** idx)
+    def _fn(x: jnp.ndarray, idx: int) -> jnp.ndarray:
+        return fn(x) * (1 - ctx.model.momentumnet_beta) / (ctx.model.momentumnet_beta ** idx)
 
     return _fn
 
@@ -254,11 +253,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
     src = ctx.parameters, src, zero, src, zero
-    for _ in range(ctx.dims.sizes.depth):
-        src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), src)
-        src = reversible(ctx, momentumnet_side(ctx), src)
-        src = reversible(ctx, momentumnet_main(ctx, feed_forward), src)
-        src = reversible(ctx, momentumnet_side(ctx), src)
+    for i in range(ctx.dims.sizes.depth):
+        src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), src, i)
+        src = reversible(ctx, momentumnet_side(ctx), src, i)
+        src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, i)
+        src = reversible(ctx, momentumnet_side(ctx), src, i)
     ctx.parameters = src[0]
     return output_embed(ctx, revnet_out(src[1:]))
 
