@@ -4,6 +4,7 @@ import typing
 
 import yaml
 from jax import numpy as jnp, random
+
 from .constants import MomentumType
 
 
@@ -100,6 +101,7 @@ class Training(DataClass):
         self.loss_top_p = 0.4
         self.loss_top_snap = 128  # snap top_p * batch to closest multiple
         self.device_steps = 1024
+        self.device_unroll = 16
         self.steps = 2 ** 16
         self.model_parallel = 8
         self.data_parallel = 1

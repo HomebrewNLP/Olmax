@@ -17,7 +17,8 @@ from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
 
 
-def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
+               ) -> typing.Tuple[typing.Dict[str, typing.Any], None]:
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
     (top_loss, loss), grads = grad_fn(wctx.ctx.parameters,
@@ -26,16 +27,12 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     wctx.loss += loss
     wctx.top_loss += top_loss
     wctx.current_step += 1
-    return wctx.serialize()
-
-
-def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
-    wctx = WhileTrainContext(while_ctx_dict)
-    return jnp.not_equal(jnp.mod(wctx.current_step, wctx.ctx.training.device_steps + 1), 0)
+    return wctx.serialize(), None
 
 
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-    return lax.while_loop(cond_fn, train_step, while_ctx_dict)
+    training = WhileTrainContext(while_ctx_dict).ctx.training
+    return lax.scan(train_step, while_ctx_dict, None, training.device_steps, unroll=training.device_unroll)[0]
 
 
 def sharding(ctx: Context, dims: typing.List[str]):
