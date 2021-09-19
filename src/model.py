@@ -253,13 +253,14 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = shard(jnp.zeros_like(src))
-    src = src, zero, src, zero
+    src = ctx.parameters, src, zero, src, zero
     for _ in range(ctx.dims.sizes.depth):
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), src)
         src = reversible(ctx, momentumnet_side(ctx), src)
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), src)
         src = reversible(ctx, momentumnet_side(ctx), src)
-    return output_embed(ctx, revnet_out(src[0][1]))
+    ctx.parameters = src[0]
+    return output_embed(ctx, revnet_out(src[1:]))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
