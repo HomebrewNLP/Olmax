@@ -26,7 +26,7 @@ def get_item(inp: jnp.ndarray, idx: int) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         def _grad(dy: jnp.ndarray):
-            return lax.pad(dy.reshape(1, *dy.shape), 0,
+            return lax.pad(dy.reshape(1, *dy.shape), jnp.zeros([], dtype=inp.dtype),
                            ((idx, inp.shape[0] - idx - 1, 0),) + ((0, 0, 0),) * (inp.ndim - 1))
 
         return src[idx], _grad
