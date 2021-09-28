@@ -74,8 +74,8 @@ def main():
     warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
     # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
-    if wctx.wandb.use_wandb:
-        wandb.init(project=wctx.wandb.project, entity=wctx.wandb.entity,
+    if wctx.ctx.wandb.use_wandb:
+        wandb.init(project=wctx.ctx.wandb.project, entity=wctx.ctx.wandb.entity,
                    config=wctx.serialize())
 
     ctx = wctx.ctx
@@ -116,9 +116,11 @@ def main():
                       f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
                 start_time = time.time()
             if idx % ctx.wandb.log_frequency == 0 and ctx.wandb.use_wandb:
-                wandb.log({"loss": wctx.loss / ctx.training.device_steps, "step": idx,\
-                           "top_loss": wctx.top_loss, "lr":float(get_current_lr(ctx, wctx.current_step)),\
-                           "tokens/secodn": millions_processed * (idx + 1) / (time.time() - global_start})
+                wandb.log({"loss": float(wctx.loss / ctx.training.device_steps), "step": idx, \
+                           "top_loss": float(wctx.top_loss),
+                           "lr": float(get_current_lr(ctx, wctx.current_step)), \
+                           "tokens/secodn": float(
+                               millions_processed * (idx + 1) / (time.time() - global_start))})
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
                     jax.profiler.start_trace(ctx.training.trace.output_path)
