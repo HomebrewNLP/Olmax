@@ -1,6 +1,7 @@
 import time
 import typing
 import warnings
+import wandb
 
 import jax
 import jax._src.util as util
@@ -73,6 +74,10 @@ def main():
     warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
     # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
+    if wctx.wandb.use_wandb:
+        wandb.init(project=wctx.wandb.project, entity=wctx.wandb.entity,
+                   config=wctx.serialize())
+
     ctx = wctx.ctx
     print(yaml.dump(ctx.config(), indent=4))
     ctx.is_initializing = True
@@ -110,6 +115,10 @@ def main():
                       f'StepTime: {time.time() - start_time:10.6f}s - '
                       f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
                 start_time = time.time()
+            if idx % ctx.wandb.log_frequency == 0 and ctx.wandb.use_wandb:
+                wandb.log({"loss": wctx.loss / ctx.training.device_steps, "step": idx,\
+                           "top_loss": wctx.top_loss, "lr":float(get_current_lr(ctx, wctx.current_step)),\
+                           "tokens/secodn": millions_processed * (idx + 1) / (time.time() - global_start})
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
                     jax.profiler.start_trace(ctx.training.trace.output_path)
