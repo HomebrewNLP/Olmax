@@ -16,6 +16,7 @@ from src.context import Context, WhileTrainContext
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
+from src.utils.wandb import WandbLog
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
@@ -26,6 +27,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
                                       wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
+    wctx.current_loss += loss
     wctx.top_loss += top_loss
     wctx.current_step += 1
     return wctx.serialize(), None
@@ -77,7 +79,7 @@ def main():
     if wctx.ctx.wandb.use_wandb:
         wandb.init(project=wctx.ctx.wandb.project, entity=wctx.ctx.wandb.entity,
                    config=wctx.serialize())
-
+        wandbLog = WandbLog()
     ctx = wctx.ctx
     print(yaml.dump(ctx.config(), indent=4))
     ctx.is_initializing = True
@@ -116,11 +118,8 @@ def main():
                       f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
                 start_time = time.time()
             if idx % ctx.wandb.log_frequency == 0 and ctx.wandb.use_wandb:
-                wandb.log({"loss": float(wctx.loss / ctx.training.device_steps), "step": idx, \
-                           "top_loss": float(wctx.top_loss),
-                           "lr": float(get_current_lr(ctx, wctx.current_step)), \
-                           "tokens/secodn": float(
-                               millions_processed * (idx + 1) / (time.time() - global_start))})
+                wandbLog(wctx)
+                wctx.zero_curr_loss()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
                     jax.profiler.start_trace(ctx.training.trace.output_path)

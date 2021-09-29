@@ -73,7 +73,7 @@ class WandB(DataClass):
         self.project = 'gpt'
         self.entity = 'homebrewnlp'
         self.model_log_type = None  # One of "gradients", "parameters", "all", or None
-        self.log_frequency = 10
+        self.log_frequency = 128
 
 class Optimizer(DataClass):
     def __init__(self):
@@ -201,11 +201,15 @@ class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
         self.loss = jnp.zeros([])
+        self.current_loss = jnp.zeros([])
         self.top_loss = jnp.zeros([])
 
         if self.config is not None:
             self.loss = config['loss']
             self.top_loss = config['top_loss']
+
+    def zero_curr_loss(self):
+        self.current_loss = jnp.zeros([])
 
     def serialize(self):
         serialized = self._serialize()
