@@ -6,6 +6,7 @@ import yaml
 from jax import numpy as jnp, random
 
 from .constants import MomentumType
+from .utils.wandb import WandbLog
 
 
 class DataClass:
@@ -140,6 +141,11 @@ class Context(DataClass):
         self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
         self.training = Training()
         self.wandb = WandB()
+        if self.wandb.use_wandb:
+            wandb.init(project=wandb.project, entity=self..wandb.entity,
+                   config=self.serialize())
+        self.wblog = WandbLog() if self.wandb.use_wanb else None
+
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
