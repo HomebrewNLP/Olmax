@@ -4,6 +4,7 @@ import typing
 
 import yaml
 from jax import numpy as jnp, random
+import wandb
 
 from .constants import MomentumType
 from .utils.wandb import WandbLog
@@ -141,10 +142,6 @@ class Context(DataClass):
         self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
         self.training = Training()
         self.wandb = WandB()
-        if self.wandb.use_wandb:
-            wandb.init(project=wandb.project, entity=self..wandb.entity,
-                   config=self.serialize())
-        self.wblog = WandbLog() if self.wandb.use_wanb else None
 
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
@@ -214,6 +211,11 @@ class WhileTrainContext(WhileContext):
             self.loss = config['loss']
             self.top_loss = config['top_loss']
 
+        if self.ctx.wandb.use_wandb:
+            wandb.init(project=self.ctx.wandb.project, entity=self.ctx.wandb.entity,
+                   config=self.serialize())
+        self.wblog = WandbLog() if self.ctx.wandb.use_wandb else None
+
     def zero_curr_loss(self):
         self.current_loss = jnp.zeros([])
 
@@ -222,6 +224,12 @@ class WhileTrainContext(WhileContext):
         serialized['loss'] = self.loss
         serialized['top_loss'] = self.top_loss
         return serialized
+
+    def send_log(self, current_lr):
+        self.wblog(self, current_lr)
+        self.zero_curr_loss()
+
+
 
 
 class WhilePredictContext(WhileContext):

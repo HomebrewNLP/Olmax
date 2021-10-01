@@ -1,9 +1,6 @@
 import time
 import wandb
 
-from src.context import WhileTrainContext
-from src.optimizer import get_current_lr
-
 
 class WandbLog:
     def __init__(self):
@@ -12,8 +9,8 @@ class WandbLog:
         self.idx = 0
         self.prev = 0
 
-    def __call__(self, wctx: WhileTrainContext):
-        curr_loss = float(wctx.current_loss) / wctx.ctx.wandb.log_frequency
+    def __call__(self, wctx, current_lr):
+        curr_loss = wctx.current_loss.astype(float) / wctx.ctx.wandb.log_frequency
         step = self.idx * wctx.ctx.wandb.log_frequency
         self.idx += 1
         self.mean_loss = ((wctx.loss / step) * self.prev + curr_loss * self.idx) / (self.prev + self.idx)  # LWMA
@@ -26,6 +23,6 @@ class WandbLog:
                    "Loss/Mean": self.mean_loss,
                    "Speed/Batches per Second": rate,
                    "Speed/Tokens per Day": tokens_per_day,
-                   "Optimizer/Learning Rate": float(get_current_lr(wctx.ctx, wctx.current_step)),
+                   "Optimizer/Learning Rate": current_lr,
                    "Optimizer/Beta1": wctx.ctx.model.momentumnet_beta},
                   step=step)
