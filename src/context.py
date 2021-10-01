@@ -75,7 +75,7 @@ class WandB(DataClass):
         self.project = 'gpt'
         self.entity = 'homebrewnlp'
         self.model_log_type = None  # One of "gradients", "parameters", "all", or None
-        self.log_frequency = 128
+        self.log_frequency = 1
 
 class Optimizer(DataClass):
     def __init__(self):
@@ -212,9 +212,9 @@ class WhileTrainContext(WhileContext):
             self.top_loss = config['top_loss']
 
         if self.ctx.wandb.use_wandb:
-            wandb.init(project=self.ctx.wandb.project, entity=self.ctx.wandb.entity,
+            run = wandb.init(project=self.ctx.wandb.project, entity=self.ctx.wandb.entity,
                    config=self.serialize())
-        self.wblog = WandbLog() if self.ctx.wandb.use_wandb else None
+            self.wblog = WandbLog(run)
 
     def zero_curr_loss(self):
         self.current_loss = jnp.zeros([])
