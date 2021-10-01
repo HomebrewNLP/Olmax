@@ -76,6 +76,10 @@ def main():
     ctx = wctx.ctx
     print(yaml.dump(ctx.config(), indent=4))
     ctx.is_initializing = True
+    if ctx.wandb.use_wandb:
+        run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity,
+               config=wctx.config)
+        wblog = WandbLog(run)
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
@@ -110,7 +114,8 @@ def main():
                       f'StepTime: {time.time() - start_time:10.6f}s - '
                       f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
             if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
-                wctx.send_log(get_current_lr(wctx.ctx, wctx.current_step))
+                wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step))
+                wctx.zero_curr_loss()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
                     jax.profiler.start_trace(ctx.training.trace.output_path)

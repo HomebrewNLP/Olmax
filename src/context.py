@@ -211,11 +211,6 @@ class WhileTrainContext(WhileContext):
             self.loss = config['loss']
             self.top_loss = config['top_loss']
 
-        if self.ctx.wandb.use_wandb:
-            run = wandb.init(project=self.ctx.wandb.project, entity=self.ctx.wandb.entity,
-                   config=self.serialize())
-            self.wblog = WandbLog(run)
-
     def zero_curr_loss(self):
         self.current_loss = jnp.zeros([])
 
@@ -224,10 +219,6 @@ class WhileTrainContext(WhileContext):
         serialized['loss'] = self.loss
         serialized['top_loss'] = self.top_loss
         return serialized
-
-    def send_log(self, current_lr):
-        self.wblog(self, current_lr)
-        self.zero_curr_loss()
 
 
 
