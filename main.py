@@ -5,6 +5,7 @@ import jax
 import jax._src.util as util
 import numpy as np
 import yaml
+import wandb
 from jax import lax, numpy as jnp
 from jax.experimental import PartitionSpec
 from jax.experimental import pjit
@@ -14,7 +15,7 @@ from src.context import Context, WhileTrainContext
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
-
+from src.utils.wandb import WandbLog
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
                ) -> typing.Tuple[typing.Dict[str, typing.Any], None]:
@@ -24,7 +25,6 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
                                       wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
-    wctx.current_loss += loss
     wctx.top_loss += top_loss
     wctx.current_step += 1
     return wctx.serialize(), None
@@ -115,7 +115,6 @@ def main():
                       f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
             if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
                 wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step))
-                wctx.zero_curr_loss()
             if ctx.training.trace.do_trace:
                 if idx == ctx.training.trace.start_step:
                     jax.profiler.start_trace(ctx.training.trace.output_path)

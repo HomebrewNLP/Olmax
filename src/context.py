@@ -211,9 +211,6 @@ class WhileTrainContext(WhileContext):
             self.loss = config['loss']
             self.top_loss = config['top_loss']
 
-    def zero_curr_loss(self):
-        self.current_loss = jnp.zeros([])
-
     def serialize(self):
         serialized = self._serialize()
         serialized['loss'] = self.loss
