@@ -10,7 +10,7 @@ class WandbLog:
         self.run = run
 
     def __call__(self, wctx, current_lr):
-        curr_loss = wctx.loss / wctx.ctx.wandb.log_frequency
+        curr_loss = wctx.loss / wctx.ctx.training.device_steps
         step = self.idx * wctx.ctx.wandb.log_frequency * wctx.ctx.training.device_steps
         self.idx += 1
         self.mean_loss = ((wctx.loss / step) * self.prev + curr_loss * self.idx) / (self.prev + self.idx)  # LWMA
