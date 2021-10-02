@@ -13,7 +13,7 @@ class WandbLog:
         curr_loss = wctx.loss / wctx.ctx.training.device_steps
         step = self.idx * wctx.ctx.wandb.log_frequency * wctx.ctx.training.device_steps
         self.idx += 1
-        self.mean_loss = ((wctx.loss / step) * self.prev + curr_loss * self.idx) / (self.prev + self.idx)  # LWMA
+        self.mean_loss = (self.mean_loss * self.prev + curr_loss * self.idx) / (self.prev + self.idx)  # LWMA
         self.prev += self.idx
 
         rate = step / (time.time() - self.start_time)
@@ -21,8 +21,10 @@ class WandbLog:
 
         self.run.log({"Loss/Current": curr_loss.astype(float),
                    "Loss/Mean": self.mean_loss.astype(float),
+                   "Loss/Current Max": (wctx.top_loss / wctx.ctx.training.device_steps).astype(float),
                    "Speed/Batches per Second": rate,
                    "Speed/Tokens per Day": tokens_per_day,
                    "Optimizer/Learning Rate": current_lr.astype(float),
-                   "Optimizer/Beta1": wctx.ctx.model.momentumnet_beta},
+                   "Optimizer/Beta1": wctx.ctx.optimizer.adam_beta1.astype(float),
+                   "Optimizer/Beta2": wctx.ctx.optimizer.adam_beta2.astype(float)},
                   step=step)
