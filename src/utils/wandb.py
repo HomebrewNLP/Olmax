@@ -25,6 +25,6 @@ class WandbLog:
                    "Speed/Batches per Second": rate,
                    "Speed/Tokens per Day": tokens_per_day,
                    "Optimizer/Learning Rate": current_lr.astype(float),
-                   "Optimizer/Beta1": wctx.ctx.optimizer.adam_beta1.astype(float),
-                   "Optimizer/Beta2": wctx.ctx.optimizer.adam_beta2.astype(float)},
+                   "Optimizer/Beta1": wctx.ctx.optimizer.adam_beta1,
+                   "Optimizer/Beta2": wctx.ctx.optimizer.adam_beta2},
                   step=step)
