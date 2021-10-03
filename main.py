@@ -78,7 +78,7 @@ def main():
     ctx.is_initializing = True
     if ctx.wandb.use_wandb:
         run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity,
-               config=ctx.config)
+               config=ctx.config())
         wblog = WandbLog(run)
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
