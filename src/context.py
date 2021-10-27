@@ -68,6 +68,15 @@ class TensorboardTrace(DataClass):
         self.output_path = "trace"
 
 
+class WandB(DataClass):
+    def __init__(self):
+        self.use_wandb = True
+        self.project = 'gpt'
+        self.entity = 'homebrewnlp'
+        self.model_log_type = None  # One of "gradients", "parameters", "all", or None
+        self.log_frequency = 1
+
+
 class Optimizer(DataClass):
     def __init__(self):
         self.learning_rate = 1e-3
@@ -132,6 +141,7 @@ class Context(DataClass):
         self.model = Model()
         self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
         self.training = Training()
+        self.wandb = WandB()
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
@@ -193,6 +203,7 @@ class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
         self.loss = jnp.zeros([])
+        self.current_loss = jnp.zeros([])
         self.top_loss = jnp.zeros([])
 
         if self.config is not None:
