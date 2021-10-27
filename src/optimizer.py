@@ -47,8 +47,6 @@ def zero_param_like(ctx: Context, new_name: str, original_name: jnp.ndarray) -> 
     return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name, []))
 
 
-
-
 def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
         prefix: str) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)

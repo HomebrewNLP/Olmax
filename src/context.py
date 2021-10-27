@@ -4,10 +4,8 @@ import typing
 
 import yaml
 from jax import numpy as jnp, random
-import wandb
 
 from .constants import MomentumType
-from .utils.wandb import WandbLog
 
 
 class DataClass:
@@ -69,6 +67,7 @@ class TensorboardTrace(DataClass):
         self.do_trace = False
         self.output_path = "trace"
 
+
 class WandB(DataClass):
     def __init__(self):
         self.use_wandb = True
@@ -76,6 +75,7 @@ class WandB(DataClass):
         self.entity = 'homebrewnlp'
         self.model_log_type = None  # One of "gradients", "parameters", "all", or None
         self.log_frequency = 1
+
 
 class Optimizer(DataClass):
     def __init__(self):
@@ -142,7 +142,6 @@ class Context(DataClass):
         self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
         self.training = Training()
         self.wandb = WandB()
-
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
@@ -216,8 +215,6 @@ class WhileTrainContext(WhileContext):
         serialized['loss'] = self.loss
         serialized['top_loss'] = self.top_loss
         return serialized
-
-
 
 
 class WhilePredictContext(WhileContext):

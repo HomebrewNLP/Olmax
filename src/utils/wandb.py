@@ -20,11 +20,11 @@ class WandbLog:
         tokens_per_day = step * 3600 * 24 * rate * wctx.ctx.dims.sizes.batch * wctx.ctx.dims.sizes.sequence
 
         self.run.log({"Loss/Current": curr_loss.astype(float),
-                   "Loss/Mean": self.mean_loss.astype(float),
-                   "Loss/Current Max": (wctx.top_loss / wctx.ctx.training.device_steps).astype(float),
-                   "Speed/Batches per Second": rate,
-                   "Speed/Tokens per Day": tokens_per_day,
-                   "Optimizer/Learning Rate": current_lr.astype(float),
-                   "Optimizer/Beta1": wctx.ctx.optimizer.adam_beta1,
-                   "Optimizer/Beta2": wctx.ctx.optimizer.adam_beta2},
-                  step=step)
+                      "Loss/Mean": self.mean_loss.astype(float),
+                      "Loss/Current Max": (wctx.top_loss / wctx.ctx.training.device_steps).astype(float),
+                      "Speed/Batches per Second": rate,
+                      "Speed/Tokens per Day": tokens_per_day,
+                      "Optimizer/Learning Rate": current_lr.astype(float),
+                      "Optimizer/Beta1": wctx.ctx.optimizer.adam_beta1,
+                      "Optimizer/Beta2": wctx.ctx.optimizer.adam_beta2},
+                     step=step)
