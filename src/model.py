@@ -41,6 +41,28 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
+def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    weight = get_param(ctx, "inp_weight", [ctx.dims.full_conv_kernel, ctx.dims.heads, ctx.dims.features_per_head,
+                                           ctx.dims.intermediate_parallel], scale=1 / ctx.model.activation_std)
+    # Conv over heads would allow reduced communication of features
+    return lax.conv_general_dilated(inp, weight, [1, 1],
+                                    padding=[(0, ctx.dims.full_conv_kernel - 1), (0, 0)],
+                                    dimension_numbers=lax.ConvDimensionNumbers((0, 3, 1, 2), (3, 2, 1, 0),
+                                                                               (0, 3, 1, 2)),
+                                    precision='fastest')
+
+
+def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    weight = get_param(ctx, "inp_weight", [ctx.dims.depthwise_conv_kernel, ctx.dims.heads, 1,
+                                           ctx.dims.intermediate_parallel], scale=1 / ctx.model.activation_std)
+    return lax.conv_general_dilated(inp, weight, [1, 1],
+                                    padding=[(0, ctx.dims.depthwise_conv_kernel - 1), (0, 0)],
+                                    dimension_numbers=lax.ConvDimensionNumbers((0, 3, 1, 2), (3, 2, 1, 0),
+                                                                               (0, 3, 1, 2)),
+                                    feature_group_count=ctx.dims.sizes.features_per_head,
+                                    precision='fastest')
+
+
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5)

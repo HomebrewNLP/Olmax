@@ -27,6 +27,8 @@ class DataContext(DataClass):
 class DimSizes(DataClass):
     def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
         self.batch = 256
+        self.full_conv_kernel = 9
+        self.depthwise_conv_kernel = 49
         self.features_per_head = 512
         self.heads = 8
         self.sequence = 256
@@ -45,6 +47,8 @@ class Dims(DataClass):
         self.batch = "batch"
         self.features_per_head = "features_per_head"
         self.heads = "heads"
+        self.full_conv_kernel = "full_conv_kernel"
+        self.depthwise_conv_kernel = "depthwise_conv_kernel"
         self.depth = "depth"
         self.sequence = "sequence"
         self.anonymous_sequence = "anonymous_sequence"
