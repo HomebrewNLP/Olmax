@@ -23,6 +23,14 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
     raise ValueError
 
 
+def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]]):
+    ndim = weight.ndim
+    dimension_numbers = (0, ndim - 1) + tuple(range(1, ndim - 1))
+    dimension_numbers = lax.ConvDimensionNumbers(dimension_numbers, tuple(range(ndim)), dimension_numbers)
+    return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding,
+                                    dimension_numbers=dimension_numbers, precision='fastest')
+
+
 def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
         left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jnp.ndarray:
     dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
