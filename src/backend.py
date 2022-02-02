@@ -23,6 +23,14 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
     raise ValueError
 
 
+def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
+             padding: typing.List[typing.Tuple[int, int]]) -> jnp.ndarray:
+    strides = (1,) * (len(window_shape) + 2)
+    dims = (1,) + tuple(window_shape) + (1,)
+    padding = ((0, 0),) + tuple(padding) + ((0, 0),)
+    return lax.reduce_window(inputs, 0, lax.add, dims, strides, padding)
+
+
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]]):
     ndim = weight.ndim
     dimension_numbers = (0, ndim - 1) + tuple(range(1, ndim - 1))

@@ -96,6 +96,7 @@ class Optimizer(DataClass):
 
 class Model(DataClass):
     def __init__(self):
+        self.device_halo_size: int = 3
         self.scan_unroll = 1
         self.norm_eps = 1e-5
         self.group_linear_factor = 2

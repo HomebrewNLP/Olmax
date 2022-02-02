@@ -6,7 +6,7 @@ import jax
 import jax._src.util as util
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, shard, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose, conv
+from src.backend import get_param, shard, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose, conv, sum_pool
 from src.context import Context
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
@@ -41,18 +41,24 @@ def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def conv_weight(ctx: Context, inp: jnp.ndarray, groups: int, conv_kernel: str, *padding: bool):
-    weight = get_param(ctx, "conv_weight", [conv_kernel, ctx.dims.heads, ctx.dims.features_per_head // groups,
-                                            ctx.dims.intermediate_parallel], scale=1 / ctx.model.activation_std)
-    return conv(inp, weight, [(0, (size - 1) if pad else 0) for size, pad in zip(weight.shape[:-2], padding)])
+def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    return sum_pool(inp, [0, ctx.model.device_halo_size], [(0, 0), (ctx.model.device_halo_size // 2,) * 2])
+
+
+def conv_weight(ctx: Context, inp: jnp.ndarray, groups: int, conv_kernel: str, pad_heads: bool):
+    weight = get_param(ctx, "conv_weight", [conv_kernel, ctx.dims.head_conv if pad_heads else ctx.dims.heads,
+                                            ctx.dims.features_per_head // groups, ctx.dims.intermediate_parallel],
+                       scale=1 / ctx.model.activation_std)
+
+    return conv(inp, weight, [(0, weight.shape[0] - 1), (ctx.dims.sizes.head_conv // 2 - 1 if pad_heads else 0,) * 2])
 
 
 def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return conv_weight(ctx, inp, 1, ctx.dims.full_conv_kernel, True, False)
+    return conv_weight(ctx, inp, 1, ctx.dims.full_conv_kernel, False)
 
 
 def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return conv_weight(ctx, inp, ctx.dims.features_per_head, ctx.dims.depthwise_conv_kernel, True, False)
+    return conv_weight(ctx, inp, ctx.dims.features_per_head, ctx.dims.depthwise_conv_kernel, False)
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
