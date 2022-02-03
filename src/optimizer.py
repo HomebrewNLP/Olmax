@@ -3,8 +3,8 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from .backend import zero_param, one_shape, shard, assign, prefixed_name
-from .constants import MomentumType
+from .backend import zero_param, one_shape, assign, prefixed_name
+from .constants import MomentumType, ParallelAxes
 from .context import Context
 
 
@@ -24,7 +24,7 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         weight_update = jnp.minimum(weight_update, buffer[-1])
 
         if i >= head_index >= 0:
-            weight_update = shard(weight_update, head_index, None)
+            weight_update = jax.lax.pmean(weight_update, ParallelAxes.data)
 
     weight_update = weight_update + jnp.square(grad)
 

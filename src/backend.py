@@ -3,8 +3,6 @@ import typing
 import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
-from jax.experimental import PartitionSpec
-from jax.experimental import pjit
 
 from .context import Context
 
@@ -72,22 +70,6 @@ def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
 
 def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return ctx.dims.intermediate_replicated if is_intermediate(ctx, inp) else ctx.dims.features_per_head
-
-
-def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0) -> jnp.ndarray:
-    spec: typing.List[typing.Optional[str]] = [None] * tensor.ndim
-    if isinstance(batch, int):
-        spec[batch] = "data_parallel"
-    if isinstance(head, int):
-        spec[head] = "model_parallel"
-    try:
-        return pjit.with_sharding_constraint(tensor, PartitionSpec(*spec))
-    except ValueError as e:
-        e_str = str(e)
-        if ("One of with_sharding_constraint arguments was given the resource assignment of PartitionSpec(" in e_str and
-                ", but resource axis " in e_str and "is undefined. Did you forget to declare the mesh?" in e_str):
-            return tensor
-        raise e
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:

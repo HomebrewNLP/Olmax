@@ -1,21 +1,23 @@
 import time
 import typing
 import warnings
+
 import jax
 import jax._src.util as util
 import numpy as np
-import yaml
 import wandb
+import yaml
 from jax import lax, numpy as jnp
 from jax.experimental import PartitionSpec
-from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
+from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
 from src.utils.wandb import WandbLog
+
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
                ) -> typing.Tuple[typing.Dict[str, typing.Any], None]:
@@ -39,9 +41,9 @@ def sharding(ctx: Context, dims: typing.List[str]):
     out = []
     for d in dims:
         if d == ctx.dims.batch:
-            out.append("data_parallel")
+            out.append(ParallelAxes.data)
         if d == ctx.dims.heads:
-            out.append("model_parallel")
+            out.append(ParallelAxes.model)
         else:
             out.append(None)
     return PartitionSpec(*out)
@@ -78,7 +80,7 @@ def main():
     ctx.is_initializing = True
     if ctx.wandb.use_wandb:
         run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity,
-               config=ctx.config())
+                         config=ctx.config())
         wblog = WandbLog(run)
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
@@ -91,13 +93,13 @@ def main():
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
-                 'data': PartitionSpec(None, None, "data_parallel", None),
+                 'data': PartitionSpec(None, None, ParallelAxes.data, None),
                  'current_step': None, 'loss': None, 'top_loss': None}
-    step = train_loop(wctx, timeit("JITing model", pjit.pjit, jitless_step, (partition,), partition))
+    step = train_loop(wctx, timeit("JITing model", jax.pmap, jitless_step, (partition,), partition))
 
     mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     global_start = time.time()
-    with mesh(mesh_devices, ('data_parallel', 'model_parallel')):
+    with mesh(mesh_devices, (ParallelAxes.data, ParallelAxes.model)):
         timeit("Compiling model and performing first step", step, next(data))
         timeit("Running second step", step, next(data))
         print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")

@@ -6,7 +6,8 @@ import jax
 import jax._src.util as util
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, shard, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose, conv, sum_pool
+from src.backend import get_param, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose, conv, sum_pool
+from src.constants import ParallelAxes
 from src.context import Context
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
@@ -16,16 +17,15 @@ def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
 
 
-def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False,
-         model_parallel_dim: typing.Optional[int] = -2, data_parallel_dim: typing.Optional[int] = 0) -> jnp.ndarray:
-    square = shard(jnp.square(inp).sum(dims, keepdims=keepdims), model_parallel_dim, data_parallel_dim)
+def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> jnp.ndarray:
+    square = jnp.square(inp).sum(dims, keepdims=keepdims)
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
 def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
-        mean = shard(src.mean(-1, keepdims=True))
+        mean = src.mean(-1, keepdims=True)
         out = src - mean
         scale = norm(ctx, out, -1, True) * src.shape[-1] ** -0.5
         out = out * scale
@@ -74,9 +74,9 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight, -1, 1, -2, 0), 0, 1))
-    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
-    out = shard(transpose(out, tuple(range(1, inp.ndim - 1)) + (0, -1)))
+    mid = activate(ctx, dot(normed, inp_weight, -1, 1, -2, 0))
+    out = dot(mid, out_weight, -1, 1, 0, 0)
+    out = transpose(out, tuple(range(1, inp.ndim - 1)) + (0, -1))
     return out
 
 
@@ -87,8 +87,8 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(matmul(normed, inp_weight, 2), None))
-    out = shard(dot(mid, out_weight, -1, 1))
+    mid = activate(ctx, lax.psum(matmul(normed, inp_weight, 2), ParallelAxes.model))
+    out = dot(mid, out_weight, -1, 1)
     return out
 
 
@@ -103,15 +103,15 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
 
-    out = shard(matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd))
+    out = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
     position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
     feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
     position_count = util.prod(position_shape)
     feature_count = util.prod(feature_shape)
     positions = jnp.reshape(jnp.arange(0, position_shape), (1, -1, 1, 1))
     features = jnp.arange(0, feature_count)
-    features = shard(jnp.reshape(features, [1, 1] + feature_shape) * 4 / feature_count, 1, None)
-    features = jnp.exp(shard(features - math.log(position_count / 2 / math.pi), 2, None))
+    features = jnp.reshape(features, [1, 1] + feature_shape) * 4 / feature_count
+    features = jnp.exp(features - math.log(position_count / 2 / math.pi))
     pos_embd = jnp.sin(features * positions).astype(ctx.model.dtype)
     return out + lax.stop_gradient(pos_embd)
 
@@ -121,7 +121,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], 0, 0)
     if ctx.is_initializing:
         return inp
-    return shard(matmul(inp, embd, 2), None)
+    return lax.psum(matmul(inp, embd, 2), ParallelAxes.model)
 
 
 def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int) -> REVERSIBLE_CTX:
@@ -170,12 +170,12 @@ def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
             arange = jnp.arange(0, lgt.shape[-1])
             mask: jnp.ndarray = jnp.greater(jnp.reshape(arange, ones + (1, -1)), jnp.reshape(arange, ones + (-1, 1)))
             lgt += (-1e30 * mask).astype(lgt.dtype)
-        lgt = jnp.exp(lgt - shard(lgt.max(-1, keepdims=True), -3))
-        lgt /= shard(lgt.sum(-1, keepdims=True), -3)
+        lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
+        lgt /= lgt.sum(-1, keepdims=True)
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
             prod = lgt * dy
-            return prod - shard(prod.sum(-1, keepdims=True), -3) * lgt
+            return prod - prod.sum(-1, keepdims=True) * lgt
 
         return lgt, _grad
 
@@ -189,9 +189,9 @@ def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, shard(dot(normed, inp_weight, -3, 1, -2, 0), 0, 1))  # HBFS
-    out = shard(dot(mid, out_weight, -1, 1, 0, 0), 0, 1)
-    out = shard(transpose(out, tuple(range(1, inp.ndim - 2)) + (-1, 0, -2)))  # B S H F
+    mid = activate(ctx, dot(normed, inp_weight, -3, 1, -2, 0))  # HBFS
+    out = dot(mid, out_weight, -1, 1, 0, 0)
+    out = transpose(out, tuple(range(1, inp.ndim - 2)) + (-1, 0, -2))  # B S H F
     return out
 
 
@@ -217,28 +217,29 @@ def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     batch_seq = batch_dims + (sequence_dim,)
 
     base = instance_norm(ctx, inp)
-    base = activate(ctx, shard(matmul(base, base_param, 2), None))
-    key = shard(matmul(base, key_param, 2))
-    qry = shard(matmul(base, qry_param, 2))
-    val = shard(matmul(base, val_param, 2))
+    base = activate(ctx, lax.psum(matmul(base, base_param, 2), ParallelAxes.model))
+    key = matmul(base, key_param, 2)
+    qry = matmul(base, qry_param, 2)
+    val = matmul(base, val_param, 2)
 
-    key = shard(transpose(key, key_permute), -3) * inp.shape[-1] ** -0.5
-    val = shard(transpose(val, key_permute), -3)
-    qry = shard(transpose(qry, qry_permute), -3)
-    lgt = shard(dot(key, qry, feature_dim, head_dim, batch_seq, batch_seq), -3)
+    key = transpose(key, key_permute) * inp.shape[-1] ** -0.5
+    val = transpose(val, key_permute)
+    qry = transpose(qry, qry_permute)
+    lgt = dot(key, qry, feature_dim, head_dim, batch_seq, batch_seq)
     lgt = softmax(ctx, lgt)
 
-    out = shard(dot(lgt, val, feature_dim, head_dim, batch_seq, batch_seq), -3)
-    return shard(transpose(out, key_permute))
+    out = dot(lgt, val, feature_dim, head_dim, batch_seq, batch_seq)
+    return transpose(out, key_permute)
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     normalization = ctx.dims.sizes.batch / tgt.size
-    tgt = shard(one_hot(tgt.astype(src.dtype), src.shape[-1]), None)
-    shifted = src - shard(src.max(-1, keepdims=True), None)
+    tgt = lax.psum(one_hot(tgt.astype(src.dtype), src.shape[-1]), ParallelAxes.model)
+    shifted = src - lax.pmin(src.max(-1, keepdims=True), ParallelAxes.model)
     exp_shifted = jnp.exp(shifted)
-    sum_exp = shard(exp_shifted.sum(-1, keepdims=True), None)
-    return shard(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), None) * normalization
+    sum_exp = lax.psum(exp_shifted.sum(-1, keepdims=True), ParallelAxes.model)
+    out = lax.psum(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), ParallelAxes.model)
+    return out * normalization
 
 
 def momentumnet_main(ctx: Context, fn: typing.Callable):
@@ -268,7 +269,7 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
-    zero = shard(jnp.zeros_like(src))
+    zero = jnp.zeros_like(src)
     src = ctx.parameters, src, zero, src, zero
     for i in range(ctx.dims.sizes.depth):
         src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), src, i)
@@ -283,7 +284,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    unreduced_loss = cross_entropy_loss(ctx, body_ctx(ctx, shard(src, None)), shard(tgt, None))
+    unreduced_loss = cross_entropy_loss(ctx, body_ctx(ctx, src), tgt)
     top_loss = loss = unreduced_loss.sum() / ctx.dims.sizes.batch
     top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
     top_k *= ctx.training.loss_top_snap
