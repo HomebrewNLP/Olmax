@@ -37,22 +37,21 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     return lax.scan(train_step, while_ctx_dict, None, training.device_steps, unroll=training.device_unroll)[0]
 
 
-def sharding(ctx: Context, dims: typing.List[str]):
-    out = []
-    for d in dims:
-        if d == ctx.dims.batch:
-            out.append(ParallelAxes.data)
-        if d == ctx.dims.heads:
-            out.append(ParallelAxes.model)
-        else:
-            out.append(None)
-    return PartitionSpec(*out)
+def sharding(ctx: Context, dims: typing.List[str], axis: ParallelAxes):
+    mapping = {ParallelAxes.data: ctx.dims.batch,
+               ParallelAxes.model: ctx.dims.heads}
+    if axis not in mapping:
+        return None
+    axis = mapping[axis]
+    if axis not in dims:
+        return None
+    return dims.index(axis)
 
 
-def timeit(text: str, fn, *args, pad=50):
+def timeit(text: str, fn, *args, pad=50, **kwargs):
     start_time = time.time()
     print(f'{text}..', end='', flush=True)
-    out = fn(*args)
+    out = fn(*args, **kwargs)
     print(f"{' ' * (pad - len(text))}Took:{time.time() - start_time:9.2f}s", flush=True)
     return out
 
@@ -92,36 +91,39 @@ def main():
            jnp.ones([], dtype=ctx.model.dtype))
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
-    partition = {'parameters': {name: sharding(ctx, dims) for name, dims in ctx.parameter_dims.items()},
-                 'data': PartitionSpec(None, None, ParallelAxes.data, None),
-                 'current_step': None, 'loss': None, 'top_loss': None}
-    step = train_loop(wctx, timeit("JITing model", jax.pmap, jitless_step, (partition,), partition))
+    step = jitless_step
+    for axis_name, axis_size in ((ParallelAxes.data, ctx.training.data_parallel),
+                                 (ParallelAxes.model, ctx.training.model_parallel)):
+        partition = {'parameters': {name: sharding(ctx, dims, axis_name)
+                                    for name, dims in ctx.parameter_dims.items()},
+                     'data': 2 if axis_name == ParallelAxes.data else None,
+                     'current_step': None, 'loss': None, 'top_loss': None}
+        step = train_loop(wctx, timeit(f"PMapping across {axis_name}", jax.pmap, step, axis_name, in_axes=partition,
+                                       out_axes=partition, axis_size=axis_size))
 
-    mesh_devices = np.array(jax.devices()).reshape(ctx.training.data_parallel, ctx.training.model_parallel)
     global_start = time.time()
-    with mesh(mesh_devices, (ParallelAxes.data, ParallelAxes.model)):
-        timeit("Compiling model and performing first step", step, next(data))
-        timeit("Running second step", step, next(data))
-        print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
+    timeit("Compiling model and performing first step", step, next(data))
+    timeit("Running second step", step, next(data))
+    print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
 
-        start_time = time.time()
-        for idx, dat in enumerate(data):
-            wctx = step(dat)
-            if idx % ctx.training.print_interval == 0:
-                millions_processed = ctx.training.device_steps * ctx.dims.sizes.sequence * ctx.dims.sizes.batch
-                print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
-                      f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
-                      f'TopLoss: {wctx.top_loss / ctx.training.device_steps:8.3f} | '
-                      f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
-                      f'StepTime: {time.time() - start_time:10.6f}s - '
-                      f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
-            if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
-                wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step))
-            if ctx.training.trace.do_trace:
-                if idx == ctx.training.trace.start_step:
-                    jax.profiler.start_trace(ctx.training.trace.output_path)
-                if idx == ctx.training.trace.stop_step:
-                    jax.profiler.stop_trace()
+    start_time = time.time()
+    for idx, dat in enumerate(data):
+        wctx = step(dat)
+        if idx % ctx.training.print_interval == 0:
+            millions_processed = ctx.training.device_steps * ctx.dims.sizes.sequence * ctx.dims.sizes.batch
+            print(f'[{idx * ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
+                  f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
+                  f'TopLoss: {wctx.top_loss / ctx.training.device_steps:8.3f} | '
+                  f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
+                  f'StepTime: {time.time() - start_time:10.6f}s - '
+                  f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
+        if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
+            wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step))
+        if ctx.training.trace.do_trace:
+            if idx == ctx.training.trace.start_step:
+                jax.profiler.start_trace(ctx.training.trace.output_path)
+            if idx == ctx.training.trace.stop_step:
+                jax.profiler.stop_trace()
 
 
 if __name__ == '__main__':
