@@ -46,9 +46,10 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise:bool, conv_kernel: str):
-    weight = get_param(ctx, "conv_weight", [ctx.dims.heads, conv_kernel,
+    weight = get_param(ctx, "conv_weight", [ctx.dims.heads,
+                                            ctx.dims.features_per_head,
                                             ctx.dims.one if depthwise else ctx.dims.features_per_head,
-                                            ctx.dims.features_per_head],
+                                            conv_kernel],
                        scale=1 / ctx.model.activation_std)
     if ctx.is_initializing:
         return inp
