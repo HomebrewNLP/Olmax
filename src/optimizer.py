@@ -32,6 +32,9 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         new = new.max([j for j in range(len(dims)) if j != i], keepdims=True)
         ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
 
+    if ctx.dims.heads in dims:
+        weight_update = jnp.squeeze(weight_update, dims.index(ctx.dims.heads))
+
     return grad * optimizer_rsqrt(weight_update)
 
 
