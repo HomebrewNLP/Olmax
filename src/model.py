@@ -55,11 +55,11 @@ def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise:bool, conv_kernel: str
 
 
 def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return conv_weight(ctx, inp, 1, ctx.dims.full_conv_kernel)
+    return conv_weight(ctx, inp, False, ctx.dims.full_conv_kernel)
 
 
 def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return conv_weight(ctx, inp, ctx.dims.features_per_head, ctx.dims.depthwise_conv_kernel)
+    return conv_weight(ctx, inp, True, ctx.dims.depthwise_conv_kernel)
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
