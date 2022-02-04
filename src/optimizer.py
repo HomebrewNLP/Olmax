@@ -25,7 +25,7 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     weight_update = weight_update + jnp.square(grad)
 
     for i, d in enumerate(dims):
-        if d != ctx.dims.heads:
+        if d != ctx.dims.heads and not ctx.is_initializing:
             new = lax.pmax(weight_update, ParallelAxes.model)
         elif ctx.is_initializing:
             new = weight_update.max(dims.index(ctx.dims.heads))
