@@ -87,8 +87,12 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = activate(ctx, lax.psum(matmul(normed, inp_weight, 2), ParallelAxes.model))
-    out = dot(mid, out_weight, -1, 1)
+
+    mid = dot(normed, inp_weight, -1, 1, -2, 0)
+    mid = lax.psum(mid, ParallelAxes.model)
+    mid = activate(ctx, mid)
+    out = dot(mid, out_weight, -1, 1, 0, 0)
+    out = transpose(out, tuple(range(1, inp.ndim - 1)) + (0, -1))
     return out
 
 
