@@ -103,6 +103,7 @@ def main():
 
     start_time = time.time()
     for idx, dat in enumerate(data):
+        step_start = time.time()
         wctx = step(dat)
         if idx % ctx.training.print_interval == 0:
             millions_processed = ctx.training.device_steps * ctx.dims.sizes.sequence * ctx.dims.sizes.batch
@@ -110,8 +111,8 @@ def main():
                   f'Loss: {wctx.loss / ctx.training.device_steps:6.3f} - '
                   f'TopLoss: {wctx.top_loss / ctx.training.device_steps:8.3f} | '
                   f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
-                  f'StepTime: {time.time() - start_time:10.6f}s - '
-                  f'Rate: {millions_processed * (idx + 1) / (time.time() - global_start):9,.1f} Tokens/s')
+                  f'StepTime: {time.time() - step_start:10.6f}s - '
+                  f'Rate: {millions_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
         if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
             wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step))
         if ctx.training.trace.do_trace:
