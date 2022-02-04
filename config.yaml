@@ -1,5 +1,5 @@
 data:
-    path: gs://ggpt4-us/the-char-pile/*
+    path: gs://ggpt4/the-char-pile/*
     datasets_used_per_step: 128
     interleaved_datasets: 256
     parallel_workers: 128

@@ -4,12 +4,9 @@ import warnings
 
 import jax
 import jax._src.util as util
-import numpy as np
 import wandb
 import yaml
 from jax import lax, numpy as jnp
-from jax.experimental import PartitionSpec
-from jax.experimental.maps import mesh
 
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext
@@ -25,6 +22,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
     grad_fn = jax.value_and_grad(compute, 0, True)
     (top_loss, loss), grads = grad_fn(wctx.ctx.parameters,
                                       wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
+    grads = {name: lax.pmean(grad, ParallelAxes.data) for name, grad in grads.items()}
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
     wctx.top_loss += top_loss

@@ -17,14 +17,10 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
     weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
     buffer = [weight_update]
-    head_index = dims.index(ctx.dims.heads) if ctx.dims.heads in dims else -1
 
     for i, d in enumerate(dims[1:], 1):
         buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i)))
         weight_update = jnp.minimum(weight_update, buffer[-1])
-
-        if i >= head_index >= 0:
-            weight_update = jax.lax.pmean(weight_update, ParallelAxes.data)
 
     weight_update = weight_update + jnp.square(grad)
 
