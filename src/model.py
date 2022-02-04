@@ -103,17 +103,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
 
-    out = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
-    position_shape = dims_to_shape(ctx, [ctx.dims.sequence])
-    feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
-    position_count = util.prod(position_shape)
-    feature_count = util.prod(feature_shape)
-    positions = jnp.reshape(jnp.arange(0, position_count), (1, -1, 1, 1))
-    features = jnp.arange(0, feature_count)
-    features = jnp.reshape(features, [1, 1] + feature_shape) * 4 / feature_count
-    features = jnp.exp(features - math.log(position_count / 2 / math.pi))
-    pos_embd = jnp.sin(features * positions).astype(ctx.model.dtype)
-    return out + lax.stop_gradient(pos_embd)
+    return matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
 
 
 def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
