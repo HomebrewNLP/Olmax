@@ -1,41 +1,14 @@
 import typing
 
 import jax
-from jax import lax, numpy as jnp
+from jax import numpy as jnp
 
-from .backend import zero_param, one_shape, assign, prefixed_name
-from .constants import MomentumType, ParallelAxes
+from .backend import zero_param, assign
 from .context import Context
 
 
 def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
-
-
-def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("sm3", count=False)
-    dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
-    weight_update = zero_param(ctx, "dim0", one_shape(len(dims), dims[0], 0))
-    buffer = [weight_update]
-
-    for i, d in enumerate(dims[1:], 1):
-        buffer.append(zero_param(ctx, f"dim{i}", one_shape(len(dims), d, i)))
-        weight_update = jnp.minimum(weight_update, buffer[-1])
-
-    weight_update = weight_update + jnp.square(grad)
-
-    for i, d in enumerate(dims):
-        if d != ctx.dims.heads and not ctx.is_initializing:
-            new = lax.pmax(weight_update, ParallelAxes.model)
-        else:
-            new = weight_update
-        new = new.max([j for j in range(len(dims)) if j != i], keepdims=True)
-        ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
-
-    if ctx.dims.heads in dims and not ctx.is_initializing:
-        weight_update = jnp.squeeze(weight_update, dims.index(ctx.dims.heads))
-
-    return grad * optimizer_rsqrt(weight_update)
 
 
 def weighted_add(x1, x2, alpha):
@@ -57,18 +30,6 @@ def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarr
     new_state = weighted_add(state, inp, beta)
     assign(ctx, "momentum_buffer", new_state)
     return debias(new_state, current_step, beta)
-
-
-def momentum(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix(f"momentum", count=False)
-    if ctx.optimizer.momentum_type == MomentumType.ema:
-        return ema(ctx, param_name, grad, current_step, ctx.optimizer.momentum_beta, "")
-    state = zero_param_like(ctx, "momentum_buffer", param_name)
-    new_state = grad + state * ctx.optimizer.momentum_beta
-    assign(ctx, "momentum_buffer", new_state)
-    if ctx.optimizer.momentum_type == MomentumType.nesterov:
-        return grad + new_state * ctx.optimizer.momentum_type
-    return new_state
 
 
 def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
@@ -103,7 +64,5 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         if "optimizer" in param_name:
             continue
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        grad = sm3(inner_ctx, param_name, grad)
-        grad = momentum(inner_ctx, param_name, grad, current_step)
-        # grad = adam(inner_ctx, param_name, grad, current_step)
+        grad = adam(inner_ctx, param_name, grad, current_step)
         ctx.parameters[param_name] = (1 - ctx.optimizer.weight_decay * lr) * ctx.parameters[param_name] + grad * lr
