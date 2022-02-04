@@ -3,10 +3,9 @@ import math
 import typing
 
 import jax
-import jax._src.util as util
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, dims_to_shape, INT_OR_TUPLE, dot, matmul, transpose, conv, sum_pool
+from src.backend import get_param, INT_OR_TUPLE, dot, matmul, conv, sum_pool
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -45,7 +44,7 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return sum_pool(inp, [0, ctx.model.device_halo_size], [(0, 0), (ctx.model.device_halo_size // 2,) * 2])
 
 
-def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise:bool, conv_kernel: str):
+def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
     weight = get_param(ctx, "conv_weight", [ctx.dims.heads,
                                             ctx.dims.features_per_head,
                                             ctx.dims.one if depthwise else ctx.dims.features_per_head,
@@ -158,11 +157,10 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
     return _fn(*src)
 
 
-
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     normalization = ctx.dims.sizes.batch / tgt.size
     tgt = lax.psum(one_hot(tgt.astype(src.dtype), src.shape[-1]), ParallelAxes.model)
-    shifted = src - lax.pmin(src.max(-1, keepdims=True), ParallelAxes.model)
+    shifted = src - lax.pmax(src.max(-1, keepdims=True), ParallelAxes.model)
     exp_shifted = jnp.exp(shifted)
     sum_exp = lax.psum(exp_shifted.sum(-1, keepdims=True), ParallelAxes.model)
     out = lax.psum(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), ParallelAxes.model)
