@@ -108,7 +108,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     feature_shape = dims_to_shape(ctx, [ctx.dims.heads, ctx.dims.features_per_head])
     position_count = util.prod(position_shape)
     feature_count = util.prod(feature_shape)
-    positions = jnp.reshape(jnp.arange(0, position_shape), (1, -1, 1, 1))
+    positions = jnp.reshape(jnp.arange(0, position_count), (1, -1, 1, 1))
     features = jnp.arange(0, feature_count)
     features = jnp.reshape(features, [1, 1] + feature_shape) * 4 / feature_count
     features = jnp.exp(features - math.log(position_count / 2 / math.pi))
