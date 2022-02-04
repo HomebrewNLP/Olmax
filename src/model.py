@@ -45,20 +45,20 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return sum_pool(inp, [0, ctx.model.device_halo_size], [(0, 0), (ctx.model.device_halo_size // 2,) * 2])
 
 
-def conv_weight(ctx: Context, inp: jnp.ndarray, groups: int, conv_kernel: str, pad_heads: bool):
-    weight = get_param(ctx, "conv_weight", [conv_kernel, ctx.dims.head_conv if pad_heads else ctx.dims.heads,
-                                            ctx.dims.features_per_head // groups, ctx.dims.intermediate_parallel],
+def conv_weight(ctx: Context, inp: jnp.ndarray, groups: int, conv_kernel: str):
+    weight = get_param(ctx, "conv_weight", [ctx.dims.heads, conv_kernel, ctx.dims.features_per_head // groups,
+                                            ctx.dims.features_per_head],
                        scale=1 / ctx.model.activation_std)
 
-    return conv(inp, weight, [(0, weight.shape[0] - 1), (ctx.dims.sizes.head_conv // 2 - 1 if pad_heads else 0,) * 2])
+    return conv(inp, weight, [(0, weight.shape[0] - 1)])
 
 
 def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return conv_weight(ctx, inp, 1, ctx.dims.full_conv_kernel, False)
+    return conv_weight(ctx, inp, 1, ctx.dims.full_conv_kernel)
 
 
 def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return conv_weight(ctx, inp, ctx.dims.features_per_head, ctx.dims.depthwise_conv_kernel, False)
+    return conv_weight(ctx, inp, ctx.dims.features_per_head, ctx.dims.depthwise_conv_kernel)
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
@@ -156,75 +156,6 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
     return _fn(*src)
 
 
-def softmax(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    @jax.custom_gradient
-    def _fn(lgt: jnp.ndarray):
-        if ctx.model.masked_attention:
-            ones = (1,) * (lgt.ndim - 2)
-            arange = jnp.arange(0, lgt.shape[-1])
-            mask: jnp.ndarray = jnp.greater(jnp.reshape(arange, ones + (1, -1)), jnp.reshape(arange, ones + (-1, 1)))
-            lgt += (-1e30 * mask).astype(lgt.dtype)
-        lgt = jnp.exp(lgt - lgt.max(-1, keepdims=True))
-        lgt /= lgt.sum(-1, keepdims=True)
-
-        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
-            prod = lgt * dy
-            return prod - prod.sum(-1, keepdims=True) * lgt
-
-        return lgt, _grad
-
-    return _fn(inp)
-
-
-def spatial_mixing(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("spatial_mixing")
-    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.sequence, ctx.dims.sequence)
-    if ctx.is_initializing:
-        return inp
-
-    normed = instance_norm(ctx, inp)
-    mid = activate(ctx, dot(normed, inp_weight, -3, 1, -2, 0))  # HBFS
-    out = dot(mid, out_weight, -1, 1, 0, 0)
-    out = transpose(out, tuple(range(1, inp.ndim - 2)) + (-1, 0, -2))  # B S H F
-    return out
-
-
-def attention(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("attention")
-    feature_dims = [ctx.dims.heads, ctx.dims.features_per_head]
-    base_param = get_param(ctx, "base", feature_dims + [ctx.dims.intermediate_replicated],
-                           scale=1 / ctx.model.activation_std)
-    key_param = get_param(ctx, "key", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    qry_param = get_param(ctx, "qry", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2)
-    val_param = get_param(ctx, "val", [ctx.dims.intermediate_replicated] + feature_dims, column_axes=2,
-                          scale=ctx.model.depth ** -0.5)
-    if ctx.is_initializing:
-        return inp
-
-    batch_dims = tuple(range(inp.ndim - 3))
-    head_dim = inp.ndim - 2
-    feature_dim = inp.ndim - 1
-    sequence_dim = inp.ndim - 3
-
-    key_permute = batch_dims + (head_dim, sequence_dim, feature_dim)
-    qry_permute = batch_dims + (head_dim, feature_dim, sequence_dim)
-    batch_seq = batch_dims + (sequence_dim,)
-
-    base = instance_norm(ctx, inp)
-    base = activate(ctx, lax.psum(matmul(base, base_param, 2), ParallelAxes.model))
-    key = matmul(base, key_param, 2)
-    qry = matmul(base, qry_param, 2)
-    val = matmul(base, val_param, 2)
-
-    key = transpose(key, key_permute) * inp.shape[-1] ** -0.5
-    val = transpose(val, key_permute)
-    qry = transpose(qry, qry_permute)
-    lgt = dot(key, qry, feature_dim, head_dim, batch_seq, batch_seq)
-    lgt = softmax(ctx, lgt)
-
-    out = dot(lgt, val, feature_dim, head_dim, batch_seq, batch_seq)
-    return transpose(out, key_permute)
-
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     normalization = ctx.dims.sizes.batch / tgt.size
@@ -266,7 +197,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = ctx.parameters, src, zero, src, zero
     for i in range(ctx.dims.sizes.depth):
-        src = reversible(ctx, momentumnet_main(ctx, spatial_mixing), src, i)
+        src = reversible(ctx, momentumnet_main(ctx, depthwise_conv), src, i)
         src = reversible(ctx, momentumnet_side(ctx), src, i)
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, i)
         src = reversible(ctx, momentumnet_side(ctx), src, i)
