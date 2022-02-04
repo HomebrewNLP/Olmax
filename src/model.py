@@ -77,9 +77,9 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     normed = instance_norm(ctx, inp)
-    mid = dot(normed, inp_weight, -1, 1, (), ())
+    mid = dot(normed, inp_weight, -1, 0, (), ())
     mid = activate(ctx, mid)
-    out = dot(mid, out_weight, -1, 1, (), ())
+    out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
 
@@ -91,10 +91,10 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     normed = instance_norm(ctx, inp)
 
-    mid = dot(normed, inp_weight, -1, 1, (), ())
+    mid = dot(normed, inp_weight, -1, 0, (), ())
     mid = lax.psum(mid, ParallelAxes.model)
     mid = activate(ctx, mid)
-    out = dot(mid, out_weight, -1, 1, (), ())
+    out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
 
