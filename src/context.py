@@ -117,8 +117,7 @@ class Training(DataClass):
         self.device_steps = 1024
         self.device_unroll = 16
         self.steps = 2 ** 16
-        self.model_parallel = 8
-        self.data_parallel = 1
+        self.tpu_size = 8
         self.print_interval = 1
         self.trace = TensorboardTrace()
 

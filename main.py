@@ -90,16 +90,17 @@ def main():
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     step = jitless_step
-    for axis_name, axis_size in ((ParallelAxes.data, ctx.training.data_parallel),
-                                 (ParallelAxes.model, ctx.training.model_parallel)):
+    for axis_name, axis_size in ((ParallelAxes.data, ctx.training.tpu_size // ctx.dims.sizes.heads),
+                                 (ParallelAxes.model, ctx.dims.sizes.heads)):
         partition = {'parameters': {name: sharding(ctx, dims, axis_name)
                                     for name, dims in ctx.parameter_dims.items()},
-                     'data': 2 if axis_name == ParallelAxes.data else None,
+                     'data': 0 if axis_name == ParallelAxes.data else None,
                      'current_step': None, 'loss': None, 'top_loss': None}
-        step = train_loop(wctx, timeit(f"PMapping across {axis_name}", jax.pmap, step, axis_name, in_axes=partition,
-                                       out_axes=partition, axis_size=axis_size))
+        step = train_loop(wctx, timeit(f"PMapping across {axis_name}", jax.pmap, step, axis_name, in_axes=(partition,),
+                                       out_axes=partition))
 
     global_start = time.time()
+
     timeit("Compiling model and performing first step", step, next(data))
     timeit("Running second step", step, next(data))
     print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
