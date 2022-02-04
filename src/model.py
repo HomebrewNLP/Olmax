@@ -50,7 +50,8 @@ def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise:bool, conv_kernel: str
                                             ctx.dims.one if depthwise else ctx.dims.features_per_head,
                                             ctx.dims.features_per_head],
                        scale=1 / ctx.model.activation_std)
-
+    if ctx.is_initializing:
+        return inp
     return conv(inp, weight, [(0, weight.shape[0] - 1)], ctx.dims.sizes.features_per_head if depthwise else 1)
 
 
