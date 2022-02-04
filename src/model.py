@@ -117,7 +117,7 @@ def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], 0, 0)
     if ctx.is_initializing:
         return inp
-    return lax.psum(matmul(inp, embd, 2), ParallelAxes.model)
+    return lax.psum(matmul(inp, embd), ParallelAxes.model)
 
 
 def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int) -> REVERSIBLE_CTX:
