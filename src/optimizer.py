@@ -1,7 +1,7 @@
 import typing
 
 import jax
-from jax import numpy as jnp
+from jax import lax, numpy as jnp
 
 from .backend import zero_param, one_shape, assign, prefixed_name
 from .constants import MomentumType, ParallelAxes
@@ -15,17 +15,21 @@ def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
 def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("sm3", count=False)
     dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
-    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
+    weight_update = zero_param(ctx, "dim0", one_shape(len(dims), dims[0], 0))
     buffer = [weight_update]
 
     for i, d in enumerate(dims[1:], 1):
-        buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i)))
+        buffer.append(zero_param(ctx, f"dim{i}", one_shape(len(dims), d, i)))
         weight_update = jnp.minimum(weight_update, buffer[-1])
 
     weight_update = weight_update + jnp.square(grad)
 
-    for i in range(grad.ndim):
-        new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
+    for i, d in enumerate(dims):
+        if d != ctx.dims.heads:
+            new = lax.pmax(weight_update, ParallelAxes.model)
+        else:
+            new = weight_update
+        new = new.max([j for j in range(len(dims)) if j != i], keepdims=True)
         ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
 
     return grad * optimizer_rsqrt(weight_update)
@@ -91,9 +95,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
 
-    arange = jnp.arange(0, ctx.dims.sizes.sequence)
-    mask = jnp.greater(jnp.reshape(arange, (1, 1, -1)), jnp.reshape(arange, (1, -1, 1))).astype(ctx.model.dtype)
-
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
         if "optimizer" in param_name:
@@ -102,6 +103,4 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         grad = sm3(inner_ctx, param_name, grad)
         grad = momentum(inner_ctx, param_name, grad, current_step)
         # grad = adam(inner_ctx, param_name, grad, current_step)
-        ctx.parameters[param_name] = (1 - ctx.optimizer.weight_decay) * ctx.parameters[param_name] + grad * lr
-        if "spatial_mixing" in param_name:
-            ctx.parameters[param_name] *= mask
+        ctx.parameters[param_name] = (1 - ctx.optimizer.weight_decay * lr) * ctx.parameters[param_name] + grad * lr
