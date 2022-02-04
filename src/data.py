@@ -59,7 +59,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
         x = tf.reshape(x, (batch_size, device_steps, sequence_length_1))
         x = tf.cast(x, tf.int32)
         x = tf.transpose(x, (1, 0, 2))
-        return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 0)
+        return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
 
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x,
                                              sequence_length_1 * full_batch // ctx.data.datasets_used_per_step),
