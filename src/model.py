@@ -159,11 +159,11 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
     normalization = ctx.dims.sizes.batch / tgt.size
-    tgt = lax.psum(one_hot(tgt.astype(src.dtype), src.shape[-1]), ParallelAxes.model)
-    shifted = src - lax.pmax(lax.stop_gradient(src).max(-1, keepdims=True), ParallelAxes.model)
+    tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
+    shifted = src - lax.stop_gradient(src).max(-1, keepdims=True)
     exp_shifted = jnp.exp(shifted)
-    sum_exp = lax.psum(exp_shifted.sum(-1, keepdims=True), ParallelAxes.model)
-    out = lax.psum(((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim))), ParallelAxes.model)
+    sum_exp = exp_shifted.sum(-1, keepdims=True)
+    out = (((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim)))
     return out * normalization
 
 
