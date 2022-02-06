@@ -80,7 +80,9 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
     if n_rows < n_cols:
         out = out.T
-    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
+    out = jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
+    new_std = jnp.rsqrt(jnp.square(out - out.mean()).mean())
+    return random.normal(ctx.prng_key, shape, ctx.model.dtype) * new_std
 
 
 def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
@@ -91,16 +93,16 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
               column_axes: int = 1, scale: float = 1.) -> jnp.ndarray:
     prefix_name = prefixed_name(ctx, name)
+    shape = dims_to_shape(ctx, str_shape)
     if prefix_name not in ctx.parameters:
         ctx.parameter_dims[prefix_name] = str_shape
-        shape = dims_to_shape(ctx, str_shape)
         if std is None and mean is None:
             if ctx.dims.depth in str_shape:
                 del shape[str_shape.index(ctx.dims.depth)]
-                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
+                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
                                    for _ in range(ctx.dims.sizes.depth)], str_shape.index(ctx.dims.depth))
             else:
-                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
+                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
         else:
             param = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:
@@ -108,7 +110,8 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
             if mean is not None:
                 param += mean
         assign(ctx, name, param)
-    return ctx.parameters[prefix_name]
+    param = ctx.parameters[prefix_name]
+    return param / np.prod(dims_to_shape(ctx, str_shape)) * scale
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
