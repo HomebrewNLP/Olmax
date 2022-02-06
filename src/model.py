@@ -52,7 +52,7 @@ def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: st
                        scale=1 / ctx.model.activation_std)
     if ctx.is_initializing:
         return inp
-    return conv(inp, weight, [(0, weight.shape[-1] - 1)], ctx.dims.sizes.features_per_head if depthwise else 1)
+    return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
 
 
 def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
