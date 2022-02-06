@@ -111,12 +111,12 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
 
 
-def output_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
     embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], 0, 0)
     if ctx.is_initializing:
         return inp
-    return lax.psum(matmul(inp, embd), ParallelAxes.model)
+    return matmul(inp, embd)
 
 
 def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int) -> REVERSIBLE_CTX:
@@ -158,13 +158,17 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
+    src = output_embed_shard(ctx, src)
+    src = lax.reshape(src, (ctx.dims.sizes.heads, -1, src.shape[-1]))
+    src = lax.psum_scatter(src, ParallelAxes.model)  # model parallel -> data parallel for loss computation
+
     normalization = ctx.dims.sizes.batch / tgt.size
     tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
     shifted = src - lax.stop_gradient(src).max(-1, keepdims=True)
     exp_shifted = jnp.exp(shifted)
     sum_exp = exp_shifted.sum(-1, keepdims=True)
     out = ((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim)))
-    return out * normalization
+    return lax.pmean(out * normalization, ParallelAxes.model)
 
 
 def momentumnet_main(ctx: Context, fn: typing.Callable):
@@ -202,7 +206,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, i)
         src = reversible(ctx, momentumnet_side(ctx), src, i)
     ctx.parameters = src[0]
-    return output_embed(ctx, revnet_out(src[1:]))
+    return revnet_out(src[1:])
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
