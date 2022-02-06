@@ -163,13 +163,13 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
     shifted = src - lax.stop_gradient(src).max(-1, keepdims=True)
     exp_shifted = jnp.exp(shifted)
     sum_exp = exp_shifted.sum(-1, keepdims=True)
-    out = (((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim)))
+    out = ((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim)))
     return out * normalization
 
 
 def momentumnet_main(ctx: Context, fn: typing.Callable):
     def _fn(sub_ctx: Context, x: jnp.ndarray, idx: int) -> jnp.ndarray:
-        return fn(sub_ctx, x) * (1 - ctx.model.momentumnet_beta) / (ctx.model.momentumnet_beta ** idx)
+        return fn(sub_ctx, x * (1 - ctx.model.momentumnet_beta) / ctx.model.momentumnet_beta ** (idx + 1))
 
     return _fn
 
