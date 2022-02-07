@@ -23,6 +23,7 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
 
 def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
              padding: typing.List[typing.Tuple[int, int]]) -> jnp.ndarray:
+    # TODO: Validate what's happening in the backend
     strides = (1,) * (len(window_shape) + 2)
     dims = (1,) + tuple(window_shape) + (1,)
     padding = ((0, 0),) + tuple(padding) + ((0, 0),)
@@ -52,24 +53,12 @@ def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
     return [ctx.dims.sizes[d] for d in dims]
 
 
-def transpose(inp: jnp.ndarray, dims: INT_OR_TUPLE) -> jnp.ndarray:
-    return inp.transpose(pos_dim(inp, dims))
-
-
 def prefixed_name(ctx: Context, name: str):
     return ctx.add_to_prefix(name, count=False).global_prefix
 
 
 def assign(ctx: Context, name: str, inp: jnp.ndarray):
     ctx.parameters[prefixed_name(ctx, name)] = inp
-
-
-def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
-    return inp.shape[-1] != ctx.dims.sizes.features_per_head
-
-
-def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return ctx.dims.intermediate_replicated if is_intermediate(ctx, inp) else ctx.dims.features_per_head
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
@@ -81,12 +70,8 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     if n_rows < n_cols:
         out = out.T
     out = jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
-    new_std = jnp.rsqrt(jnp.square(out - out.mean()).mean())
+    new_std = lax.rsqrt(jnp.square(out - out.mean()).mean())
     return random.normal(ctx.prng_key, shape, ctx.model.dtype) * new_std
-
-
-def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
-    return default_value if value is None else value
 
 
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
@@ -109,20 +94,11 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
                 param *= std
             if mean is not None:
                 param += mean
+        param = param.astype(ctx.model.dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
-    return param / np.prod(dims_to_shape(ctx, str_shape)) * scale
+    return (param / np.prod(dims_to_shape(ctx, str_shape)) * scale).astype(ctx.model.dtype)
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
     return get_param(ctx, name, shape, 0, 0)
-
-
-def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
-    base = ["one"] * ndim
-    base[dim_idx] = dim_name
-    return base
-
-
-def base_spec(inp: jnp.ndarray) -> str:
-    return ''.join(chr(ord('a') + i) for i in range(inp.ndim))

@@ -107,7 +107,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], column_axes=2)
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
-
+    # TODO: Use lax.gather
     return matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
 
 
@@ -157,10 +157,20 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
     return _fn(*src)
 
 
+def psum_scatter(inp: jnp.ndarray) -> jnp.ndarray:
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray):
+        def _grad(out: jnp.ndarray) -> jnp.ndarray:
+            return lax.all_gather(out, ParallelAxes.model).reshape(inp.shape)
+
+        return lax.psum_scatter(src, ParallelAxes.model), _grad
+
+    return _fn(inp)
+
+
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
-    src = output_embed_shard(ctx, src)
-    src = lax.reshape(src, (ctx.dims.sizes.heads, -1, src.shape[-1]))
-    src = lax.psum_scatter(src, ParallelAxes.model)  # model parallel -> data parallel for loss computation
+    src = src.reshape(ctx.dims.sizes.heads, -1, src.shape[-1])
+    src = psum_scatter(src)  # model parallel -> data parallel for loss computation
 
     normalization = ctx.dims.sizes.batch / tgt.size
     tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
@@ -206,7 +216,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, i)
         src = reversible(ctx, momentumnet_side(ctx), src, i)
     ctx.parameters = src[0]
-    return revnet_out(src[1:])
+    return output_embed_shard(ctx, revnet_out(src[1:]))
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
