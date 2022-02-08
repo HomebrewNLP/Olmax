@@ -156,6 +156,7 @@ class Context(DataClass):
 
         self.name_cache: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
+        self.parameter_std: typing.Dict[str, float] = {}
         self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False

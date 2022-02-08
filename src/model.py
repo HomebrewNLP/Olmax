@@ -45,7 +45,7 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
-    weight = get_param(ctx, "conv_weight", [ctx.dims.heads,
+    weight = get_param(ctx, "weight", [ctx.dims.heads,
                                             ctx.dims.features_per_head,
                                             ctx.dims.one if depthwise else ctx.dims.features_per_head,
                                             conv_kernel],
@@ -56,10 +56,12 @@ def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: st
 
 
 def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("full_conv")
     return conv_weight(ctx, inp, False, ctx.dims.full_conv_kernel)
 
 
 def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("depthwise_conv")
     return conv_weight(ctx, inp, True, ctx.dims.depthwise_conv_kernel)
 
 

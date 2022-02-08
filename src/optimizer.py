@@ -64,5 +64,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         if "optimizer" in param_name:
             continue
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        grad = adam(inner_ctx, param_name, grad, current_step)
-        ctx.parameters[param_name] = (1 - ctx.optimizer.weight_decay * lr) * ctx.parameters[param_name] + grad * lr
+        updated_weight = adam(inner_ctx, param_name, grad, current_step)
+        parameter_lr = lr * ctx.parameter_std[param_name]
+        updated_weight *= parameter_lr
+        updated_weight += (1 - ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+        ctx.parameters[param_name] = updated_weight

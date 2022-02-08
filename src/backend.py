@@ -58,7 +58,9 @@ def prefixed_name(ctx: Context, name: str):
 
 
 def assign(ctx: Context, name: str, inp: jnp.ndarray):
-    ctx.parameters[prefixed_name(ctx, name)] = inp
+    name = prefixed_name(ctx, name)
+    ctx.parameters[name] = inp
+    ctx.parameter_std[name] = inp.std()
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
@@ -88,6 +90,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
                                    for _ in range(ctx.dims.sizes.depth)], str_shape.index(ctx.dims.depth))
             else:
                 param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+            param *= scale
         else:
             param = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:
@@ -97,7 +100,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         param = param.astype(ctx.model.dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
-    return (param / np.prod(dims_to_shape(ctx, str_shape)) * scale).astype(ctx.model.dtype)
+    return param
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
