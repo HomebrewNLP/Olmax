@@ -180,7 +180,7 @@ class Context(DataClass):
     def config(self) -> dict:
         cfg = self.__dict__.copy()
         del cfg['name_cache'], cfg['parameters'], cfg['parameter_dims'], cfg['prng_key'], cfg['is_initializing']
-        del cfg['parameter_dims']
+        del cfg['parameter_variance']
         return serialize(cfg)
 
 
