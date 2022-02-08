@@ -60,7 +60,7 @@ def prefixed_name(ctx: Context, name: str):
 def assign(ctx: Context, name: str, inp: jnp.ndarray):
     name = prefixed_name(ctx, name)
     ctx.parameters[name] = inp
-    ctx.parameter_std[name] = inp.std()
+    ctx.parameter_variance[name] = inp.var()
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
