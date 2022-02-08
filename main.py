@@ -91,7 +91,9 @@ def main():
     partition = {'parameters': {name: sharding(ctx, dims, ParallelAxes.model)
                                 for name, dims in ctx.parameter_dims.items()},
                  'data': None,
-                 'current_step': None, 'loss': None, 'top_loss': None}
+                 'current_step': None, 'loss': None, 'top_loss': None,
+                 'parameter_variance': {name: None for name, dims in ctx.parameter_dims.items()}
+                 }
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition))
 
