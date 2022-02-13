@@ -28,22 +28,23 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
+    def _fn(src: jnp.ndarray, param: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
         out = src - mean
         scale = norm(ctx, out, -1, True) * src.shape[-1] ** -0.5
-        scale = scale * scale_param  # no reshape needed as it's a single scalar per device
-        out = out * scale
+        scaled = out * scale
+        out = out * param  # no reshape needed as it's a single scalar per device)
 
-        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
-            dy = dy * scale
+        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+            d_scale = (scaled * dy).sum().reshape(1,)
+            dy = dy * (scale * param)
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
-            return dy
+            return dy, d_scale
 
         return out, _grad
 
-    return _fn(inp)
+    return _fn(inp, scale_param)
 
 
 def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
