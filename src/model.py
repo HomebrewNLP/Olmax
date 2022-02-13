@@ -227,11 +227,12 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = ctx.parameters, src, zero, src, zero
-    for i in range(ctx.dims.sizes.depth):
-        src = reversible(ctx, momentumnet_main(ctx, depthwise_conv), src, i)
-        src = reversible(ctx, momentumnet_side(ctx), src, i)
-        src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, i)
-        src = reversible(ctx, momentumnet_side(ctx), src, i)
+    side = momentumnet_side(ctx)
+    for i in range(0, 2 * ctx.dims.sizes.depth, 2):
+        src = reversible(ctx, momentumnet_main(ctx, conv_block), src, i)
+        src = reversible(ctx, side, src, i)
+        src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, i + 1)
+        src = reversible(ctx, side, src, i + 1)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
