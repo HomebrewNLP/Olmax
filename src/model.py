@@ -124,7 +124,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return jnp.zeros([1] * (inp.ndim + 1))
     # TODO: Use lax.gather
-    return matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
+    out = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
+    return normalize(ctx, out)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
