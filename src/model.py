@@ -91,11 +91,12 @@ def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tup
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel)
+    inp = normalize(ctx, inp)
+
     if ctx.is_initializing:
         return inp
 
-    normed = normalize(ctx, inp)
-    mid = dot(normed, inp_weight, -1, 0, (), ())
+    mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = activate(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
     return out
@@ -104,12 +105,12 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated)
+    inp = normalize(ctx, inp)
+
     if ctx.is_initializing:
         return inp
 
-    normed = normalize(ctx, inp)
-
-    mid = dot(normed, inp_weight, -1, 0, (), ())
+    mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = lax.psum(mid, ParallelAxes.model)
     mid = activate(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
@@ -122,13 +123,10 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
-
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], column_axes=2)
-    if ctx.is_initializing:
-        return jnp.zeros([1] * (inp.ndim + 1))
-    # TODO: Use lax.gather
-    out = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)
-    return normalize(ctx, out)
+    if not ctx.is_initializing:
+        inp = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)  # TODO: Use lax.gather
+    return normalize(ctx, inp)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
