@@ -49,25 +49,34 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return sum_pool(inp, [0, ctx.model.device_halo_size], [(0, 0), (ctx.model.device_halo_size // 2,) * 2])
 
 
-def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
-    weight = get_param(ctx, "weight", [ctx.dims.heads,
-                                            ctx.dims.features_per_head,
-                                            ctx.dims.one if depthwise else ctx.dims.features_per_head,
-                                            conv_kernel],
-                       scale=1 / ctx.model.activation_std)
+def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
+    weight = get_param(ctx, "weight",
+                       [ctx.dims.heads,
+                        ctx.dims.features_per_head,
+                        ctx.dims.one if depthwise else ctx.dims.features_per_head,
+                        conv_kernel],
+                       column_axes=2,
+                       scale=scale)
     if ctx.is_initializing:
         return inp
     return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
 
 
-def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def full_conv(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("full_conv")
-    return conv_weight(ctx, inp, False, ctx.dims.full_conv_kernel)
+    return conv_weight(ctx, inp, False, ctx.dims.full_conv_kernel, scale)
 
 
-def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("depthwise_conv")
-    return conv_weight(ctx, inp, True, ctx.dims.depthwise_conv_kernel)
+    return conv_weight(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale)
+
+
+def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    inp = normalize(ctx, inp)
+    mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std)
+    mid = activate(ctx, mid)
+    return full_conv(ctx, mid, ctx.model.depth ** -0.5)
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
@@ -82,7 +91,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
-    normed = instance_norm(ctx, inp)
+    normed = normalize(ctx, inp)
     mid = dot(normed, inp_weight, -1, 0, (), ())
     mid = activate(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
@@ -95,7 +104,7 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
-    normed = instance_norm(ctx, inp)
+    normed = normalize(ctx, inp)
 
     mid = dot(normed, inp_weight, -1, 0, (), ())
     mid = lax.psum(mid, ParallelAxes.model)
