@@ -31,7 +31,7 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         mean = src.mean(-1, keepdims=True)
         out = src - mean
         scale = norm(ctx, out, -1, True) * src.shape[-1] ** -0.5
-        scale = scale * scale_param.reshape((1,) * (src.ndim - 2) + tuple(scale_param.shape))
+        scale = scale * scale_param  # no reshape needed as it's a single scalar per device
         out = out * scale
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
