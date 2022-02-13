@@ -60,7 +60,6 @@ def prefixed_name(ctx: Context, name: str):
 def assign(ctx: Context, name: str, inp: jnp.ndarray):
     name = prefixed_name(ctx, name)
     ctx.parameters[name] = inp
-    ctx.parameter_variance[name] = inp.var()
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
@@ -74,21 +73,44 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.dtype)
 
 
+def stacked_orthogonal_init(ctx: Context, str_shape: typing.List[str], column_axes: int,
+                            split_dims: typing.List[str]) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    split_dims = split_dims.copy()
+    while split_dims and split_dims[0] not in str_shape:
+        split_dims.pop(0)
+    if not split_dims:
+        shape = dims_to_shape(ctx, str_shape)
+        out = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+        return out, out.var()
+    dim = split_dims.pop(0)
+    dim_index = str_shape.index(dim)
+    new_shape = str_shape.copy()
+    new_shape.remove(dim)
+
+    out = []
+    var = 0
+    size = ctx.dims.sizes[dim]
+    for _ in range(size):
+        new_out, new_var = stacked_orthogonal_init(ctx, str_shape, column_axes, split_dims)
+        out.append(new_out)
+        var += new_var
+    return jnp.stack(out, dim_index), var / size
+
+
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
-              column_axes: int = 1, scale: float = 1.) -> jnp.ndarray:
+              column_axes: int = 1, scale: float = 1., post_variance_scale: float = 1,
+              split_dims: typing.Optional[typing.List[str]] = None) -> jnp.ndarray:
+    if split_dims is None:
+        split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
     shape = dims_to_shape(ctx, str_shape)
     if prefix_name not in ctx.parameters:
         ctx.parameter_dims[prefix_name] = str_shape
         if std is None and mean is None:
-            if ctx.dims.depth in str_shape:
-                del shape[str_shape.index(ctx.dims.depth)]
-                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
-                                   for _ in range(ctx.dims.sizes.depth)], str_shape.index(ctx.dims.depth))
-            else:
-                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
-            param *= scale
+            param, var = stacked_orthogonal_init(ctx, str_shape, column_axes, split_dims)
+            param *= scale * post_variance_scale
+            ctx.parameter_variance[name] = var * scale ** 2
         else:
             param = random.normal(ctx.prng_key, shape, ctx.model.dtype)
             if std is not None:
