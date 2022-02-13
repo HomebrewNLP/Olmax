@@ -71,7 +71,7 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
     if n_rows < n_cols:
         out = out.T
-    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
+    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.dtype)
 
 
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
