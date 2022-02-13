@@ -71,9 +71,7 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
     if n_rows < n_cols:
         out = out.T
-    out = jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
-    new_std = lax.rsqrt(jnp.square(out - out.mean()).mean())
-    return random.normal(ctx.prng_key, shape, ctx.model.dtype) * new_std
+    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
 
 
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
