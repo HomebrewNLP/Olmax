@@ -22,6 +22,7 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
 
 
 def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("normalization")
     scale_param = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], mean=1, std=0)
     if ctx.is_initializing:
         return inp
@@ -73,6 +74,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
 
 
 def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("group_convolution")
     inp = normalize(ctx, inp)
     mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std)
     mid = activate(ctx, mid)
