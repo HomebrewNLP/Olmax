@@ -21,12 +21,17 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def instance_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    scale_param = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], mean=1, std=0)
+    if ctx.is_initializing:
+        return inp
+
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
         out = src - mean
         scale = norm(ctx, out, -1, True) * src.shape[-1] ** -0.5
+        scale = scale * scale_param.reshape((1,) * (src.ndim - 2) + tuple(scale_param.shape))
         out = out * scale
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
