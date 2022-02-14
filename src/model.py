@@ -240,7 +240,7 @@ def block(ctx: Context):
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
-    inp = ((ctx.parameters, src, zero, src, zero), jnp.zeros((1,), dtype=ctx.model.computation_dtype))
+    inp = ((ctx.parameters, src, zero, src, zero), jnp.zeros((1,), dtype=jnp.int32))
     if ctx.is_initializing:
         (ctx.parameters, _, _, _, _), _ = block(ctx)(inp)
     else:
