@@ -134,4 +134,4 @@ def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
 
 
 def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
-    return lax.scan(fn, lambda *x: (fn_input(*x[:-1]), None), None, steps, unroll=unroll)[0]
+    return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]

@@ -9,32 +9,81 @@ from .constants import MomentumType
 
 
 class DataClass:
-    pass
+    def serialize(self):
+        return serialize(self)
+
+
+def fn_if_dataclass(instance: typing.Any, fn: typing.Callable):
+    return fn(instance) if isinstance(instance, (DataClass, list, tuple, dict)) else instance
+
+
+def serialize(instance: typing.Union[DataClass, typing.Dict[str, typing.Any]]):
+    if isinstance(instance, DataClass):
+        attributes = {key: getattr(instance, key) for key in dir(instance) if
+                      not key.startswith('_') and not key.endswith('_')}
+        return serialize({key: value for key, value in attributes.items() if not isinstance(value, typing.Callable)})
+    if isinstance(instance, (list, tuple)):
+        return [fn_if_dataclass(itm, serialize) for itm in instance]
+    if isinstance(instance, dict):
+        return {k: fn_if_dataclass(v, serialize) for k, v in instance.items()}
+    return instance
+
+
+def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
+    for name in dir(instance):
+        if name.startswith("_") or name.endswith("_") or name not in config:
+            continue
+        attr = getattr(instance, name)
+        is_dataclass = isinstance(attr, DataClass)
+        is_list = isinstance(attr, (list, tuple))
+        is_dict = isinstance(attr, dict)
+        if not (is_dataclass or (is_list and isinstance(attr[0], DataClass)) or (
+                is_dict and isinstance(next(iter(attr.values())), DataClass))):
+            setattr(instance, name, config[name])
+            continue
+
+        if is_dataclass:
+            init_class(attr, config[name])
+        elif is_list:
+            setattr(instance, name, type(attr)(init_class_copy(attr[0], item) for item in config[name]))
+        elif is_dict:
+            base = next(iter(attr.values()))
+            setattr(instance, name, {key: init_class_copy(base, item) for key, item in config[name].items()})
+        else:
+            raise ValueError(f"Unknown type {type(attr)} with given data {config[name]}")
+
+
+def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -> DataClass:
+    instance = copy.deepcopy(instance)
+    init_class(instance, config)
+    return instance
 
 
 class DataContext(DataClass):
+    path: str = "gs://obst-euw4a-aa/the-small-chunk-char-pile/*"
+    shuffle_buffer: int = 0
+    parallel_workers: int = 128
+    interleaved_datasets: int = 1024
+    prefetch_buffer: int = 16
+    seed: int = 0
+    vocab_size: int = 256  # should be divisible by 128
+
     def __init__(self):
-        self.path = "gs://obst-euw4a-aa/the-small-chunk-char-pile/*"
-        self.shuffle_buffer = 0
-        self.parallel_workers = 128
-        self.interleaved_datasets = 1024
-        self.datasets_used_per_step = self.parallel_workers
-        self.prefetch_buffer = 16
-        self.seed = 0
-        self.vocab_size = 256  # should be divisible by 128
+        self.datasets_used_per_step: int = self.parallel_workers
 
 
 class DimSizes(DataClass):
+    batch: int = 256
+    full_conv_kernel: int = 9
+    depthwise_conv_kernel: int = 49
+    features_per_head: int = 512
+    heads: int = 8
+    sequence: int = 256
+    one: int = 1
+    depth: int = 32
+
     def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
-        self.batch = 256
-        self.full_conv_kernel = 9
-        self.depthwise_conv_kernel = 49
-        self.features_per_head = 512
-        self.heads = 8
-        self.sequence = 256
-        self.vocab = data.vocab_size
-        self.one = 1
-        self.depth = 32
+        self.vocab: int = data.vocab_size
         self.intermediate_replicated = int(self.features_per_head * group_linear_factor)
         self.intermediate_parallel = int(self.intermediate_replicated * feed_forward_factor)
 
@@ -43,20 +92,21 @@ class DimSizes(DataClass):
 
 
 class Dims(DataClass):
+    batch: str = "batch"
+    features_per_head: str = "features_per_head"
+    heads: str = "heads"
+    full_conv_kernel: str = "full_conv_kernel"
+    depthwise_conv_kernel: str = "depthwise_conv_kernel"
+    depth: str = "depth"
+    sequence: str = "sequence"
+    anonymous_sequence: str = "anonymous_sequence"
+    intermediate_replicated: str = "intermediate_replicated"
+    intermediate_parallel: str = "intermediate_parallel"
+    one: str = "one"
+    vocab: str = "vocab"
+
     def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
-        self.batch = "batch"
-        self.features_per_head = "features_per_head"
-        self.heads = "heads"
-        self.full_conv_kernel = "full_conv_kernel"
-        self.depthwise_conv_kernel = "depthwise_conv_kernel"
-        self.depth = "depth"
-        self.sequence = "sequence"
-        self.anonymous_sequence = "anonymous_sequence"
-        self.intermediate_replicated = "intermediate_replicated"
-        self.intermediate_parallel = "intermediate_parallel"
-        self.one = "one"
-        self.vocab = "vocab"
-        self.sizes = DimSizes(data, group_linear_factor, feed_forward_factor)
+        self.sizes: DimSizes = DimSizes(data, group_linear_factor, feed_forward_factor)
 
 
 class TensorboardTrace(DataClass):
@@ -64,90 +114,69 @@ class TensorboardTrace(DataClass):
     Defines a tensorboard profiling output (folder) on which a tensorboard can be run to measure RAM utilization and
     view the operation trace.
     """
-
-    def __init__(self):
-        self.start_step = 16
-        self.stop_step = 64 + 16
-        self.do_trace = False
-        self.output_path = "trace"
+    start_step: int = 16
+    stop_step: int = 64 + 16
+    do_trace: bool = False
+    output_path: str = "trace"
 
 
 class WandB(DataClass):
-    def __init__(self):
-        self.use_wandb = True
-        self.project = 'gpt'
-        self.entity = 'homebrewnlp'
-        self.model_log_type = None  # One of "gradients", "parameters", "all", or None
-        self.log_frequency = 1
+    use_wandb: bool = True
+    project: str = 'gpt'
+    entity: str = 'homebrewnlp'
+    model_log_type: typing.Optional[str] = None  # One of "gradients", "parameters", "all", or None
+    log_frequency: int = 1
 
 
 class Optimizer(DataClass):
-    def __init__(self):
-        self.learning_rate = 1e-3
-        self.gradient_clip = 0.1
-        self.momentum_beta = 0.9
-        self.adam_beta1 = 0.9
-        self.adam_beta2 = 0.99
-        self.momentum_type = MomentumType.nesterov
-        self.weight_decay = 1e-3
-        self.warmup_end = 4096
-        self.exponential_decay = 1e-4
+    learning_rate: float = 1e-3
+    gradient_clip: float = 0.1
+    momentum_beta: float = 0.9
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.99
+    momentum_type: MomentumType = MomentumType.nesterov
+    weight_decay: float = 1e-3
+    warmup_end: int = 4096
+    exponential_decay: float = 1e-4
 
 
 class Model(DataClass):
-    def __init__(self):
-        self.device_halo_size: int = 3
-        self.scan_unroll = 1
-        self.norm_eps = 1e-5
-        self.group_linear_factor = 2
-        self.experts = 1  # TODO: Add dense MoE
-        self.momentumnet_beta = 0.9
-        self.depth = 32
-        self.depth_unroll = 8
-        self.leaky_relu_slope = 0.02
-        self.activation_std = 0.5893595616022745
-        self.masked_attention = True
-        self.weight_sharing: bool = False
-        self.feed_forward_factor = 2
-        self.storage_dtype = "float32"  # valid jax.numpy.storage_dtype
-        self.computation_dtype: str = "bfloat16"
+    device_halo_size: int = 3
+    scan_unroll: int = 1
+    norm_eps: float = 1e-5
+    group_linear_factor: int = 2
+    experts: int = 1  # TODO: Add dense MoE
+    momentumnet_beta: float = 0.9
+    depth: int = 32
+    depth_unroll: int = 8
+    leaky_relu_slope: float = 0.02
+    activation_std: float = 0.5893595616022745
+    masked_attention: bool = True
+    weight_sharing: bool = False
+    feed_forward_factor: int = 2
+    storage_dtype: str = "float32"  # valid jax.numpy.storage_dtype
+    computation_dtype: str = "bfloat16"
 
 
 class Training(DataClass):
-    def __init__(self):
-        self.loss_top_p = 0.4
-        self.loss_top_snap = 128  # snap top_p * batch to closest multiple
-        self.device_steps = 1024
-        self.device_unroll = 16
-        self.steps = 2 ** 16
-        self.print_interval = 1
-        self.trace = TensorboardTrace()
-
-
-def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
-    for name, attr in instance.__dict__.items():
-        if name not in config:
-            continue
-        if isinstance(attr, DataClass):
-            init_class(attr, config[name])
-            continue
-        setattr(instance, name, config[name])
-
-
-def serialize(instance: typing.Union[typing.Dict[str, DataClass], DataClass]):
-    if isinstance(instance, DataClass):
-        return serialize(instance.__dict__)
-    return {k: serialize(v) if isinstance(v, DataClass) else v for k, v in instance.items()}
+    loss_top_p: float = 0.4
+    loss_top_snap: int = 128  # snap top_p * batch to closest multiple
+    device_steps: int = 1024
+    device_unroll: int = 16
+    steps: int = 2 ** 16
+    print_interval: int = 1
+    trace: TensorboardTrace = TensorboardTrace()
 
 
 class Context(DataClass):
+    data: DataContext = DataContext()
+    optimizer: Optimizer = Optimizer()
+    model: Model = Model()
+    training: Training = Training()
+    wandb: WandB = WandB()
+
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
-        self.data = DataContext()
-        self.optimizer = Optimizer()
-        self.model = Model()
         self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
-        self.training = Training()
-        self.wandb = WandB()
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
