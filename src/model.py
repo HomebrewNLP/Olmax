@@ -5,7 +5,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, INT_OR_TUPLE, dot, matmul, conv, sum_pool
+from src.backend import get_param, INT_OR_TUPLE, dot, matmul, conv, sum_pool, loop
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -23,7 +23,7 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
 
 def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
-    scale_param = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], mean=1, std=0)
+    scale_param = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], mean=1, std=0, depth_indexing=True)
     if ctx.is_initializing:
         return inp
 
@@ -54,7 +54,7 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
     weight = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head,
                                        ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
-                       column_axes=2, scale=scale)
+                       column_axes=2, scale=scale, split_dims=[ctx.dims.depth, ctx.dims.heads], depth_indexing=True)
     if ctx.is_initializing:
         return inp
     return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
@@ -79,8 +79,10 @@ def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5)
+    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std,
+                           depth_indexing=True)
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5,
+                           depth_indexing=True)
     return inp_weight, out_weight
 
 
@@ -134,12 +136,13 @@ def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return matmul(inp, embd)
 
 
-def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int) -> REVERSIBLE_CTX:
+def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray], src: REVERSIBLE_CTX
+               ) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, x10, idx)
+        out = fn(new_ctx, x10, new_ctx.depth_index)
         ctx.parameters = new_ctx.parameters
         ctx.parameter_dims = new_ctx.parameter_dims
         ctx.name_cache = new_ctx.name_cache
@@ -152,7 +155,7 @@ def reversible(ctx: Context, fn: typing.Callable, src: REVERSIBLE_CTX, idx: int)
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, inp, idx)
+        out = fn(new_ctx, inp, new_ctx.depth_index)
         ctx.name_cache = new_ctx.name_cache
         return out
 
@@ -196,15 +199,15 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
     return lax.pmean(out * normalization, ParallelAxes.model)
 
 
-def momentumnet_main(ctx: Context, fn: typing.Callable):
-    def _fn(sub_ctx: Context, x: jnp.ndarray, idx: int) -> jnp.ndarray:
+def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
+    def _fn(sub_ctx: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
         return fn(sub_ctx, x * (1 - ctx.model.momentumnet_beta) / ctx.model.momentumnet_beta ** (idx + 1))
 
     return _fn
 
 
-def momentumnet_side(ctx):
-    def _fn(_ignored: Context, x: jnp.ndarray, idx: int) -> jnp.ndarray:
+def momentumnet_side(ctx: Context):
+    def _fn(_ignored: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
         return x * ctx.model.momentumnet_beta ** idx
 
     return _fn
@@ -221,16 +224,22 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
     return _fn(*src)
 
 
+def block(ctx: Context, src: REVERSIBLE_CTX) -> typing.Tuple[Context, REVERSIBLE_CTX]:
+    src = reversible(ctx, momentumnet_main(ctx, conv_block), src)
+    src = reversible(ctx, momentumnet_side(ctx), src)
+    ctx.depth_index += 1
+    src = reversible(ctx, momentumnet_main(ctx, feed_forward), src)
+    src = reversible(ctx, momentumnet_side(ctx), src)
+    ctx.depth_index += 1
+    return ctx, src
+
+
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = ctx.parameters, src, zero, src, zero
-    side = momentumnet_side(ctx)
-    for i in range(0, 2 * ctx.dims.sizes.depth, 2):
-        src = reversible(ctx, momentumnet_main(ctx, conv_block), src, i)
-        src = reversible(ctx, side, src, i)
-        src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, i + 1)
-        src = reversible(ctx, side, src, i + 1)
+    ctx.depth_index = jnp.zeros((1,))
+    src = loop(block, (ctx, src), ctx.model.depth, ctx.model.depth_unroll)[1]  # We only want src
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 

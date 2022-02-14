@@ -103,9 +103,11 @@ class Model(DataClass):
         self.experts = 1  # TODO: Add dense MoE
         self.momentumnet_beta = 0.9
         self.depth = 32
+        self.depth_unroll = 8
         self.leaky_relu_slope = 0.02
         self.activation_std = 0.5893595616022745
         self.masked_attention = True
+        self.weight_sharing: bool = False
         self.feed_forward_factor = 2
         self.storage_dtype = "float32"  # valid jax.numpy.storage_dtype
         self.computation_dtype: str = "bfloat16"
@@ -155,6 +157,7 @@ class Context(DataClass):
         self.seed = 0
         self.global_prefix = ''
 
+        self.depth_index: typing.Optional[jnp.ndarray] = None
         self.name_cache: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_variance: typing.Dict[str, float] = {}

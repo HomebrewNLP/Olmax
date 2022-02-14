@@ -25,5 +25,3 @@ training:
         do_trace: false
         start_step: 2
         stop_step: 8
-model:
-    dtype: float32

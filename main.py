@@ -13,11 +13,11 @@ from src.context import Context, WhileTrainContext
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
+from src.backend import loop
 from src.utils.wandb import WandbLog
 
 
-def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
-               ) -> typing.Tuple[typing.Dict[str, typing.Any], None]:
+def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
     (top_loss, loss), grads = grad_fn(wctx.ctx.parameters,
@@ -26,17 +26,16 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any], _unused: None
     wctx.loss += loss
     wctx.top_loss += top_loss
     wctx.current_step += 1
-    return wctx.serialize(), None
+    return wctx.serialize()
 
 
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     training = WhileTrainContext(while_ctx_dict).ctx.training
-    return lax.scan(train_step, while_ctx_dict, None, training.device_steps, unroll=training.device_unroll)[0]
+    return loop(train_step, while_ctx_dict, training.device_steps, training.device_unroll)
 
 
 def sharding(ctx: Context, dims: typing.List[str], axis: ParallelAxes):
-    mapping = {ParallelAxes.data: ctx.dims.batch,
-               ParallelAxes.model: ctx.dims.heads}
+    mapping = {ParallelAxes.data: ctx.dims.batch, ParallelAxes.model: ctx.dims.heads}
     if axis not in mapping:
         return None
     axis = mapping[axis]
@@ -75,8 +74,7 @@ def main():
     print(yaml.dump(ctx.config(), indent=4))
     ctx.is_initializing = True
     if ctx.wandb.use_wandb:
-        run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity,
-                         config=ctx.config())
+        run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
         wblog = WandbLog(run)
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
@@ -88,12 +86,10 @@ def main():
            jnp.ones([], dtype=ctx.model.computation_dtype))
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
-    partition = {'parameters': {name: sharding(ctx, dims, ParallelAxes.model)
-                                for name, dims in ctx.parameter_dims.items()},
-                 'data': None,
-                 'current_step': None, 'loss': None, 'top_loss': None,
-                 'parameter_variance': {name: None for name, dims in ctx.parameter_variance.items()}
-                 }
+    partition = {
+        'parameters': {name: sharding(ctx, dims, ParallelAxes.model) for name, dims in ctx.parameter_dims.items()},
+        'data': None, 'current_step': None, 'loss': None, 'top_loss': None,
+        'parameter_variance': {name: None for name, dims in ctx.parameter_variance.items()}}
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition))
 

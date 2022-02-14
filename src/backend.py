@@ -98,12 +98,16 @@ def stacked_orthogonal_init(ctx: Context, str_shape: typing.List[str], column_ax
 
 
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
-              std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
-              column_axes: int = 1, scale: float = 1., post_variance_scale: float = 1,
-              split_dims: typing.Optional[typing.List[str]] = None) -> jnp.ndarray:
+              std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
+              scale: float = 1., post_variance_scale: float = 1,
+              split_dims: typing.Optional[typing.List[str]] = None,
+              depth_indexing: bool = False) -> jnp.ndarray:
     if split_dims is None:
         split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
+    depth_indexing &= ctx.model.weight_sharing
+    if depth_indexing:
+        str_shape = [ctx.dims.depth] + str_shape
     shape = dims_to_shape(ctx, str_shape)
     if prefix_name not in ctx.parameters:
         ctx.parameter_dims[prefix_name] = str_shape
@@ -120,8 +124,14 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         param = param.astype(ctx.model.storage_dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
+    if depth_indexing:
+        param = param[ctx.depth_index]
     return param.astype(ctx.model.computation_dtype)
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
     return get_param(ctx, name, shape, 0, 0)
+
+
+def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
+    return lax.scan(fn, lambda *x: (fn_input(*x[:-1]), None), None, steps, unroll=unroll)[0]
