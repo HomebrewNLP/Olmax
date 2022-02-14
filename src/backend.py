@@ -107,6 +107,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
     prefix_name = prefixed_name(ctx, name)
     depth_indexing &= not ctx.model.weight_sharing
     if depth_indexing:
+        assert idx is not None, "idx has to be set when depth indexing is true"
         str_shape = [ctx.dims.depth] + str_shape
     shape = dims_to_shape(ctx, str_shape)
     if prefix_name not in ctx.parameters:

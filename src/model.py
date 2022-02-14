@@ -21,9 +21,9 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def normalize(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
-    scale_param = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], mean=1, std=0, depth_indexing=True)
+    scale_param = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], mean=1, std=0, depth_indexing=True, idx=idx)
     if ctx.is_initializing:
         return inp
 
@@ -73,7 +73,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, idx: jnp.ndarra
 
 def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_convolution")
-    inp = normalize(ctx, inp)
+    inp = normalize(ctx, inp, idx)
     mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std, idx)
     mid = activate(ctx, mid)
     return full_conv(ctx, mid, ctx.model.depth ** -0.5, idx)
@@ -88,10 +88,10 @@ def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndar
     return inp_weight, out_weight
 
 
-def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx:jnp.ndarray) -> jnp.ndarray:
+def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel, idx)
-    inp = normalize(ctx, inp)
+    inp = normalize(ctx, inp, idx)
 
     if ctx.is_initializing:
         return inp
@@ -102,11 +102,11 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx:jnp.ndarray) -> jnp.n
     return out
 
 
-def feed_forward(ctx: Context, inp: jnp.ndarray, idx:jnp.ndarray) -> jnp.ndarray:
+def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated,
                                                    idx)
-    inp = normalize(ctx, inp)
+    inp = normalize(ctx, inp, idx)
 
     if ctx.is_initializing:
         return inp
