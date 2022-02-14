@@ -105,7 +105,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
     if split_dims is None:
         split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
-    depth_indexing &= ctx.model.weight_sharing
+    depth_indexing &= not ctx.model.weight_sharing
     if depth_indexing:
         str_shape = [ctx.dims.depth] + str_shape
     shape = dims_to_shape(ctx, str_shape)
