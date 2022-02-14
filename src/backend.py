@@ -101,7 +101,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
               split_dims: typing.Optional[typing.List[str]] = None,
-              depth_indexing: bool = False) -> jnp.ndarray:
+              depth_indexing: bool = False, idx: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
     if split_dims is None:
         split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
@@ -125,7 +125,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
     if depth_indexing:
-        param = param[ctx.depth_index].reshape(param.shape[1:])
+        param = param[idx].reshape(param.shape[1:])
     return param.astype(ctx.model.computation_dtype)
 
 
