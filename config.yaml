@@ -6,19 +6,21 @@ data:
     prefetch_buffer: 2
 dims:
     sizes:
-        batch: 8192
-        depth: 2
-        features_per_head: 128
-        intermediate_replicated: 128
-        intermediate_parallel: 128
+        sequence: 65536
+        batch: 8
+        depth: 16
+        features_per_head: 256
+        intermediate_replicated: 512
+        intermediate_parallel: 512
 optimizer:
     exponential_decay: 2.0e-05
-    gradient_clip: 0.005
-    learning_rate: 0.0005
+    gradient_clip: 0.1
+    learning_rate: 0.01
     warmup_end: 4096
 training:
-    device_steps: 4
-    device_unroll: 4
+    loss_top_p: 1
+    device_steps: 32
+    device_unroll: 1
     trace:
         do_trace: false
         start_step: 2
