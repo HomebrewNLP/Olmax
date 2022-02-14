@@ -242,9 +242,10 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     inp = ((ctx.parameters, src, zero, src, zero), jnp.zeros((1,), dtype=jnp.int32))
     if ctx.is_initializing:
-        (ctx.parameters, _, _, _, _), _ = block(ctx)(inp)
+        src, _ = block(ctx)(inp)
     else:
-        (ctx.parameters, _, _, _, _), _ = loop(block(ctx), inp, ctx.model.depth, ctx.model.depth_unroll)
+        src, _ = loop(block(ctx), inp, ctx.model.depth, ctx.model.depth_unroll)
+    ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
 
