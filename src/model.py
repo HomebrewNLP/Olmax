@@ -122,10 +122,10 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], column_axes=2)
-    if not ctx.is_initializing:
-        # TODO: Use lax.gather
-        inp = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd)
-    return normalize(ctx, inp)
+    if ctx.is_initializing:
+        return inp
+    # TODO: Use lax.gather
+    return matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -136,8 +136,8 @@ def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return matmul(inp, embd)
 
 
-def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray], src: REVERSIBLE_CTX
-               ) -> REVERSIBLE_CTX:
+def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray],
+               src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
