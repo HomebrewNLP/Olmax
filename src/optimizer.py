@@ -52,7 +52,7 @@ def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
     learning_rate = opt.learning_rate
     learning_rate *= jnp.minimum(current_step, opt.warmup_end).astype(jnp.float32) / opt.warmup_end
     learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(current_step.astype(jnp.float32) - opt.warmup_end)
-    return learning_rate.astype(ctx.model.dtype)
+    return learning_rate.astype(ctx.model.storage_dtype)
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
@@ -63,6 +63,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
         if "optimizer" in param_name:
             continue
+        grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         updated_weight = adam(inner_ctx, param_name, grad, current_step)
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)

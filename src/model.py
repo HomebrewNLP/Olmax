@@ -36,7 +36,7 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         out = out * param  # no reshape needed as it's a single scalar per device)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            d_scale = (scaled * dy).sum().reshape(1,)
+            d_scale = (scaled * dy).sum().reshape(1, )
             dy = dy * (scale * param)
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
@@ -52,13 +52,9 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
-    weight = get_param(ctx, "weight",
-                       [ctx.dims.heads,
-                        ctx.dims.features_per_head,
-                        ctx.dims.one if depthwise else ctx.dims.features_per_head,
-                        conv_kernel],
-                       column_axes=2,
-                       scale=scale)
+    weight = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head,
+                                       ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
+                       column_axes=2, scale=scale)
     if ctx.is_initializing:
         return inp
     return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
@@ -125,7 +121,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], column_axes=2)
     if not ctx.is_initializing:
-        inp = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.dtype), inp_embd)  # TODO: Use lax.gather
+        # TODO: Use lax.gather
+        inp = matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd)
     return normalize(ctx, inp)
 
 

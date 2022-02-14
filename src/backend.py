@@ -66,11 +66,11 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     axes = tuple([shape[c] for c in column_axes])
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
-    out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.dtype))
+    out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.storage_dtype))
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
     if n_rows < n_cols:
         out = out.T
-    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.dtype)
+    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.storage_dtype)
 
 
 def stacked_orthogonal_init(ctx: Context, str_shape: typing.List[str], column_axes: int,
@@ -112,15 +112,15 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
             param *= scale * post_variance_scale
             ctx.parameter_variance[name] = var * scale ** 2
         else:
-            param = random.normal(ctx.prng_key, shape, ctx.model.dtype)
+            param = random.normal(ctx.prng_key, shape, ctx.model.storage_dtype)
             if std is not None:
                 param *= std
             if mean is not None:
                 param += mean
-        param = param.astype(ctx.model.dtype)
+        param = param.astype(ctx.model.storage_dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
-    return param
+    return param.astype(ctx.model.computation_dtype)
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:

@@ -85,7 +85,7 @@ def main():
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
     timeit("Acquiring optimizer parameters", update, ctx,
            {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()},
-           jnp.ones([], dtype=ctx.model.dtype))
+           jnp.ones([], dtype=ctx.model.computation_dtype))
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {'parameters': {name: sharding(ctx, dims, ParallelAxes.model)

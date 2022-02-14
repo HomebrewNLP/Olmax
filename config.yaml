@@ -26,4 +26,4 @@ training:
         start_step: 2
         stop_step: 8
 model:
-    dtype: float32   # TODO: Split computation dtype and buffer dtype
+    dtype: float32
