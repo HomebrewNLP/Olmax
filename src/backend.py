@@ -91,7 +91,7 @@ def stacked_orthogonal_init(ctx: Context, str_shape: typing.List[str], column_ax
     var = 0
     size = ctx.dims.sizes[dim]
     for _ in range(size):
-        new_out, new_var = stacked_orthogonal_init(ctx, str_shape, column_axes, split_dims)
+        new_out, new_var = stacked_orthogonal_init(ctx, new_shape, column_axes, split_dims)
         out.append(new_out)
         var += new_var
     return jnp.stack(out, dim_index), var / size
