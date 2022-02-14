@@ -125,7 +125,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
     if depth_indexing:
-        param = param[ctx.depth_index]
+        param = param[ctx.depth_index].reshape(param.shape[1:])
     return param.astype(ctx.model.computation_dtype)
 
 
