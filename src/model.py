@@ -225,8 +225,8 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 
 
 def block(ctx: Context):
-    def _fn(src: REVERSIBLE_CTX, step: jnp.ndarray) -> typing.Tuple[REVERSIBLE_CTX, jnp.ndarray]:
-        ctx.depth_index = step
+    def _fn(inp: typing.Tuple[REVERSIBLE_CTX, jnp.ndarray]) -> typing.Tuple[REVERSIBLE_CTX, jnp.ndarray]:
+        src, ctx.depth_index = inp
         src = reversible(ctx, momentumnet_main(ctx, conv_block), src)
         src = reversible(ctx, momentumnet_side(ctx), src)
         ctx.depth_index += 1
@@ -240,10 +240,11 @@ def block(ctx: Context):
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
-    src = ctx.parameters, src, zero, src, zero
-    ctx.depth_index = jnp.zeros((1,))
-    src = loop(block(ctx), (src, jnp.zeros((1,))), ctx.model.depth, ctx.model.depth_unroll)[1]  # We only want src
-    ctx.parameters = src[0]
+    inp = ((ctx.parameters, src, zero, src, zero), jnp.zeros((1,), dtype=ctx.model.computation_dtype))
+    if ctx.is_initializing:
+        (ctx.parameters, _, _, _, _), _ = block(ctx)(inp)
+    else:
+        (ctx.parameters, _, _, _, _), _ = loop(block(ctx), inp, ctx.model.depth, ctx.model.depth_unroll)
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
 
