@@ -186,7 +186,6 @@ class Context(DataClass):
         self.seed = 0
         self.global_prefix = ''
 
-        self.depth_index: typing.Optional[jnp.ndarray] = None
         self.name_cache: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_variance: typing.Dict[str, float] = {}
