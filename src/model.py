@@ -23,28 +23,25 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
 
 def normalize(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
-    scale_param = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], mean=1, std=0, depth_indexing=True, idx=idx)
     if ctx.is_initializing:
         return inp
 
     @jax.custom_gradient
-    def _fn(src: jnp.ndarray, param: jnp.ndarray):
+    def _fn(src: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
         out = src - mean
         scale = norm(ctx, out, -1, True) * src.shape[-1] ** -0.5
-        scaled = out * scale
-        out = out * param  # no reshape needed as it's a single scalar per device)
+        out *= scale
 
-        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            d_scale = (scaled * dy).sum().reshape(1, )
-            dy = dy * (scale * param)
+        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+            dy = dy * scale
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
-            return dy, d_scale
+            return dy
 
         return out, _grad
 
-    return _fn(inp, scale_param)
+    return _fn(inp)
 
 
 def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -79,8 +76,8 @@ def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     return full_conv(ctx, mid, ctx.model.depth ** -0.5, idx)
 
 
-def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndarray
-                          ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndarray) -> typing.Tuple[
+    jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std,
                            depth_indexing=True, idx=idx)
     out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5,
@@ -139,8 +136,8 @@ def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return matmul(inp, embd)
 
 
-def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray],
-               src: REVERSIBLE_CTX, top_idx: jnp.ndarray) -> REVERSIBLE_CTX:
+def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray], src: REVERSIBLE_CTX,
+               top_idx: jnp.ndarray) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
@@ -165,8 +162,8 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndar
     @jax.custom_gradient
     def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, back_x0: jnp.ndarray, x1: jnp.ndarray,
             back_x1: jnp.ndarray, idx: jnp.ndarray):
-        def _grad(dy: REVERSIBLE_CTX) -> typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray,
-                                                      jnp.ndarray, jnp.ndarray,None]:
+        def _grad(dy: REVERSIBLE_CTX) -> typing.Tuple[
+            typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, None]:
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0, idx)
             d_params, dx0 = grad_fn(dy1)
