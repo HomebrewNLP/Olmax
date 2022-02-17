@@ -29,17 +29,17 @@ def normalize(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
-        out = src - mean
-        scale = norm(ctx, out, -1, True) * src.shape[-1] ** -0.5
-        out *= scale
+        src -= mean
+        scale = norm(ctx, src, -1, True) * src.shape[-1] ** -0.5
+        src *= scale
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
             dy = dy * scale
-            dy -= (dy * out).mean(-1, keepdims=True) * out
+            dy -= (dy * src).mean(-1, keepdims=True) * src  # src == out
             dy -= dy.mean(-1, keepdims=True)
             return dy
 
-        return out, _grad
+        return src, _grad
 
     return _fn(inp)
 
@@ -70,10 +70,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, idx: jnp.ndarra
 
 def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_convolution")
-    inp = normalize(ctx, inp, idx)
-    mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std, idx)
-    mid = activate(ctx, mid)
-    return full_conv(ctx, mid, ctx.model.depth ** -0.5, idx)
+    return depthwise_conv(ctx, inp, ctx.model.depth ** -0.5, idx)
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndarray) -> typing.Tuple[
@@ -162,8 +159,8 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndar
     @jax.custom_gradient
     def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, back_x0: jnp.ndarray, x1: jnp.ndarray,
             back_x1: jnp.ndarray, idx: jnp.ndarray):
-        def _grad(dy: REVERSIBLE_CTX) -> typing.Tuple[
-            typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, None]:
+        def _grad(dy: REVERSIBLE_CTX) -> typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray,
+                                                      jnp.ndarray, jnp.ndarray, None]:
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0, idx)
             d_params, dx0 = grad_fn(dy1)
