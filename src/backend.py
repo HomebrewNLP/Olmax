@@ -99,9 +99,9 @@ def stacked_orthogonal_init(ctx: Context, str_shape: typing.List[str], column_ax
 
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
-              scale: float = 1., post_variance_scale: float = 1,
-              split_dims: typing.Optional[typing.List[str]] = None,
-              depth_indexing: bool = False, idx: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
+              scale: float = 1., post_variance_scale: float = 1, split_dims: typing.Optional[typing.List[str]] = None,
+              depth_indexing: bool = False, idx: typing.Optional[jnp.ndarray] = None,
+              learning_rate_scale: float = 1) -> jnp.ndarray:
     if split_dims is None:
         split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
@@ -115,13 +115,14 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         if std is None and mean is None:
             param, var = stacked_orthogonal_init(ctx, str_shape, column_axes, split_dims)
             param *= scale * post_variance_scale
-            ctx.parameter_variance[name] = var * scale ** 2
+            ctx.parameter_variance[name] = var * scale ** 2 * learning_rate_scale
         else:
             param = random.normal(ctx.prng_key, shape, ctx.model.storage_dtype)
             if std is not None:
                 param *= std
             if mean is not None:
                 param += mean
+            ctx.parameter_variance[name] = learning_rate_scale
         param = param.astype(ctx.model.storage_dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]

@@ -141,6 +141,7 @@ class Optimizer(DataClass):
 
 
 class Model(DataClass):
+    rezero_learning_rate_scale: float = 0.01
     device_halo_size: int = 3
     scan_unroll: int = 1
     norm_eps: float = 1e-5

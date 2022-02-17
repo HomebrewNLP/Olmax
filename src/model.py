@@ -68,6 +68,13 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, idx: jnp.ndarra
     return conv_weight(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, idx)
 
 
+def rezero(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
+    ctx.add_to_prefix("rezero")
+    scale = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], std=0, depth_indexing=True, idx=idx,
+                      learning_rate_scale=ctx.model.rezero_learning_rate_scale)
+    return inp * scale
+
+
 def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_convolution")
     return depthwise_conv(ctx, inp, ctx.model.depth ** -0.5, idx)
@@ -199,7 +206,9 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.
 
 def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray]):
     def _fn(sub_ctx: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
-        return fn(sub_ctx, x * (1 - ctx.model.momentumnet_beta) / ctx.model.momentumnet_beta ** (idx + 1), idx)
+        inp = x * (1 - ctx.model.momentumnet_beta) / ctx.model.momentumnet_beta ** (idx + 1)
+        out = fn(sub_ctx, inp, idx)
+        return rezero(sub_ctx, out, idx)
 
     return _fn
 
