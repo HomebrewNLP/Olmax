@@ -160,6 +160,7 @@ class Model(DataClass):
 
 
 class Training(DataClass):
+    z_loss: float = 1e-4
     loss_top_p: float = 0.4
     loss_top_snap: int = 128  # snap top_p * batch to closest multiple
     device_steps: int = 1024

@@ -192,16 +192,15 @@ def psum_scatter(inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
-    src = src.reshape(ctx.dims.sizes.heads, -1, src.shape[-1])
-    src = psum_scatter(src)  # model parallel -> data parallel for loss computation
+    src = lax.psum(src, ParallelAxes.model)
 
-    normalization = ctx.dims.sizes.batch / tgt.size
-    tgt = one_hot(tgt.astype(src.dtype), src.shape[-1])
-    shifted = src - lax.stop_gradient(src).max(-1, keepdims=True)
-    exp_shifted = jnp.exp(shifted)
-    sum_exp = exp_shifted.sum(-1, keepdims=True)
-    out = ((jnp.log(sum_exp) - shifted) * tgt).sum(tuple(range(1, tgt.ndim)))
-    return lax.pmean(out * normalization, ParallelAxes.model)
+    max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
+    log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
+    loss = (log_z - src) * one_hot(tgt.astype(src.dtype), src.shape[-1])
+    loss = loss.sum() / tgt.size
+    if ctx.training.z_loss:
+        loss += jnp.square(log_z) * (ctx.training.z_loss / tgt.size)
+    return loss
 
 
 def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray]):
