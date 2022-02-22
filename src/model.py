@@ -72,14 +72,14 @@ def rezero(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
 
 def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_convolution")
-    return depthwise_conv(ctx, inp, ctx.model.depth ** -0.5, idx)
+    return depthwise_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5, idx)
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndarray) -> typing.Tuple[
     jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std,
                            depth_indexing=True, idx=idx)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.model.depth ** -0.5,
+    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5,
                            depth_indexing=True, idx=idx)
     return inp_weight, out_weight
 
@@ -245,7 +245,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     if ctx.is_initializing:
         src, _ = block(ctx)(inp)
     else:
-        src, _ = loop(block(ctx), inp, ctx.model.depth, ctx.model.depth_unroll)
+        src, _ = loop(block(ctx), inp, ctx.dims.sizes.depth, min(ctx.model.depth_unroll, ctx.dims.sizes.depth))
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 

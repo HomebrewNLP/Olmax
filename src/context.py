@@ -148,7 +148,6 @@ class Model(DataClass):
     group_linear_factor: int = 2
     experts: int = 1  # TODO: Add dense MoE
     momentumnet_beta: float = 0.9
-    depth: int = 32
     depth_unroll: int = 8
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
