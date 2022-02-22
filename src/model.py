@@ -87,7 +87,6 @@ def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndar
 def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel, idx)
-    inp = normalize(ctx, inp)
 
     if ctx.is_initializing:
         return inp
@@ -102,7 +101,6 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarra
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated,
                                                    idx)
-    inp = normalize(ctx, inp)
 
     if ctx.is_initializing:
         return inp
