@@ -187,16 +187,17 @@ def psum_scatter(inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> jnp.ndarray:
+def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     src = lax.psum(src, ParallelAxes.model)
 
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
     log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
-    loss = (log_z - src) * one_hot(tgt.astype(src.dtype), src.shape[-1])
-    loss = loss.sum() / tgt.size
+    loss = log_z - src * one_hot(tgt.astype(src.dtype), src.shape[-1])
+    loss = loss.mean()
+    accuracy = (jnp.argmax(src, 1) == tgt).astype(jnp.float32).mean()
     if ctx.training.z_loss:
         loss += jnp.square(log_z) * (ctx.training.z_loss / tgt.size)
-    return loss
+    return loss, accuracy
 
 
 def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray]):
@@ -254,11 +255,4 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    unreduced_loss = cross_entropy_loss(ctx, body_ctx(ctx, src), tgt)
-    top_loss = loss = unreduced_loss.sum() / ctx.dims.sizes.batch
-    top_k = math.ceil(ctx.dims.sizes.batch * ctx.training.loss_top_p / ctx.training.loss_top_snap)
-    top_k *= ctx.training.loss_top_snap
-    if ctx.training.loss_top_p < 1 and top_k < ctx.dims.sizes.batch:
-        top_loss, _ = lax.top_k(unreduced_loss, top_k)
-        top_loss = top_loss.sum() / top_k
-    return top_loss, loss
+    return cross_entropy_loss(ctx, body_ctx(ctx, src), tgt)

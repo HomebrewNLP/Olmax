@@ -20,11 +20,11 @@ from src.utils.wandb import WandbLog
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
-    (top_loss, loss), grads = grad_fn(wctx.ctx.parameters,
+    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters,
                                       wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
-    wctx.top_loss += top_loss
+    wctx.top_loss += accuracy
     wctx.current_step += 1
     return wctx.serialize()
 
