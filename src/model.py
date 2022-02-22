@@ -123,8 +123,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], std=1e-5)
     if ctx.is_initializing:
         return inp
-    # TODO: Use lax.gather
-    return normalize(ctx, matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd))
+    out = jnp.take(inp_embd, inp, 0)
+    return normalize(ctx, out)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -191,7 +191,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
 
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
     log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
-    loss = (src * one_hot(tgt.astype(src.dtype), src.shape[-1])).sum(-1, keepdims=True) - log_z
+    loss = jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1) - log_z
     loss = -loss.mean()
     accuracy = (jnp.argmax(src, 2) == tgt).astype(jnp.float32).mean()
     if ctx.training.z_loss:
