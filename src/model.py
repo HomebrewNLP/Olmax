@@ -21,7 +21,7 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def normalize(inp: jnp.ndarray) -> jnp.ndarray:
+def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
@@ -88,7 +88,7 @@ def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndar
 def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel, idx)
-    inp = normalize(inp)
+    inp = normalize(ctx, inp)
 
     if ctx.is_initializing:
         return inp
@@ -103,7 +103,7 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarra
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated,
                                                    idx)
-    inp = normalize(inp)
+    inp = normalize(ctx, inp)
 
     if ctx.is_initializing:
         return inp
@@ -125,7 +125,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
     # TODO: Use lax.gather
-    return normalize(matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd))
+    return normalize(ctx, matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd))
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
