@@ -21,11 +21,7 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def normalize(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("normalization")
-    if ctx.is_initializing:
-        return inp
-
+def normalize(inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
@@ -92,7 +88,7 @@ def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndar
 def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel, idx)
-    inp = normalize(ctx, inp, idx)
+    inp = normalize(inp)
 
     if ctx.is_initializing:
         return inp
@@ -107,7 +103,7 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarra
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated,
                                                    idx)
-    inp = normalize(ctx, inp, idx)
+    inp = normalize(inp)
 
     if ctx.is_initializing:
         return inp
@@ -125,16 +121,16 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], column_axes=2)
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], std=1e-5)
     if ctx.is_initializing:
         return inp
     # TODO: Use lax.gather
-    return matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd)
+    return normalize(matmul(one_hot(inp, ctx.data.vocab_size).astype(ctx.model.computation_dtype), inp_embd))
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab])
+    embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], std=0)
     if ctx.is_initializing:
         return inp
     return matmul(inp, embd)
