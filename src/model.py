@@ -196,7 +196,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     loss = loss.mean()
     accuracy = (jnp.argmax(src, 2) == tgt).astype(jnp.float32).mean()
     if ctx.training.z_loss:
-        loss += jnp.square(log_z) * (ctx.training.z_loss / tgt.size)
+        loss += jnp.square(log_z).mean() * (ctx.training.z_loss / tgt.size)
     return loss, accuracy
 
 
