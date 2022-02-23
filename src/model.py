@@ -216,10 +216,10 @@ def momentumnet_side(ctx: Context):
 def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(x0: jnp.ndarray, x0_back: jnp.ndarray, x1: jnp.ndarray, x1_back: jnp.ndarray):
-        def _grad(dy) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            return dy, x0, dy, x1
+        def _grad(dy) -> typing.Tuple[jnp.ndarray, jnp.ndarray, None, jnp.ndarray]:
+            return dy, x0, None, x1
 
-        return x0 + x1, _grad
+        return x0, _grad
 
     return _fn(*src)
 
