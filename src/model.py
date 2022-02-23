@@ -199,7 +199,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
 
 def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray]):
     def _fn(sub_ctx: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
-        inp = x * (1 - ctx.model.momentumnet_beta) / ctx.model.momentumnet_beta ** (idx + 1)
+        inp = x * ctx.model.momentumnet_beta ** idx
         out = fn(sub_ctx, inp, idx)
         return rezero(sub_ctx, out, idx)
 
@@ -208,7 +208,7 @@ def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jn
 
 def momentumnet_side(ctx: Context):
     def _fn(_ignored: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
-        return x * ctx.model.momentumnet_beta ** idx
+        return x * (1 - ctx.model.momentumnet_beta) / ctx.model.momentumnet_beta ** (idx + 1)
 
     return _fn
 
