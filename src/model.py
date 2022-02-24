@@ -24,9 +24,9 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
-        src -= mean
+        src = src - mean
         scale = norm(ctx, src, -1, True) * src.shape[-1] ** -0.5
-        src *= scale
+        src = src * scale
 
         def _grad(dy: jnp.ndarray) -> jnp.ndarray:
             dy = dy * scale
@@ -72,15 +72,20 @@ def rezero(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
 
 def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_convolution")
-    return depthwise_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5, idx)
+
+    inp = normalize(ctx, inp)
+    mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std, idx)
+    mid = activate(ctx, mid)
+    mid = normalize(ctx, mid)
+    return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, idx)
 
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, idx: jnp.ndarray) -> typing.Tuple[
     jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std,
                            depth_indexing=True, idx=idx)
-    out_weight = get_param(ctx, "out_weight", [ctx.dims.heads, out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5,
-                           depth_indexing=True, idx=idx)
+    out_weight = get_param(ctx, "out_weight", [out_dim, ctx.dims.heads, in_dim], scale=ctx.dims.sizes.depth ** -0.5,
+                           depth_indexing=True, idx=idx, column_axes=2)
     return inp_weight, out_weight
 
 
@@ -91,8 +96,10 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.
     if ctx.is_initializing:
         return inp
 
+    inp = normalize(ctx, inp)
     mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = activate(ctx, mid)
+    mid = normalize(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
@@ -105,9 +112,11 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarra
     if ctx.is_initializing:
         return inp
 
+    inp = normalize(ctx, inp)
     mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = lax.psum(mid, ParallelAxes.model)
     mid = activate(ctx, mid)
+    mid = normalize(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
@@ -127,7 +136,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], std=0)
+    embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], std=0,
+                     learning_rate_scale=1 / (ctx.dims.sizes.heads * ctx.dims.sizes.features_per_head))
     if ctx.is_initializing:
         return inp
     return matmul(inp, embd)
@@ -201,7 +211,7 @@ def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jn
     def _fn(sub_ctx: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
         inp = x * ctx.model.momentumnet_beta ** idx
         out = fn(sub_ctx, inp, idx)
-        return rezero(sub_ctx, out, idx)
+        return out
 
     return _fn
 

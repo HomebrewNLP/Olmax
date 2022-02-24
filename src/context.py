@@ -129,7 +129,7 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
-    learning_rate: float = 1e-3
+    learning_rate: float = 1
     gradient_clip: float = 0.1
     momentum_beta: float = 0.9
     adam_beta1: float = 0.9
@@ -155,7 +155,7 @@ class Model(DataClass):
     weight_sharing: bool = False
     feed_forward_factor: int = 2
     storage_dtype: str = "float32"  # valid jax.numpy.storage_dtype
-    computation_dtype: str = "bfloat16"
+    computation_dtype: str = "float32"
 
 
 class Training(DataClass):
