@@ -198,9 +198,9 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     src = lax.psum(src, ParallelAxes.model)
 
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
-    log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
-    loss = jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1) - log_z
-    loss = -loss.mean()
+    log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit 
+    loss = log_z - jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1)
+    loss = loss.mean()
     accuracy = (jnp.argmax(src, 2) == tgt).astype(jnp.float32).mean()
     if ctx.training.z_loss:
         loss += jnp.square(log_z).mean() * ctx.training.z_loss
