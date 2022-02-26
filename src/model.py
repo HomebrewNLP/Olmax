@@ -11,7 +11,7 @@ from src.context import Context
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
 
-def activate(ctx, inp: jnp.ndarray) -> jnp.ndarray:
+def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
 
 
@@ -46,6 +46,12 @@ def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: st
     return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
 
 
+def mm(ctx: Context, inp: jnp.ndarray, weight: jnp.ndarray):
+    if ctx.is_initializing:
+        return inp
+    return dot(inp, weight, -1, 0, (), ())
+
+
 def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("full_conv")
     return conv_weight(ctx, inp, False, ctx.dims.full_conv_kernel, scale, idx)
@@ -57,7 +63,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, idx: jnp.ndarra
 
 
 def rezero(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
-    ctx.add_to_prefix("rezero")
+    ctx = ctx.add_to_prefix("rezero")
     scale = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], std=0, depth_indexing=True, idx=idx,
                       learning_rate_scale=ctx.model.rezero_learning_rate_scale)
     return inp * scale
@@ -66,10 +72,10 @@ def rezero(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
 def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_convolution")
 
-    inp = normalize(ctx, inp)
+    inp = normalize(ctx, inp, idx)
     mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std, idx)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
+    mid = normalize(ctx, mid, idx)
     return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, idx)
 
 
@@ -86,14 +92,11 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel, idx)
 
-    if ctx.is_initializing:
-        return inp
-
-    inp = normalize(ctx, inp)
-    mid = dot(inp, inp_weight, -1, 0, (), ())
+    inp = normalize(ctx, inp, idx)
+    mid = mm(ctx, inp, inp_weight)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
-    out = dot(mid, out_weight, -1, 0, (), ())
+    mid = normalize(ctx, mid, idx)
+    out = mm(ctx, mid, out_weight)
     return out
 
 
@@ -102,15 +105,12 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarra
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated,
                                                    idx)
 
-    if ctx.is_initializing:
-        return inp
-
-    inp = normalize(ctx, inp)
-    mid = dot(inp, inp_weight, -1, 0, (), ())
-    mid = lax.psum(mid, ParallelAxes.model)
+    inp = normalize(ctx, inp, idx)
+    mid = mm(ctx, inp, inp_weight)
+    mid = psum(ctx, mid)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
-    out = dot(mid, out_weight, -1, 0, (), ())
+    mid = normalize(ctx, mid, idx)
+    out = mm(ctx, mid, out_weight)
     return out
 
 
@@ -121,10 +121,8 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], std=1e-5)
-    if ctx.is_initializing:
-        return inp
     out = jnp.take(inp_embd, inp, 0)
-    return normalize(ctx, out)
+    return normalize(ctx, out, None)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -176,20 +174,8 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndar
     return _fn(*src, top_idx)
 
 
-def psum_scatter(inp: jnp.ndarray) -> jnp.ndarray:
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
-        def _grad(out: jnp.ndarray) -> jnp.ndarray:
-            return lax.all_gather(out, ParallelAxes.model).reshape(inp.shape)
-
-        return lax.psum_scatter(src, ParallelAxes.model), _grad
-
-    return _fn(inp)
-
-
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    src = lax.psum(src, ParallelAxes.model)
-
+    src = psum(ctx, src)
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
     log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
     loss = log_z - jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1)
