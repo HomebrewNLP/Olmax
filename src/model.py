@@ -20,23 +20,16 @@ def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> 
     return lax.rsqrt(ctx.model.norm_eps + square)
 
 
-def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
-        mean = src.mean(-1, keepdims=True)
-        src = src - mean
-        scale = norm(ctx, src, -1, True) * src.shape[-1] ** -0.5
-        src = src * scale
+def psum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    if ctx.is_initializing:
+        return inp
+    return lax.psum(inp, ParallelAxes.model)
 
-        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
-            dy = dy * scale
-            dy -= (dy * src).mean(-1, keepdims=True) * src  # src == out
-            dy -= dy.mean(-1, keepdims=True)
-            return dy
 
-        return src, _grad
-
-    return _fn(inp)
+def normalize(ctx: Context, inp: jnp.ndarray, idx: typing.Optional[jnp.ndarray]) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("normalization")
+    scale = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], std=0, depth_indexing=idx is not None, idx=idx)
+    return inp / norm(ctx, inp, -1, True) * (1 + scale)
 
 
 def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
