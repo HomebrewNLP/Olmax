@@ -175,7 +175,7 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndar
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    src = psum(ctx, src)
+    src = psum(ctx, src)  # TODO: Split batch across model parallel
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
     log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
     loss = log_z - jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1)
