@@ -129,13 +129,11 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
-    learning_rate: float = 1
-    gradient_clip: float = 0.1
-    momentum_beta: float = 0.9
+    learning_rate: float = 0.01
+    gradient_clip: float = 0.01
     adam_beta1: float = 0.9
     adam_beta2: float = 0.99
-    momentum_type: MomentumType = MomentumType.nesterov
-    weight_decay: float = 1e-3
+    weight_decay: float = 0.1
     warmup_end: int = 4096
     exponential_decay: float = 1e-4
 
@@ -159,7 +157,7 @@ class Model(DataClass):
 
 
 class Training(DataClass):
-    z_loss: float = 1e-4
+    z_loss: float = 0.01
     loss_top_p: float = 0.4
     loss_top_snap: int = 128  # snap top_p * batch to closest multiple
     device_steps: int = 1024
