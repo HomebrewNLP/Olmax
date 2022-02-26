@@ -76,7 +76,6 @@ def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     inp = normalize(ctx, inp)
     mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std, idx)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
     return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, idx)
 
 
@@ -99,7 +98,6 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.
     inp = normalize(ctx, inp)
     mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
@@ -116,7 +114,6 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarra
     mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = lax.psum(mid, ParallelAxes.model)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
