@@ -29,6 +29,8 @@ def psum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def normalize(ctx: Context, inp: jnp.ndarray, idx: typing.Optional[jnp.ndarray]) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     scale = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], std=0, depth_indexing=idx is not None, idx=idx)
+    if ctx.is_initializing:
+        return inp
     return inp / norm(ctx, inp, -1, True) * (1 + scale)
 
 
