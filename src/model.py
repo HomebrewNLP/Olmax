@@ -207,29 +207,13 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     return loss, accuracy
 
 
-def momentumnet_main(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray, jnp.ndarray], jnp.ndarray]):
-    def _fn(sub_ctx: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
-        inp = x * ctx.model.momentumnet_beta ** idx
-        out = fn(sub_ctx, inp, idx)
-        return out
-
-    return _fn
-
-
-def momentumnet_side(ctx: Context):
-    def _fn(_ignored: Context, x: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
-        return x * (1 - ctx.model.momentumnet_beta) / ctx.model.momentumnet_beta ** (idx + 1)
-
-    return _fn
-
-
 def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(x0: jnp.ndarray, x0_back: jnp.ndarray, x1: jnp.ndarray, x1_back: jnp.ndarray):
         def _grad(dy) -> typing.Tuple[jnp.ndarray, jnp.ndarray, None, jnp.ndarray]:
-            return dy, x0, None, x1
+            return dy, x0, dy, x1
 
-        return x0, _grad
+        return x0 + x1, _grad
 
     return _fn(*src)
 
@@ -237,11 +221,9 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
 def block(ctx: Context):
     def _fn(inp: typing.Tuple[REVERSIBLE_CTX, jnp.ndarray]) -> typing.Tuple[REVERSIBLE_CTX, jnp.ndarray]:
         src, idx = inp
-        src = reversible(ctx, momentumnet_main(ctx, conv_block), src, idx)
-        src = reversible(ctx, momentumnet_side(ctx), src, idx)
-        src = reversible(ctx, momentumnet_main(ctx, feed_forward), src, idx + 1)
-        src = reversible(ctx, momentumnet_side(ctx), src, idx + 1)
-        return src, idx + 2
+        src = reversible(ctx, conv_block, src, idx)
+        src = reversible(ctx, feed_forward, src, idx)
+        return src, idx + 1
 
     return _fn
 
