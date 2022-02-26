@@ -76,6 +76,7 @@ def conv_block(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarray:
     inp = normalize(ctx, inp)
     mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std, idx)
     mid = activate(ctx, mid)
+    mid = normalize(ctx, mid)
     return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, idx)
 
 
@@ -98,6 +99,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.
     inp = normalize(ctx, inp)
     mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = activate(ctx, mid)
+    mid = normalize(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
@@ -114,6 +116,7 @@ def feed_forward(ctx: Context, inp: jnp.ndarray, idx: jnp.ndarray) -> jnp.ndarra
     mid = dot(inp, inp_weight, -1, 0, (), ())
     mid = lax.psum(mid, ParallelAxes.model)
     mid = activate(ctx, mid)
+    mid = normalize(ctx, mid)
     out = dot(mid, out_weight, -1, 0, (), ())
     return out
 
@@ -195,7 +198,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     src = lax.psum(src, ParallelAxes.model)
 
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
-    log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit 
+    log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
     loss = log_z - jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1)
     loss = loss.mean()
     accuracy = (jnp.argmax(src, 2) == tgt).astype(jnp.float32).mean()
