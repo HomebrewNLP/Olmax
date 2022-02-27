@@ -12,6 +12,8 @@ REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.nd
 
 
 def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    if ctx.is_initializing:
+        return inp
     return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
 
 
