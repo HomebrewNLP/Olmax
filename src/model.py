@@ -47,7 +47,7 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
         return out, _grad
 
-    return _fn(inp) * scale
+    return _fn(inp) * (1 + scale)
 
 
 def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
