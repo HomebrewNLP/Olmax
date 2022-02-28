@@ -31,9 +31,23 @@ def psum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     scale = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], std=0)
-    if ctx.is_initializing:
-        return inp
-    return inp * (norm(ctx, inp, -1, True) * (1 + scale))
+
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray):
+        mean = shard(src.mean(-1, keepdims=True))
+        out = src - mean
+        scale = norm(ctx, out, -1, True) * src.shape[-1] ** 0.5
+        out = out * scale
+
+        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+            dy = dy * scale
+            dy -= (dy * out).mean(-1, keepdims=True) * out
+            dy -= dy.mean(-1, keepdims=True)
+            return dy
+
+        return out, _grad
+
+    return _fn(inp) * scale
 
 
 def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
