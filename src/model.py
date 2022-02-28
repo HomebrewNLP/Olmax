@@ -34,7 +34,7 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray):
-        mean = shard(src.mean(-1, keepdims=True))
+        mean = src.mean(-1, keepdims=True)
         out = src - mean
         scale = norm(ctx, out, -1, True) * src.shape[-1] ** 0.5
         out = out * scale
