@@ -47,7 +47,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
 
 
 def get_optimizer_state(ctx: Context):
-    def _fn(parameters: typing.Dict[str], grads: typing.Dict[str]):
+    def _fn(parameters: typing.Dict[str, jnp.ndarray], grads: typing.Dict[str, jnp.ndarray]):
         ctx.parameters = parameters
         update(ctx, grads, jnp.ones((), dtype=ctx.model.computation_dtype))
         params = ctx.parameters
