@@ -30,7 +30,7 @@ def psum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
-    scale = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], std=0)
+    scale = get_param(ctx, "scale", [ctx.dims.one], std=0)
     if ctx.is_initializing:
         return inp
     return inp * (norm(ctx, inp, -1, True) * (1 + scale))
@@ -41,9 +41,9 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
-    weight = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head,
+    weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
                                        ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
-                       column_axes=2, scale=scale, split_dims=[ctx.dims.depth, ctx.dims.heads])
+                       column_axes=2, scale=scale)
     if ctx.is_initializing:
         return inp
     return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
@@ -67,7 +67,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
 
 def rezero(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("rezero")
-    scale = get_param(ctx, "scale", [ctx.dims.heads, ctx.dims.one], std=0,
+    scale = get_param(ctx, "scale", [ctx.dims.one], std=0,
                       learning_rate_scale=ctx.model.rezero_learning_rate_scale)
     return inp * scale
 
@@ -84,8 +84,8 @@ def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[
     jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [ctx.dims.heads, in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [out_dim, ctx.dims.heads, in_dim], scale=ctx.dims.sizes.depth ** -0.5,
+    inp_weight = get_param(ctx, "inp_weight", [in_dim, out_dim], scale=1 / ctx.model.activation_std)
+    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5,
                            column_axes=2)
     return inp_weight, out_weight
 
@@ -121,14 +121,14 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
 
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.heads, ctx.dims.features_per_head], std=1e-5)
+    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features_per_head], std=1e-5)
     out = jnp.take(inp_embd, inp, 0)
     return normalize(ctx, out)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "weight", [ctx.dims.heads, ctx.dims.features_per_head, ctx.dims.vocab], std=0,
+    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
                      learning_rate_scale=1 / (ctx.dims.sizes.heads * ctx.dims.sizes.features_per_head))
     if ctx.is_initializing:
         return inp
@@ -165,7 +165,7 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
                                                       jnp.ndarray, jnp.ndarray]:
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0)
-            d_params, dx0, _ = grad_fn(dy1)
+            d_params, dx0 = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
             return d_params, dy1, y1 - x0, dx0 + dy0, y0
 

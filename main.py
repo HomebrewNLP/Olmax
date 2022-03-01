@@ -6,14 +6,14 @@ import jax
 import jax._src.util as util
 import wandb
 import yaml
-from jax import lax, numpy as jnp
+from jax import numpy as jnp
 
+from src.backend import loop
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
-from src.backend import loop
 from src.utils.wandb import WandbLog
 
 
@@ -32,6 +32,16 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     training = WhileTrainContext(while_ctx_dict).ctx.training
     return loop(train_step, while_ctx_dict, training.device_steps, training.device_unroll)
+
+
+def get_parameters(ctx: Context, inp: jnp.ndarray):
+    def _fn(x):
+        body_ctx(ctx, x)
+        return ctx.parameters
+
+    inp = jnp.broadcast_to(inp, (ctx.dims.sizes.heads,) + inp.shape)
+    ctx.parameters = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=0)(inp)
+    ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims}
 
 
 def sharding(ctx: Context, dims: typing.List[str], axis: ParallelAxes):
@@ -79,9 +89,9 @@ def main():
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
-    timeit("Acquiring forward parameters", body_ctx, ctx, inp)
+    timeit("Acquiring forward parameters", get_parameters, ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
-    timeit("Acquiring optimizer parameters", update, ctx,
+    timeit("Acquiring optimizer parameters", jax.pmap(update, ParallelAxes.model), ctx,
            {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()},
            jnp.ones([], dtype=ctx.model.computation_dtype))
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
