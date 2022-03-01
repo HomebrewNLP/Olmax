@@ -38,11 +38,14 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
     def _fn(x):
         body_ctx(ctx, x)
         params = ctx.parameters
+        var = ctx.parameter_variance
         ctx.parameters = {}
-        return params
+        ctx.parameter_variance = {}
+        return params, var
 
     inp = jnp.broadcast_to(inp, (ctx.dims.sizes.heads,) + inp.shape)
-    ctx.parameters = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=0)(inp)
+    ctx.parameters, variance = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=(0, None))(inp)
+    ctx.parameter_variance = {name: var.mean() for name, var in variance.items()}
     ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims.items()}
 
 
