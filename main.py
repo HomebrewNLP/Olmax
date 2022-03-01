@@ -105,7 +105,7 @@ def main():
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {'parameters': {k: 0 for k in ctx.parameters.keys()},
-                 'parameter_variance': {k: None for k in ctx.parameters.keys()},
+                 'parameter_variance': {k: None for k in ctx.parameter_variance.keys()},
                  'data': None, 'current_step': None, 'loss': None, 'top_loss': None}
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition))
