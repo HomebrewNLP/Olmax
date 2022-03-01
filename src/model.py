@@ -99,8 +99,7 @@ def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[
     jnp.ndarray, jnp.ndarray]:
     inp_weight = get_param(ctx, "inp_weight", [in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5,
-                           column_axes=2)
+    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5)
     return inp_weight, out_weight
 
 
