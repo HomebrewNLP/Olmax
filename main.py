@@ -62,16 +62,6 @@ def get_optimizer_state(ctx: Context):
     jnp.ones([], dtype=ctx.model.computation_dtype)
 
 
-def sharding(ctx: Context, dims: typing.List[str], axis: ParallelAxes):
-    mapping = {ParallelAxes.data: ctx.dims.batch, ParallelAxes.model: ctx.dims.heads}
-    if axis not in mapping:
-        return None
-    axis = mapping[axis]
-    if axis not in dims:
-        return None
-    return dims.index(axis)
-
-
 def timeit(text: str, fn, *args, pad=50, **kwargs):
     start_time = time.time()
     print(f'{text}..', end='', flush=True)
@@ -112,10 +102,8 @@ def main():
     timeit("Acquiring optimizer parameters", get_optimizer_state, ctx)
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
-    partition = {
-        'parameters': {name: sharding(ctx, dims, ParallelAxes.model) for name, dims in ctx.parameter_dims.items()},
-        'data': None, 'current_step': None, 'loss': None, 'top_loss': None,
-        'parameter_variance': {name: None for name, dims in ctx.parameter_variance.items()}}
+    partition = {'parameters': 0, 'data': None, 'current_step': None, 'loss': None, 'top_loss': None,
+                 'parameter_variance': None}
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition))
 
