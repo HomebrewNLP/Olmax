@@ -41,7 +41,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
 
     inp = jnp.broadcast_to(inp, (ctx.dims.sizes.heads,) + inp.shape)
     ctx.parameters = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=0)(inp)
-    ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims}
+    ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims.items()}
 
 
 def sharding(ctx: Context, dims: typing.List[str], axis: ParallelAxes):
