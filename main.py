@@ -47,7 +47,6 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
     inp = jnp.broadcast_to(inp, (ctx.dims.sizes.heads,) + inp.shape)
     ctx.parameters, variance = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=(0, 0))(inp)
     ctx.parameter_variance = {name: var.mean() for name, var in variance.items()}
-    ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims.items()}
 
 
 def get_optimizer_state(ctx: Context):
@@ -103,6 +102,9 @@ def main():
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
     timeit("Acquiring optimizer parameters", get_optimizer_state, ctx)
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
+
+    ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims.items()}
+    # It's not used anywhere, but nice to have
 
     partition = {'parameters': {k: 0 for k in ctx.parameters.keys()},
                  'parameter_variance': {k: None for k in ctx.parameter_variance.keys()},
