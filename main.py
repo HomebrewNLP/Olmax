@@ -37,11 +37,26 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
 def get_parameters(ctx: Context, inp: jnp.ndarray):
     def _fn(x):
         body_ctx(ctx, x)
-        return ctx.parameters
+        params = ctx.parameters
+        ctx.parameters = {}
+        return params
 
     inp = jnp.broadcast_to(inp, (ctx.dims.sizes.heads,) + inp.shape)
     ctx.parameters = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=0)(inp)
     ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims.items()}
+
+
+def get_optimizer_state(ctx: Context):
+    def _fn(parameters: typing.Dict[str], grads: typing.Dict[str]):
+        ctx.parameters = parameters
+        update(ctx, grads, jnp.ones((), dtype=ctx.model.computation_dtype))
+        params = ctx.parameters
+        ctx.parameters = {}
+        return params
+
+    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=0)
+    ctx.parameters = pmapped(ctx.parameters, {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
+    jnp.ones([], dtype=ctx.model.computation_dtype)
 
 
 def sharding(ctx: Context, dims: typing.List[str], axis: ParallelAxes):
@@ -91,9 +106,7 @@ def main():
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
     timeit("Acquiring forward parameters", get_parameters, ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items())
-    timeit("Acquiring optimizer parameters", jax.pmap(update, ParallelAxes.model), ctx,
-           {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()},
-           jnp.ones([], dtype=ctx.model.computation_dtype))
+    timeit("Acquiring optimizer parameters", get_optimizer_state, ctx)
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
     partition = {
