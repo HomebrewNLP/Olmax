@@ -59,7 +59,7 @@ def get_optimizer_state(ctx: Context):
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
-    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=0)
+    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=({k: 0 for k in ctx.parameters.keys()},) * 2, out_axes=0)
     ctx.parameters = pmapped(ctx.parameters, {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
     jnp.ones([], dtype=ctx.model.computation_dtype)
 
