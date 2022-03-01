@@ -1,3 +1,4 @@
+import copy
 import time
 import typing
 import warnings
@@ -44,18 +45,19 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         return params, var
 
     inp = jnp.broadcast_to(inp, (ctx.dims.sizes.heads,) + inp.shape)
-    ctx.parameters, variance = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=(0, None))(inp)
+    ctx.parameters, variance = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=(0, 0))(inp)
     ctx.parameter_variance = {name: var.mean() for name, var in variance.items()}
     ctx.parameter_dims = {name: [ctx.dims.heads] + dims for name, dims in ctx.parameter_dims.items()}
 
 
 def get_optimizer_state(ctx: Context):
     def _fn(parameters: typing.Dict[str, jnp.ndarray], grads: typing.Dict[str, jnp.ndarray]):
-        ctx.parameters = parameters
-        update(ctx, grads, jnp.ones((), dtype=ctx.model.computation_dtype))
-        params = ctx.parameters
-        ctx.parameters = {}
-        return params
+        new_ctx = ctx
+        new_ctx.parameters = {}
+        new_ctx = copy.deepcopy(new_ctx)
+        new_ctx.parameters = parameters
+        update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
+        return new_ctx.parameters
 
     pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=0)
     ctx.parameters = pmapped(ctx.parameters, {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
@@ -102,12 +104,11 @@ def main():
     timeit("Acquiring optimizer parameters", get_optimizer_state, ctx)
     buffer_count = sum(util.prod(param.shape) for name, param in ctx.parameters.items()) - parameter_count
 
-    partition = {'parameters': 0, 'data': None, 'current_step': None, 'loss': None, 'top_loss': None,
-                 'parameter_variance': None}
+    partition = {'parameters': {k: 0 for k in ctx.parameters.keys()},
+                 'parameter_variance': {k: None for k in ctx.parameters.keys()},
+                 'data': None, 'current_step': None, 'loss': None, 'top_loss': None}
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition))
-
-    global_start = time.time()
 
     timeit("Compiling model and performing first step", step, next(data))
     timeit("Running second step", step, next(data))
