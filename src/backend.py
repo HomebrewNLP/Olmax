@@ -115,14 +115,14 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         if std is None and mean is None:
             param, var = stacked_orthogonal_init(ctx, str_shape, column_axes, split_dims)
             param *= scale * post_variance_scale
-            ctx.parameter_variance[name] = var * scale ** 2 * learning_rate_scale
+            ctx.parameter_variance[prefix_name] = var * scale ** 2 * learning_rate_scale
         else:
             param = random.normal(ctx.prng_key, shape, ctx.model.storage_dtype)
             if std is not None:
                 param *= std
             if mean is not None:
                 param += mean
-            ctx.parameter_variance[name] = learning_rate_scale
+            ctx.parameter_variance[prefix_name] = learning_rate_scale
         param = param.astype(ctx.model.storage_dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
