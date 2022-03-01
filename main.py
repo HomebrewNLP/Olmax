@@ -51,17 +51,17 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
 
 
 def get_optimizer_state(ctx: Context):
-    def _fn(parameters: typing.Dict[str, jnp.ndarray], grads: typing.Dict[str, jnp.ndarray]):
+    def _fn(parameters: typing.Dict[str, jnp.ndarray]):
         new_ctx = ctx
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
         new_ctx.parameters = parameters
+        grads = {name: jnp.zeros_like(param) for name, param in parameters.items()}
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
-    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=({k: 0 for k in ctx.parameters.keys()},) * 2, out_axes=0)
-    ctx.parameters = pmapped(ctx.parameters, {name: jnp.zeros_like(param) for name, param in ctx.parameters.items()})
-    jnp.ones([], dtype=ctx.model.computation_dtype)
+    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=({k: 0 for k in ctx.parameters.keys()}), out_axes=0)
+    ctx.parameters = pmapped(ctx.parameters)
 
 
 def timeit(text: str, fn, *args, pad=50, **kwargs):
