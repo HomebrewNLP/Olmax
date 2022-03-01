@@ -57,7 +57,7 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
     weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
                                        ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
-                       column_axes=2, scale=scale)
+                       column_axes=2, scale=scale * ctx.dims.sizes.heads ** -0.25)
     if ctx.is_initializing:
         return inp
     return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
@@ -98,8 +98,10 @@ def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[
     jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [in_dim, out_dim], scale=1 / ctx.model.activation_std)
-    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5)
+    inp_weight = get_param(ctx, "inp_weight", [in_dim, out_dim],
+                           scale=1 / ctx.model.activation_std * ctx.dims.sizes.heads ** -0.25)
+    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim],
+                           scale=ctx.dims.sizes.depth ** -0.5 * ctx.dims.sizes.heads ** -0.25)
     return inp_weight, out_weight
 
 
