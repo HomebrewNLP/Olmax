@@ -62,11 +62,16 @@ def assign(ctx: Context, name: str, inp: jnp.ndarray):
     ctx.parameters[name] = inp
 
 
+def normal(ctx: Context, shape: typing.Sequence[int]):
+    ctx.prng_key, key = random.split(ctx.prng_key)
+    return random.normal(key, shape, ctx.model.storage_dtype)
+
+
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
     axes = tuple([shape[c] for c in column_axes])
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
-    out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.storage_dtype))
+    out, r = jnp.linalg.qr(normal(ctx, matrix_shape))
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
     if n_rows < n_cols:
         out = out.T
@@ -117,7 +122,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
             param *= scale * post_variance_scale
             ctx.parameter_variance[prefix_name] = var * scale ** 2 * learning_rate_scale
         else:
-            param = random.normal(ctx.prng_key, shape, ctx.model.storage_dtype)
+            param = normal(ctx, shape)
             if std is not None:
                 param *= std
             if mean is not None:
