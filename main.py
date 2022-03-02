@@ -38,7 +38,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
 def get_parameters(ctx: Context, inp: jnp.ndarray):
     def _fn(x: jnp.ndarray, idx: jnp.ndarray):
         ctx.seed += idx
-        ctx.prng_key = random.PRNGKey(ctx.seed)
+        ctx.prng_key = jax.random.PRNGKey(ctx.seed)
         body_ctx(ctx, x)
         params = ctx.parameters
         var = ctx.parameter_variance
