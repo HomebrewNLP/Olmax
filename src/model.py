@@ -142,8 +142,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
-                     learning_rate_scale=1 / (ctx.dims.sizes.heads * ctx.dims.sizes.features_per_head))
+    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0)
     if ctx.is_initializing:
         return inp
     return matmul(inp, embd)
