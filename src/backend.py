@@ -3,8 +3,6 @@ import typing
 import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
-from jax.experimental import PartitionSpec
-from jax.experimental import pjit
 
 from .context import Context
 
@@ -25,17 +23,18 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
 
 def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
              padding: typing.List[typing.Tuple[int, int]]) -> jnp.ndarray:
+    # TODO: Validate what's happening in the backend
     strides = (1,) * (len(window_shape) + 2)
     dims = (1,) + tuple(window_shape) + (1,)
     padding = ((0, 0),) + tuple(padding) + ((0, 0),)
     return lax.reduce_window(inputs, 0, lax.add, dims, strides, padding)
 
 
-def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]]):
+def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
     ndim = weight.ndim
     dimension_numbers = (0, ndim - 1) + tuple(range(1, ndim - 1))
     dimension_numbers = lax.ConvDimensionNumbers(dimension_numbers, tuple(range(ndim)), dimension_numbers)
-    return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding,
+    return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
                                     dimension_numbers=dimension_numbers, precision='fastest')
 
 
@@ -54,90 +53,92 @@ def dims_to_shape(ctx: Context, dims: typing.List[str]) -> typing.List[int]:
     return [ctx.dims.sizes[d] for d in dims]
 
 
-def transpose(inp: jnp.ndarray, dims: INT_OR_TUPLE) -> jnp.ndarray:
-    return inp.transpose(pos_dim(inp, dims))
-
-
 def prefixed_name(ctx: Context, name: str):
     return ctx.add_to_prefix(name, count=False).global_prefix
 
 
 def assign(ctx: Context, name: str, inp: jnp.ndarray):
-    ctx.parameters[prefixed_name(ctx, name)] = inp
+    name = prefixed_name(ctx, name)
+    ctx.parameters[name] = inp
 
 
-def is_intermediate(ctx, inp: jnp.ndarray) -> bool:
-    return inp.shape[-1] != ctx.dims.sizes.features_per_head
-
-
-def get_feature_dim(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return ctx.dims.intermediate_replicated if is_intermediate(ctx, inp) else ctx.dims.features_per_head
-
-
-def shard(tensor: jnp.ndarray, head: typing.Optional[int] = -2, batch: typing.Optional[int] = 0) -> jnp.ndarray:
-    spec: typing.List[typing.Optional[str]] = [None] * tensor.ndim
-    if isinstance(batch, int):
-        spec[batch] = "data_parallel"
-    if isinstance(head, int):
-        spec[head] = "model_parallel"
-    try:
-        return pjit.with_sharding_constraint(tensor, PartitionSpec(*spec))
-    except ValueError as e:
-        e_str = str(e)
-        if ("One of with_sharding_constraint arguments was given the resource assignment of PartitionSpec(" in e_str and
-                ", but resource axis " in e_str and "is undefined. Did you forget to declare the mesh?" in e_str):
-            return tensor
-        raise e
+def normal(ctx: Context, shape: typing.Sequence[int]):
+    ctx.prng_key, key = random.split(ctx.prng_key)
+    return random.normal(key, shape, ctx.model.storage_dtype)
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
     axes = tuple([shape[c] for c in column_axes])
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
-    out, r = jnp.linalg.qr(random.normal(ctx.prng_key, matrix_shape, ctx.model.dtype))
+    out, r = jnp.linalg.qr(normal(ctx, matrix_shape))
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
     if n_rows < n_cols:
         out = out.T
-    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes)
+    return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.storage_dtype)
 
 
-def default(value: typing.Any, default_value: typing.Any) -> typing.Any:
-    return default_value if value is None else value
+def stacked_orthogonal_init(ctx: Context, str_shape: typing.List[str], column_axes: int,
+                            split_dims: typing.List[str]) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    split_dims = split_dims.copy()
+    while split_dims and split_dims[0] not in str_shape:
+        split_dims.pop(0)
+    if not split_dims:
+        shape = dims_to_shape(ctx, str_shape)
+        out = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+        return out, out.var()
+    dim = split_dims.pop(0)
+    dim_index = str_shape.index(dim)
+    new_shape = str_shape.copy()
+    new_shape.remove(dim)
+
+    out = []
+    var = 0
+    size = ctx.dims.sizes[dim]
+    for _ in range(size):
+        new_out, new_var = stacked_orthogonal_init(ctx, new_shape, column_axes, split_dims)
+        out.append(new_out)
+        var += new_var
+    return jnp.stack(out, dim_index), var / size
 
 
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
-              std: typing.Optional[float] = None, mean: typing.Optional[float] = None,
-              column_axes: int = 1, scale: float = 1.) -> jnp.ndarray:
+              std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
+              scale: float = 1., post_variance_scale: float = 1, split_dims: typing.Optional[typing.List[str]] = None,
+              depth_indexing: bool = False, idx: typing.Optional[jnp.ndarray] = None,
+              learning_rate_scale: float = 1) -> jnp.ndarray:
+    if split_dims is None:
+        split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
+    depth_indexing &= not ctx.model.weight_sharing
+    if depth_indexing:
+        assert idx is not None, "idx has to be set when depth indexing is true"
+        str_shape = [ctx.dims.depth] + str_shape
+    shape = dims_to_shape(ctx, str_shape)
     if prefix_name not in ctx.parameters:
         ctx.parameter_dims[prefix_name] = str_shape
-        shape = dims_to_shape(ctx, str_shape)
         if std is None and mean is None:
-            if ctx.dims.depth in str_shape:
-                del shape[str_shape.index(ctx.dims.depth)]
-                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
-                                   for _ in range(ctx.dims.sizes.depth)], str_shape.index(ctx.dims.depth))
-            else:
-                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) * scale
+            param, var = stacked_orthogonal_init(ctx, str_shape, column_axes, split_dims)
+            param *= scale * post_variance_scale
+            ctx.parameter_variance[prefix_name] = var * scale ** 2 * learning_rate_scale
         else:
-            param = random.normal(ctx.prng_key, shape, ctx.model.dtype)
+            param = normal(ctx, shape)
             if std is not None:
                 param *= std
             if mean is not None:
                 param += mean
+            ctx.parameter_variance[prefix_name] = learning_rate_scale
+        param = param.astype(ctx.model.storage_dtype)
         assign(ctx, name, param)
-    return ctx.parameters[prefix_name]
+    param = ctx.parameters[prefix_name]
+    if depth_indexing:
+        param = param[idx].reshape(param.shape[1:])
+    return param.astype(ctx.model.computation_dtype)
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
     return get_param(ctx, name, shape, 0, 0)
 
 
-def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
-    base = ["one"] * ndim
-    base[dim_idx] = dim_name
-    return base
-
-
-def base_spec(inp: jnp.ndarray) -> str:
-    return ''.join(chr(ord('a') + i) for i in range(inp.ndim))
+def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
+    return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]

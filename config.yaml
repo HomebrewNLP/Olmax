@@ -1,25 +1,25 @@
 data:
-    path: gs://ggpt4-us/the-char-pile/*
     datasets_used_per_step: 128
     interleaved_datasets: 256
     parallel_workers: 128
     prefetch_buffer: 2
 dims:
     sizes:
-        batch: 8192
-        depth: 2
-        features_per_head: 128
-        intermediate_replicated: 128
-        intermediate_parallel: 128
+        sequence: 65536
+        batch: 8
+        depth: 4
+        features_per_head: 256
 optimizer:
-    exponential_decay: 2.0e-05
-    gradient_clip: 0.005
-    learning_rate: 0.0005
+    exponential_decay: 1.0e-05
+    gradient_clip: 0.01
+    learning_rate: 0.001
     warmup_end: 4096
 training:
-    device_steps: 4
-    device_unroll: 4
+    device_steps: 32
+    device_unroll: 1
     trace:
         do_trace: false
         start_step: 2
         stop_step: 8
+model:
+    feed_forward_factor: 2
