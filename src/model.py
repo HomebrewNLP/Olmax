@@ -33,21 +33,23 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     weight = get_param(ctx, "scale", [ctx.dims.one], std=0)
 
     @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
+    def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
         out = src - mean
         scale = norm(ctx, out, -1, True) * src.shape[-1] ** 0.5
+        scale = scale * (1 + wgt)
         out = out * scale
 
-        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+            d_wgt = (dy * out).sum() / (1 + wgt)
             dy = dy * scale
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
-            return dy
+            return dy, d_wgt
 
         return out, _grad
 
-    return _fn(inp) * (1 + weight)
+    return _fn(inp, weight)
 
 
 def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -92,7 +94,6 @@ def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = normalize(ctx, inp)
     mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
     return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5)
 
 
@@ -112,7 +113,6 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = normalize(ctx, inp)
     mid = mm(ctx, inp, inp_weight)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
     out = mm(ctx, mid, out_weight)
     return out
 
@@ -125,7 +125,6 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     mid = mm(ctx, inp, inp_weight)
     mid = psum(ctx, mid)
     mid = activate(ctx, mid)
-    mid = normalize(ctx, mid)
     out = mm(ctx, mid, out_weight)
     return out
 
