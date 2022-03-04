@@ -40,7 +40,7 @@ def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         out = out * scale
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            d_wgt = (dy * out).sum()
+            d_wgt = (dy * out).sum().reshape((1,))
             dy = dy * scale * (1 + wgt)
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
