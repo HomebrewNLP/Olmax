@@ -16,6 +16,7 @@ from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
 from src.utils.wandb import WandbLog
+from src.utils.checkpoint import write_ckpt
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -142,7 +143,8 @@ def main():
                 jax.profiler.start_trace(ctx.training.trace.output_path)
             if idx == ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
-
+        if idx % ctx.training.checkpoint_interval == 0:
+            write_ckpt(ctx)
 
 if __name__ == '__main__':
     main()

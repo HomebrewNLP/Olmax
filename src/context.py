@@ -60,7 +60,7 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 
 
 class DataContext(DataClass):
-    path: str = "gs://obst-euw4a-aa/the-small-chunk-char-pile/*"
+    path: str = "gs://ggpt4/the-char-pile/*"
     shuffle_buffer: int = 0
     parallel_workers: int = 128
     interleaved_datasets: int = 1024
@@ -157,6 +157,8 @@ class Model(DataClass):
 
 
 class Training(DataClass):
+    checkpoint_path: str = "gs://ggpt4/homebrewnlp-checkpoint/"
+    checkpoint_interval: float = 16384
     z_loss: float = 0.01
     loss_top_p: float = 0.4
     loss_top_snap: int = 128  # snap top_p * batch to closest multiple
