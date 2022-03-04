@@ -73,14 +73,14 @@ class DataContext(DataClass):
 
 
 class DimSizes(DataClass):
-    batch: int = 256
+    batch: int = 8
     full_conv_kernel: int = 9
     depthwise_conv_kernel: int = 49
-    features_per_head: int = 512
+    features_per_head: int = 256
     heads: int = 8
-    sequence: int = 256
+    sequence: int = 65536
     one: int = 1
-    depth: int = 32
+    depth: int = 4
 
     def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
         self.vocab: int = data.vocab_size
@@ -129,13 +129,13 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
-    learning_rate: float = 0.01
+    learning_rate: float = 0.001
     gradient_clip: float = 0.01
     adam_beta1: float = 0.9
     adam_beta2: float = 0.99
     weight_decay: float = 0.1
     warmup_end: int = 4096
-    exponential_decay: float = 1e-4
+    exponential_decay: float = 1e-5
 
 
 class Model(DataClass):
@@ -144,24 +144,19 @@ class Model(DataClass):
     scan_unroll: int = 1
     norm_eps: float = 1e-5
     group_linear_factor: int = 2
-    experts: int = 1  # TODO: Add dense MoE
-    momentumnet_beta: float = 0.9
-    depth_unroll: int = 8
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
     masked_attention: bool = True
     weight_sharing: bool = False
     feed_forward_factor: int = 2
     storage_dtype: str = "float32"  # valid jax.numpy.storage_dtype
-    computation_dtype: str = "float32"
+    computation_dtype: str = "bfloat16"
 
 
 class Training(DataClass):
     checkpoint_path: str = "gs://ggpt4/homebrewnlp-checkpoint/"
     checkpoint_interval: float = 16384
     z_loss: float = 0.01
-    loss_top_p: float = 0.4
-    loss_top_snap: int = 128  # snap top_p * batch to closest multiple
     device_steps: int = 1024
     device_unroll: int = 16
     steps: int = 2 ** 16
