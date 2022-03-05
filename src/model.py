@@ -90,12 +90,10 @@ def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5)
 
 
-def feed_forward_features(ctx: Context, in_dim: str, out_dim: str) -> typing.Tuple[
-    jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [in_dim, out_dim],
-                           scale=1 / ctx.model.activation_std * ctx.dims.sizes.heads ** -0.25)
-    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim],
-                           scale=ctx.dims.sizes.depth ** -0.5 * ctx.dims.sizes.heads ** -0.25)
+def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, inp_scale: float = 1
+                          ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    inp_weight = get_param(ctx, "inp_weight", [in_dim, out_dim], scale=1 / ctx.model.activation_std * inp_scale)
+    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5)
     return inp_weight, out_weight
 
 
@@ -112,8 +110,8 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
-    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated)
-
+    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated,
+                                                   1 / ctx.dims.sizes.heads)
     inp = scale_norm(ctx, inp)
     mid = mm(ctx, inp, inp_weight)
     mid = psum(ctx, mid)
