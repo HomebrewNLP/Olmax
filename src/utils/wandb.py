@@ -17,7 +17,7 @@ class WandbLog:
         self.prev += self.idx
 
         rate = step / (time.time() - self.start_time)
-        tokens_per_day = step * 3600 * 24 * rate * wctx.ctx.dims.sizes.batch * wctx.ctx.dims.sizes.sequence
+        tokens_per_day = 3600 * 24 * rate * wctx.ctx.dims.sizes.batch * wctx.ctx.dims.sizes.sequence
 
         self.run.log({"Loss/Current": curr_loss.astype(float),
                       "Loss/Mean": self.mean_loss.astype(float),
