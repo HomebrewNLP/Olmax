@@ -4,7 +4,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, INT_OR_TUPLE, dot, matmul, conv, sum_pool
+from src.backend import get_param, dot, matmul, conv, sum_pool
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -17,36 +17,30 @@ def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
 
 
-def norm(ctx: Context, inp: jnp.ndarray, dims: INT_OR_TUPLE, keepdims=False) -> jnp.ndarray:
-    square = jnp.square(inp).sum(dims, keepdims=keepdims)
-    return lax.rsqrt(ctx.model.norm_eps + square)
-
-
 def psum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
     return lax.psum(inp, ParallelAxes.model)
 
 
-def normalize(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def scale_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     weight = get_param(ctx, "scale", [ctx.dims.one], std=0)
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         mean = src.mean(-1, keepdims=True)
-        out = src - mean
-        scale = norm(ctx, out, -1, True) * src.shape[-1] ** 0.5
-        out = out * scale
+        std = lax.rsqrt(jnp.square(src).mean(-1, keepdims=True) - jnp.square(mean))
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+            out = (src - mean) * std
             d_wgt = (dy * out).sum().reshape((1,))
-            dy = dy * scale * (1 + wgt)
+            dy = dy * std * (1 + wgt)
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
             return dy, d_wgt
 
-        return out * (1 + wgt), _grad
+        return (src - mean) * std * (1 + wgt), _grad
 
     return _fn(inp, weight)
 
@@ -90,7 +84,7 @@ def rezero(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_convolution")
 
-    inp = normalize(ctx, inp)
+    inp = scale_norm(ctx, inp)
     mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std)
     mid = activate(ctx, mid)
     return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5)
@@ -109,7 +103,7 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel)
 
-    inp = normalize(ctx, inp)
+    inp = scale_norm(ctx, inp)
     mid = mm(ctx, inp, inp_weight)
     mid = activate(ctx, mid)
     out = mm(ctx, mid, out_weight)
@@ -120,7 +114,7 @@ def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("feed_forward")
     inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated)
 
-    inp = normalize(ctx, inp)
+    inp = scale_norm(ctx, inp)
     mid = mm(ctx, inp, inp_weight)
     mid = psum(ctx, mid)
     mid = activate(ctx, mid)
@@ -136,7 +130,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features_per_head], std=1e-5)
     out = jnp.take(inp_embd, inp, 0)
-    return normalize(ctx, out)
+    return scale_norm(ctx, out)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
