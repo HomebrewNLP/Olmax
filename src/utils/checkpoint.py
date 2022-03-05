@@ -48,7 +48,7 @@ def write_ckpt(ctx: Context):
         cpu_flattened_chunked = (cpu_flattened[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(pieces))
 
         with multiprocessing.pool.ThreadPool(pieces) as p:
-            write_fn = functools.partial(write, ckpt_dir=f"{ctx.training.checkpoint_path}/")
+            write_fn = functools.partial(write, ckpt_dir=f"{ctx.training.checkpoint_path}/{shard}_")
             list((p.imap_unordered(write_fn, enumerate(cpu_flattened_chunked))))
 
 
