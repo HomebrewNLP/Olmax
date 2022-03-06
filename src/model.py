@@ -1,10 +1,11 @@
 import copy
+import operator
 import typing
 
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, dot, matmul, conv, sum_pool
+from src.backend import get_param, dot, matmul, conv
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -133,8 +134,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
-                     learning_rate_scale=1 / (ctx.dims.sizes.features_per_head * ctx.dims.sizes.heads))
+    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0)
     if ctx.is_initializing:
         return inp
     return matmul(inp, embd)
