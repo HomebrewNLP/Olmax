@@ -47,7 +47,14 @@ def scale_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return sum_pool(inp, [0, ctx.model.device_halo_size], [(0, 0), (ctx.model.device_halo_size // 2,) * 2])
+    out = inp
+    for shift in [operator.add, operator.sub]:
+        for halo_idx in range(1, 1 + ctx.model.device_halo_size // 2):
+            permutation = []
+            for device_idx in range(ctx.dims.sizes.heads):
+                permutation.append((device_idx, shift(device_idx, halo_idx) % ctx.dims.sizes.heads))
+            out = out + lax.ppermute(inp, ParallelAxes.model, permutation)
+    return out
 
 
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
