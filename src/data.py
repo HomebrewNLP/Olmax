@@ -1,7 +1,7 @@
 import random
 
 import tensorflow as tf
-from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
+from tensorflow.data.experimental import AutoShardPolicy
 from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
 from .context import Context
@@ -71,9 +71,8 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     if ctx.data.prefetch_buffer > 0:
         dset = dset.prefetch(ctx.data.prefetch_buffer)
     options = tf.data.Options()
-    options.experimental_deterministic = False
-    options.experimental_optimization.autotune = True
-    options.experimental_optimization.autotune_buffers = True
+    options.deterministic = False
+    options.experimental_optimization.apply_default_optimizations = True
     options.experimental_optimization.filter_fusion = True
     options.experimental_optimization.map_and_batch_fusion = True
     options.experimental_optimization.map_and_filter_fusion = True
@@ -82,9 +81,9 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     options.experimental_optimization.noop_elimination = True
     options.experimental_optimization.parallel_batch = True
     options.experimental_optimization.shuffle_and_repeat_fusion = True
-    options.experimental_optimization.apply_default_optimizations = False
-    options.experimental_threading.max_intra_op_parallelism = 1
-    options.experimental_threading.private_threadpool_size = 48
+    options.threading.max_intra_op_parallelism = 1
+    options.threading.private_threadpool_size = 96
+    options.experimental_slack = True
     options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
     dset = dset.with_options(options)
     return dset.as_numpy_iterator()
