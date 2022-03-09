@@ -60,7 +60,7 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
     weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
                                        ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
-                       column_axes=2, scale=scale * ctx.dims.sizes.heads ** -0.25)
+                       column_axes=2, scale=scale)
     if ctx.is_initializing:
         return inp
     return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
@@ -84,8 +84,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
 
 def rezero(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("rezero")
-    scale = get_param(ctx, "scale", [ctx.dims.one], std=0,
-                      learning_rate_scale=ctx.model.rezero_learning_rate_scale)
+    scale = get_param(ctx, "scale", [ctx.dims.one], std=0, learning_rate_scale=ctx.model.rezero_learning_rate_scale)
     return inp * scale
 
 
