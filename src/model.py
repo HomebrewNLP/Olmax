@@ -5,7 +5,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, dot, matmul, conv
+from src.backend import get_param, dot, matmul, conv as lax_conv
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -57,50 +57,43 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return out
 
 
-def conv_weight(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float):
-    weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
-                                       ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
-                       column_axes=2, scale=scale)
-    if ctx.is_initializing:
-        return inp
-    return conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
-
-
-def mm(ctx: Context, inp: jnp.ndarray, weight: jnp.ndarray):
-    if ctx.is_initializing:
-        return inp
-    return dot(inp, weight, -1, 0, (), ())
-
-
-def full_conv(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("full_conv")
-    return conv_weight(ctx, inp, False, ctx.dims.full_conv_kernel, scale)
-
-
-def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("depthwise_conv")
-    return conv_weight(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale)
-
-
-def rezero(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def rezero(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("rezero")
-    scale = get_param(ctx, "scale", [ctx.dims.one], std=0, learning_rate_scale=ctx.model.rezero_learning_rate_scale)
+    scale = get_param(ctx, "scale", [ctx.dims.one], std=0,
+                      learning_rate_scale=ctx.model.rezero_learning_rate_scale * scale)
     return inp * scale
+
+
+def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
+    weight = get_param(ctx, "weight", [ctx.dims.intermediate_replicated,
+                                       ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
+                       column_axes=2)
+    weight = rezero(ctx, weight, ctx.dims.sizes.depth ** -0.5)
+    if ctx.is_initializing:
+        return inp
+    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
+
+
+def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("full_conv")
+    return conv(ctx, inp, False, ctx.dims.full_conv_kernel)
+
+
+def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("depthwise_conv")
+    return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel)
 
 
 def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("linear")
-    return mm(ctx, inp, get_param(ctx, "weight", shape, scale=scale))
+    return dot(inp, get_param(ctx, "weight", shape, scale=scale), -1, 0)
 
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
-    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate_replicated],
-            1 / ctx.model.activation_std / ctx.dims.sizes.heads)
-
+    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate_replicated], 1 / ctx.model.activation_std)
     mid = activate(ctx, linear(*args)) * linear(*args) + linear(*args)
-    out = depthwise_conv(ctx, mid, 1 / ctx.model.activation_std)
-    return rezero(ctx, out)
+    return depthwise_conv(ctx, mid)
 
 
 def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -109,8 +102,7 @@ def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
                  1 / ctx.model.activation_std / ctx.dims.sizes.heads)
     mid = psum(ctx, mid)
     mid = activate(ctx, mid)
-    out = full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5)
-    return rezero(ctx, out)
+    return full_conv(ctx, mid)
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
