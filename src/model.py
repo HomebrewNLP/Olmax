@@ -57,7 +57,7 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return out
 
 
-def rezero(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
+def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("rezero")
     scale = get_param(ctx, "scale", [ctx.dims.one], std=0,
                       learning_rate_scale=ctx.model.rezero_learning_rate_scale * scale)

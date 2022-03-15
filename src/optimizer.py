@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from .backend import zero_param, assign
+from .backend import zero_param, assign, prefixed_name
 from .context import Context
 
 
@@ -19,24 +19,41 @@ def debias(x: jnp.ndarray, current_step: jnp.ndarray, beta: float) -> jnp.ndarra
     return x * (1 - beta ** current_step)
 
 
-def zero_param_like(ctx: Context, new_name: str, original_name: jnp.ndarray) -> jnp.ndarray:
+def zero_param_like(ctx: Context, new_name: str, original_name: str) -> jnp.ndarray:
     return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name, []))
 
 
-def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
-        prefix: str) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
+def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
+    base = ["one"] * ndim
+    base[dim_idx] = dim_name
+    return base
+
+
+def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("sm3", count=False)
+    dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
+    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
+    buffer = [weight_update]
+
+    for i, d in enumerate(dims[1:], 1):
+        buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i)))
+        weight_update = jnp.minimum(weight_update, buffer[-1])
+
+    weight_update = weight_update + jnp.square(grad)
+
+    for i in range(grad.ndim):
+        new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
+        ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
+
+    return grad * optimizer_rsqrt(weight_update)
+
+
+def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix(f"momentum", count=False)
     state = zero_param_like(ctx, "momentum_buffer", param_name)
-    new_state = weighted_add(state, inp, beta)
+    new_state = grad + state * ctx.optimizer.momentum_beta
     assign(ctx, "momentum_buffer", new_state)
-    return debias(new_state, current_step, beta)
-
-
-def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("adam", count=False)
-    exp_avg = ema(ctx, param_name, grad, current_step, ctx.optimizer.adam_beta1, "avg")
-    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, ctx.optimizer.adam_beta2, "avg_sq")
-    return exp_avg * optimizer_rsqrt(exp_avg_sq)
+    return grad + new_state * ctx.optimizer.momentum_type
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
@@ -65,8 +82,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             continue
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        updated_weight = adam(inner_ctx, param_name, grad, current_step)
+        grad = sm3(inner_ctx, param_name, grad)
+        grad = momentum(inner_ctx, param_name, grad)
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
-        updated_weight *= parameter_lr
-        updated_weight += (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
-        ctx.parameters[param_name] = updated_weight
+        grad *= parameter_lr
+        ctx.parameters[param_name] = grad + (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
