@@ -53,7 +53,7 @@ def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     state = zero_param_like(ctx, "momentum_buffer", param_name)
     new_state = grad + state * ctx.optimizer.momentum_beta
     assign(ctx, "momentum_buffer", new_state)
-    return grad + new_state * ctx.optimizer.momentum_type
+    return grad + new_state
 
 
 def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
@@ -98,8 +98,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             continue
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        if "norm" in param_name or "rezero" in param_name or grad.ndim < 2:  # Do adam update for small parameters
-            grad = adam(inner_ctx, param_name, grad, current_step)
+        if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
+            grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
         else:
             grad = sm3(inner_ctx, param_name, grad)
             grad = momentum(inner_ctx, param_name, grad)
