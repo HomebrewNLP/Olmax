@@ -172,6 +172,11 @@ class Context(DataClass):
     wandb: WandB = WandB()
 
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+        self.data = DataContext()
+        self.optimizer = Optimizer()
+        self.model = Model()
+        self.training = Training()
+        self.wandb = WandB()
         self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
