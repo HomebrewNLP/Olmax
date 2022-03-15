@@ -88,43 +88,29 @@ def rezero(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return inp * scale
 
 
-def conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("group_convolution")
-
-    inp = scale_norm(ctx, inp)
-    mid = depthwise_conv(ctx, inp, 1 / ctx.model.activation_std)
-    mid = activate(ctx, mid)
-    return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5)
-
-
-def feed_forward_features(ctx: Context, in_dim: str, out_dim: str, inp_scale: float = 1
-                          ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    inp_weight = get_param(ctx, "inp_weight", [in_dim, out_dim], scale=1 / ctx.model.activation_std * inp_scale)
-    out_weight = get_param(ctx, "out_weight", [out_dim, in_dim], scale=ctx.dims.sizes.depth ** -0.5)
-    return inp_weight, out_weight
+def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("linear")
+    return mm(ctx, inp, get_param(ctx, "weight", shape, scale=scale))
 
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
-    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_parallel)
+    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate_replicated],
+            1 / ctx.model.activation_std / ctx.dims.sizes.heads)
 
-    inp = scale_norm(ctx, inp)
-    mid = mm(ctx, inp, inp_weight)
-    mid = activate(ctx, mid)
-    out = mm(ctx, mid, out_weight)
-    return out
+    mid = activate(ctx, linear(*args)) * linear(*args) + linear(*args)
+    out = depthwise_conv(ctx, mid, 1 / ctx.model.activation_std)
+    return rezero(ctx, out)
 
 
-def feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("feed_forward")
-    inp_weight, out_weight = feed_forward_features(ctx, ctx.dims.features_per_head, ctx.dims.intermediate_replicated,
-                                                   1 / ctx.dims.sizes.heads)
-    inp = scale_norm(ctx, inp)
-    mid = mm(ctx, inp, inp_weight)
+def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("reduced_feed_forward")
+    mid = linear(ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate_replicated],
+                 1 / ctx.model.activation_std / ctx.dims.sizes.heads)
     mid = psum(ctx, mid)
     mid = activate(ctx, mid)
-    out = mm(ctx, mid, out_weight)
-    return out
+    out = full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5)
+    return rezero(ctx, out)
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
@@ -215,8 +201,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.sizes.depth):
-        src = reversible(ctx, conv_block, src)
-        src = reversible(ctx, feed_forward, src)
+        src = reversible(ctx, group_feed_forward, src)
+        src = reversible(ctx, reduced_feed_forward, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
