@@ -65,8 +65,8 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
 
 
 def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
-    weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
-                                       ctx.dims.one if depthwise else ctx.dims.intermediate, conv_kernel],
+    weight = get_param(ctx, "weight", [ctx.dims.intermediate,
+                                       ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
                        column_axes=2)
     weight = rezero(ctx, weight, ctx.dims.sizes.depth ** -0.5)
     if ctx.is_initializing:
