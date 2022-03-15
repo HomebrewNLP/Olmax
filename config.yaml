@@ -6,13 +6,13 @@ data:
 dims:
     sizes:
         sequence: 65536
-        batch: 8
+        batch: 32
         depth: 4
         features_per_head: 256
 optimizer:
     exponential_decay: 1.0e-05
-    gradient_clip: 0.01
-    learning_rate: 0.001
+    gradient_clip: 0.001
+    learning_rate: 0.01
     warmup_end: 4096
 training:
     device_steps: 32
