@@ -56,6 +56,22 @@ def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     return grad + new_state * ctx.optimizer.momentum_type
 
 
+def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
+        prefix: str) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
+    state = zero_param_like(ctx, "momentum_buffer", param_name)
+    new_state = weighted_add(state, inp, beta)
+    assign(ctx, "momentum_buffer", new_state)
+    return debias(new_state, current_step, beta)
+
+
+def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("adam", count=False)
+    exp_avg = ema(ctx, param_name, grad, current_step, ctx.optimizer.adam_beta1, "avg")
+    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, ctx.optimizer.adam_beta2, "avg_sq")
+    return exp_avg * optimizer_rsqrt(exp_avg_sq)
+
+
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
     wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
@@ -82,8 +98,11 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             continue
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        grad = sm3(inner_ctx, param_name, grad)
-        grad = momentum(inner_ctx, param_name, grad)
+        if "norm" in param_name or "rezero" in param_name or grad.ndim < 2:  # Do adam update for small parameters
+            grad = adam(inner_ctx, param_name, grad, current_step)
+        else:
+            grad = sm3(inner_ctx, param_name, grad)
+            grad = momentum(inner_ctx, param_name, grad)
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
