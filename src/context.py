@@ -84,8 +84,7 @@ class DimSizes(DataClass):
 
     def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
         self.vocab: int = data.vocab_size
-        self.intermediate_replicated = int(self.features_per_head * group_linear_factor)
-        self.intermediate_parallel = int(self.intermediate_replicated * feed_forward_factor)
+        self.intermediate = int(self.features_per_head * group_linear_factor)
 
     def __getitem__(self, item: str):
         return getattr(self, item)
@@ -100,8 +99,7 @@ class Dims(DataClass):
     depth: str = "depth"
     sequence: str = "sequence"
     anonymous_sequence: str = "anonymous_sequence"
-    intermediate_replicated: str = "intermediate_replicated"
-    intermediate_parallel: str = "intermediate_parallel"
+    intermediate: str = "intermediate"
     one: str = "one"
     vocab: str = "vocab"
 

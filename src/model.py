@@ -65,8 +65,8 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
 
 
 def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
-    weight = get_param(ctx, "weight", [ctx.dims.intermediate_replicated,
-                                       ctx.dims.one if depthwise else ctx.dims.features_per_head, conv_kernel],
+    weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
+                                       ctx.dims.one if depthwise else ctx.dims.intermediate, conv_kernel],
                        column_axes=2)
     weight = rezero(ctx, weight, ctx.dims.sizes.depth ** -0.5)
     if ctx.is_initializing:
@@ -91,14 +91,14 @@ def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
-    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate_replicated], 1 / ctx.model.activation_std)
+    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate], 1 / ctx.model.activation_std)
     mid = activate(ctx, linear(*args)) * linear(*args) + linear(*args)
     return depthwise_conv(ctx, mid)
 
 
 def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("reduced_feed_forward")
-    mid = linear(ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate_replicated],
+    mid = linear(ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate],
                  1 / ctx.model.activation_std / ctx.dims.sizes.heads)
     mid = psum(ctx, mid)
     mid = activate(ctx, mid)
