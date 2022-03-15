@@ -85,6 +85,7 @@ class DimSizes(DataClass):
     def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
         self.vocab: int = data.vocab_size
         self.intermediate = int(self.features_per_head * group_linear_factor)
+        self.multiplier: int = group_linear_factor
 
     def __getitem__(self, item: str):
         return getattr(self, item)
@@ -101,6 +102,7 @@ class Dims(DataClass):
     anonymous_sequence: str = "anonymous_sequence"
     intermediate: str = "intermediate"
     one: str = "one"
+    multiplier: str = "multiplier"
     vocab: str = "vocab"
 
     def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
