@@ -86,7 +86,10 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("linear")
-    return dot(inp, get_param(ctx, "weight", shape, scale=scale), -1, 0)
+    weight = get_param(ctx, "weight", shape, scale=scale)
+    if ctx.is_initializing:
+        return inp
+    return dot(inp, weight, -1, 0)
 
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
