@@ -66,7 +66,7 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float) -> jnp.ndarray:
 
 def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
     weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
-                                       ctx.dims.multiplier if depthwise else ctx.dims.intermediate, conv_kernel],
+                                       ctx.dims.one if depthwise else ctx.dims.intermediate, conv_kernel],
                        column_axes=2)
     weight = rezero(ctx, weight, ctx.dims.sizes.depth ** -0.5)
     if ctx.is_initializing:
@@ -94,8 +94,8 @@ def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
-    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate], 1 / ctx.model.activation_std)
-    mid = activate(ctx, linear(*args)) * linear(*args) + linear(*args)
+    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.features_per_head])
+    mid = activate(ctx, linear(*args, 1 / ctx.model.activation_std)) * linear(*args, 1) + linear(*args, 1)
     return depthwise_conv(ctx, mid)
 
 
