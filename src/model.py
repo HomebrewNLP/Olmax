@@ -74,7 +74,7 @@ def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scal
         weight = rezero(ctx, weight, scale)
     if ctx.is_initializing:
         return inp
-    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes[conv_kernel] if depthwise else 1)
+    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes[out_features] if depthwise else 1)
 
 
 def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str,
