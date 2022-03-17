@@ -5,8 +5,6 @@ import typing
 import yaml
 from jax import numpy as jnp, random
 
-from .constants import MomentumType
-
 
 class DataClass:
     def serialize(self):
@@ -75,7 +73,7 @@ class DataContext(DataClass):
 class DimSizes(DataClass):
     batch: int = 8
     full_conv_kernel: int = 9
-    depthwise_conv_kernel: int = 49
+    depthwise_conv_kernel: int = 81
     features_per_head: int = 256
     heads: int = 8
     sequence: int = 65536
