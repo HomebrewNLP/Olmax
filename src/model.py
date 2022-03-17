@@ -5,7 +5,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, dot, matmul, conv as lax_conv
+from src.backend import get_param, matmul, conv as lax_conv
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -65,7 +65,7 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
 
 
 def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float,
-         in_features: str, out_features: str, use_rezero: bool):
+         in_features: str, out_features: str, use_rezero: bool = False):
     weight = get_param(ctx, "weight", [out_features,
                                        in_features, conv_kernel],
                        column_axes=2,
@@ -74,44 +74,42 @@ def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scal
         weight = rezero(ctx, weight, scale)
     if ctx.is_initializing:
         return inp
-    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
+    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes[conv_kernel] if depthwise else 1)
 
 
 def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str,
-              use_rezero: bool) -> jnp.ndarray:
+              use_rezero: bool = False) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("full_conv")
     return conv(ctx, inp, False, ctx.dims.full_conv_kernel, scale, in_features, out_features, use_rezero)
 
 
 def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: str,
-                   use_rezero: bool) -> jnp.ndarray:
+                   use_rezero: bool = False) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("depthwise_conv")
     return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, ctx.dims.one, out_features, use_rezero)
 
 
-def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("linear")
-    weight = get_param(ctx, "weight", shape, scale=scale)
-    if ctx.is_initializing:
-        return inp
-    return dot(inp, weight, -1, 0)
+def output_conv(ctx: Context, inp: jnp.ndarray):
+    ctx = ctx.add_to_prefix("output_conv")
+    return full_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5, ctx.dims.intermediate, ctx.dims.features_per_head, True)
 
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
-    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head,
-                    False)
+    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.intermediate)
     mid = activate(ctx, mid)
-    return depthwise_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, ctx.dims.features_per_head, True)
+    mid = depthwise_conv(ctx, mid, 1 / ctx.model.activation_std, ctx.dims.intermediate)
+    mid = activate(ctx, mid)
+    return output_conv(ctx, mid)
 
 
 def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("reduced_feed_forward")
     mid = full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
-                    ctx.dims.intermediate, False)
+                    ctx.dims.intermediate)
     mid = psum(ctx, mid)
     mid = activate(ctx, mid)
-    return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, ctx.dims.intermediate, ctx.dims.features_per_head, True)
+    return output_conv(ctx, mid)
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
