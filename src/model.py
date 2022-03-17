@@ -64,24 +64,29 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
     return inp * scale
 
 
-def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str):
-    weight = get_param(ctx, "weight", [ctx.dims.features_per_head,
-                                       ctx.dims.one if depthwise else ctx.dims.intermediate, conv_kernel],
-                       column_axes=2)
-    weight = rezero(ctx, weight, ctx.dims.sizes.depth ** -0.5)
+def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float,
+         in_features: str, out_features: str, use_rezero: bool):
+    weight = get_param(ctx, "weight", [out_features,
+                                       in_features, conv_kernel],
+                       column_axes=2,
+                       scale=1 if use_rezero else scale)
+    if use_rezero:
+        weight = rezero(ctx, weight, scale)
     if ctx.is_initializing:
         return inp
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes.features_per_head if depthwise else 1)
 
 
-def full_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str,
+              use_rezero: bool) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("full_conv")
-    return conv(ctx, inp, False, ctx.dims.full_conv_kernel)
+    return conv(ctx, inp, False, ctx.dims.full_conv_kernel, scale, in_features, out_features, use_rezero)
 
 
-def depthwise_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: str,
+                   use_rezero: bool) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("depthwise_conv")
-    return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel)
+    return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, ctx.dims.one, out_features, use_rezero)
 
 
 def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float) -> jnp.ndarray:
@@ -94,18 +99,19 @@ def linear(ctx: Context, inp: jnp.ndarray, shape: typing.List[str], scale: float
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("group_feed_forward")
-    args = (ctx, inp, [ctx.dims.features_per_head, ctx.dims.features_per_head])
-    mid = activate(ctx, linear(*args, 1 / ctx.model.activation_std)) * linear(*args, 1) + linear(*args, 1)
-    return depthwise_conv(ctx, mid)
+    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head,
+                    False)
+    mid = activate(ctx, mid)
+    return depthwise_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, ctx.dims.features_per_head, True)
 
 
 def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("reduced_feed_forward")
-    mid = linear(ctx, inp, [ctx.dims.features_per_head, ctx.dims.intermediate],
-                 1 / ctx.model.activation_std / ctx.dims.sizes.heads)
+    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
+                    ctx.dims.intermediate, False)
     mid = psum(ctx, mid)
     mid = activate(ctx, mid)
-    return full_conv(ctx, mid)
+    return full_conv(ctx, mid, ctx.dims.sizes.depth ** -0.5, ctx.dims.intermediate, ctx.dims.features_per_head, True)
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
