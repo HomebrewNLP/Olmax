@@ -17,7 +17,8 @@ def exec_tpu(host: str, command: str):
 
 def exec_code(host: str, wandb_key: str, sweep_id: str):  # https://wandb.ai/authorize
     exec_tpu(host, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
-    exec_tpu(host, "rm -rf HomebrewNLP-Jax ; git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
+    exec_tpu(host, "rm -rf HomebrewNLP-Jax ; pkill -f python3")
+    exec_tpu(host, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
     exec_tpu(host, "cd HomebrewNLP-Jax && bash setup.sh")
     exec_tpu(host, f"wandb login {wandb_key}")
     exec_tpu(host, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
