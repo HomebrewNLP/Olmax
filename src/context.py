@@ -61,8 +61,8 @@ class DataContext(DataClass):
     path: str = "gs://ggpt4/the-char-pile/*"
     shuffle_buffer: int = 0
     parallel_workers: int = 128
-    interleaved_datasets: int = 1024
-    prefetch_buffer: int = 16
+    interleaved_datasets: int = 256
+    prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 256  # should be divisible by 128
 
@@ -80,7 +80,7 @@ class DimSizes(DataClass):
     one: int = 1
     depth: int = 4
 
-    def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
+    def __init__(self, data: DataContext, group_linear_factor: float):
         self.vocab: int = data.vocab_size
         self.intermediate = int(self.features_per_head * group_linear_factor)
         self.multiplier: int = group_linear_factor
@@ -153,8 +153,8 @@ class Training(DataClass):
     checkpoint_path: str = "gs://ggpt4/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
     z_loss: float = 0.01
-    device_steps: int = 1024
-    device_unroll: int = 16
+    device_steps: int = 8
+    device_unroll: int = 1
     steps: int = 2 ** 16
     print_interval: int = 1
     trace: TensorboardTrace = TensorboardTrace()
