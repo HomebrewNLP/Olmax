@@ -98,12 +98,12 @@ def main():
     # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
     ctx = wctx.ctx
-    print(yaml.dump(ctx.config(), indent=4))
     ctx.is_initializing = True
     if ctx.wandb.use_wandb:
         run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
         init_class(ctx, run.config.as_dict())
         wblog = WandbLog(run)
+    print(yaml.dump(ctx.config(), indent=4))
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
