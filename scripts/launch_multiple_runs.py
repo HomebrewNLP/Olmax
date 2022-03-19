@@ -17,7 +17,7 @@ def exec_code(host: str, wandb_key: str, sweep_id: str):  # https://wandb.ai/aut
     exec_tpu(host, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
     exec_tpu(host, "cd HomebrewNLP-Jax && sudo bash setup.sh")
     exec_tpu(host, f"wandb login {wandb_key}")
-    exec_tpu(host, f"screen -S model bash -c 'cd HomebrewNLP-Jax && wandb sweep --resume {sweep_id} ; "
+    exec_tpu(host, f"screen -S model bash -c 'cd HomebrewNLP-Jax && wandb agent {sweep_id} ; "
                    f"python3 -c 'from google.cloud import tpu_v2alpha1; "
                    f"tpu_v2alpha1.TpuClient().delete_node(request=tpu_v2alpha1.DeleteNodeRequest(name={host}))"
                    f".result()'")  # Delete via python client as pu doesn't work and gcloud needs manual confirmation
