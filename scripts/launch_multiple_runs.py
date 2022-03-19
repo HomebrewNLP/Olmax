@@ -15,28 +15,27 @@ def exec_tpu(host: str, command: str):
     print(f"done after {time.time() - start_time:.1f}s")
 
 
-def exec_code(host: str, wandb_key: str, sweep_id: str):  # https://wandb.ai/authorize
-    exec_tpu(host, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
-    exec_tpu(host, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
-    exec_tpu(host, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
-    exec_tpu(host, "cd HomebrewNLP-Jax && bash setup.sh")
-    exec_tpu(host, f"wandb login {wandb_key}")
-    exec_tpu(host, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
-                   f'echo y | gcloud alpha compute tpus tpu-vm delete {host}" &> log.txt 2> error.txt &')
-
-
 def tpu_names(zone: str):
     return [t['name'].split('/')[-1] for t in list_tpus(zone)]
 
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
-    tpu_name = f"{prefix}-{tpu_id}"
+    host = f"{prefix}-{tpu_id}"
     while True:
-        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {tpu_name} '
+        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
                   f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
                   f'do echo "Trying again.."; done')
-        exec_code(tpu_name, wandb_key, sweep_id)
-        while tpu_name in tpu_names(zone):
+
+        exec_tpu(host, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
+        exec_tpu(host, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
+        exec_tpu(host, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
+        exec_tpu(host, "cd HomebrewNLP-Jax && bash setup.sh")
+        exec_tpu(host, f"wandb login {wandb_key}")
+        exec_tpu(host, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
+                       f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
+                       f'&> log.txt 2> error.txt &')
+
+        while host in tpu_names(zone):
             time.sleep(60)
 
 
