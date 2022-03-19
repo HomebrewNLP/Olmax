@@ -22,31 +22,42 @@ def tpu_names(zone: str):
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
     host = f"{prefix}-{tpu_id}"
     while True:
-        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
-                  f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
-                  f'do echo "Trying again.."; done')
+        try:
+            os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
+                      f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
+                      f'do echo "Trying again.."; done')
 
-        exec_tpu(host, zone, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
-        exec_tpu(host, zone, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
-        exec_tpu(host, zone, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
-        exec_tpu(host, zone, "cd HomebrewNLP-Jax && bash setup.sh")
-        exec_tpu(host, zone, f"wandb login {wandb_key}")
-        exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
-                             f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
-                             f'&> log.txt 2> error.txt &')
+            exec_tpu(host, zone, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
+            exec_tpu(host, zone, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
+            exec_tpu(host, zone, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
+            exec_tpu(host, zone, "cd HomebrewNLP-Jax && bash setup.sh")
+            exec_tpu(host, zone, f"wandb login {wandb_key}")
+            exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
+                                 f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
+                                 f'&> log.txt 2> error.txt &')
 
-        while host in tpu_names(zone):
-            time.sleep(60)
+            while host in tpu_names(zone):
+                time.sleep(60)
+        except KeyboardInterrupt:
+            print(f"KeyboardInterrupt registered. Killing TPUs {host}. Don't press it a second time.")
+            break
+    os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}")
 
 
 def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int = 3, zone: str = "europe-west4-a"):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
-    threads = [threading.Thread(target=start_single, args=(prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone))
-               for tpu_id in range(tpus)]
+    threads = [threading.Thread(target=start_single, args=(prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone),
+                                daemon=True) for tpu_id in range(tpus)]
     for t in threads:
         t.start()
-    for t in threads:
-        t.join()
+    while all(t.is_alive() for t in threads):
+        try:
+            time.sleep(10)
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt registered. Killing all TPUs. Don't press it a second time.")
+            break
+    for tpu_id in range(tpus):
+        os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {prefix}-{tpu_id + 1} --zone {zone}")
 
 
 def parse_args() -> typing.Tuple[int, int, str, str, str]:
