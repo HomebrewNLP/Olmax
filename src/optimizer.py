@@ -51,9 +51,9 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"momentum", count=False)
     state = zero_param_like(ctx, "momentum_buffer", param_name)
-    state = grad + state * ctx.optimizer.momentum_beta  # 1st for momentum
+    state = grad + state * (1 - ctx.optimizer.momentum_beta)  # 1st for momentum
     assign(ctx, "momentum_buffer", state)
-    return grad + state * ctx.optimizer.momentum_beta  # 2nd for nesterov
+    return grad + state * (1 - ctx.optimizer.momentum_beta)  # 2nd for nesterov
 
 
 def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
@@ -67,8 +67,8 @@ def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarr
 
 def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("adam", count=False)
-    exp_avg = ema(ctx, param_name, grad, current_step, ctx.optimizer.adam_beta1, "avg")
-    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, ctx.optimizer.adam_beta2, "avg_sq")
+    exp_avg = ema(ctx, param_name, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg")
+    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq")
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
 
 

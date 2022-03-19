@@ -103,8 +103,8 @@ class Dims(DataClass):
     multiplier: str = "multiplier"
     vocab: str = "vocab"
 
-    def __init__(self, data: DataContext, group_linear_factor: float, feed_forward_factor: float):
-        self.sizes: DimSizes = DimSizes(data, group_linear_factor, feed_forward_factor)
+    def __init__(self, data: DataContext, group_linear_factor: float):
+        self.sizes: DimSizes = DimSizes(data, group_linear_factor)
 
 
 class TensorboardTrace(DataClass):
@@ -127,11 +127,11 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
-    momentum_beta: float = 0.9
+    momentum_beta: float = 0.1
     learning_rate: float = 0.001
     gradient_clip: float = 0.01
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.99
+    adam_beta1: float = 0.1
+    adam_beta2: float = 0.01
     weight_decay: float = 0.1
     warmup_end: int = 4096
     exponential_decay: float = 1e-5
@@ -141,13 +141,10 @@ class Model(DataClass):
     rezero_learning_rate_scale: float = 0.01
     device_halo_size: int = 3
     scan_unroll: int = 1
-    norm_eps: float = 1e-5
     group_linear_factor: int = 2
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
-    masked_attention: bool = True
     weight_sharing: bool = False
-    feed_forward_factor: int = 2
     storage_dtype: str = "float32"  # valid jax.numpy.storage_dtype
     computation_dtype: str = "bfloat16"
 
@@ -176,7 +173,7 @@ class Context(DataClass):
         self.model = Model()
         self.training = Training()
         self.wandb = WandB()
-        self.dims = Dims(self.data, self.model.group_linear_factor, self.model.feed_forward_factor)
+        self.dims = Dims(self.data, self.model.group_linear_factor)
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
