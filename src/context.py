@@ -65,9 +65,7 @@ class DataContext(DataClass):
     prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 256  # should be divisible by 128
-
-    def __init__(self):
-        self.datasets_used_per_step: int = self.parallel_workers
+    datasets_used_per_step: int = 8
 
 
 class DimSizes(DataClass):
