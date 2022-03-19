@@ -51,9 +51,9 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"momentum", count=False)
     state = zero_param_like(ctx, "momentum_buffer", param_name)
-    new_state = grad + state * ctx.optimizer.momentum_beta
-    assign(ctx, "momentum_buffer", new_state)
-    return grad + new_state
+    state = grad + state * ctx.optimizer.momentum_beta  # 1st for momentum
+    assign(ctx, "momentum_buffer", state)
+    return grad + state * ctx.optimizer.momentum_beta  # 2nd for nesterov
 
 
 def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
