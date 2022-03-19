@@ -19,6 +19,16 @@ def tpu_names(zone: str):
     return [t['name'].split('/')[-1] for t in list_tpus(zone)]
 
 
+def delete_all(prefix: str, zone: str):
+    for host in tpu_names(zone):
+        if prefix not in host:
+            continue
+        try:
+            os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone} --async")
+        except KeyboardInterrupt:
+            break
+
+
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
     host = f"{prefix}-{tpu_id}"
     while True:
@@ -41,7 +51,7 @@ def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_ve
         except KeyboardInterrupt:
             print(f"KeyboardInterrupt registered. Killing TPUs {host}. Don't press it a second time.")
             break
-    os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}")
+    delete_all(prefix, zone)
 
 
 def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int = 3, zone: str = "europe-west4-a"):
@@ -56,24 +66,28 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int = 3, 
         except KeyboardInterrupt:
             print("KeyboardInterrupt registered. Killing all TPUs. Don't press it a second time.")
             break
-    for tpu_id in range(tpus):
-        os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {prefix}-{tpu_id + 1} --zone {zone}")
+    delete_all(prefix, zone)
 
 
-def parse_args() -> typing.Tuple[int, int, str, str, str]:
+def parse_args() -> typing.Tuple[int, int, str, str, str, bool]:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tpus", type=int, default=1, help="How many TPUs should be launched")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
     parser.add_argument("--prefix", type=str, default="homebrewnlp-preemptible-tuning", help="Name prefix for TPUs")
     parser.add_argument("--zone", type=str, default="europe-west4-a", help="GCP Zone TPUs get created in")
     parser.add_argument("--sweep-id", type=str, help="ID of the Weights and Biases sweep that'll be resumed")
+    parser.add_argument("--cleanup", default="0", type=str,
+                        help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     args = parser.parse_args()
-    return args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep_id
+    return args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep_id, bool(int(args.cleanup))
 
 
 def main():
-    tpus, tpu_version, prefix, zone, sweep_id = parse_args()
-    start_multiple(prefix, tpus, sweep_id, tpu_version, zone)
+    tpus, tpu_version, prefix, zone, sweep_id, cleanup = parse_args()
+    if cleanup:
+        delete_all(prefix, zone)
+    else:
+        start_multiple(prefix, tpus, sweep_id, tpu_version, zone)
 
 
 if __name__ == '__main__':
