@@ -116,8 +116,8 @@ def main():
     # It's not used anywhere, but nice to have
 
     partition = {'parameters': {k: 0 for k in ctx.parameters.keys()},
-                 'parameter_variance': {k: None for k in ctx.parameter_variance.keys()},
-                 'data': None, 'current_step': None, 'loss': None, 'top_loss': None}
+                 'parameter_variance': {k: None for k in ctx.parameter_variance.keys()}, 'data': None,
+                 'current_step': None, 'loss': None, 'top_loss': None}
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition))
 
@@ -144,8 +144,9 @@ def main():
                 jax.profiler.start_trace(ctx.training.trace.output_path)
             if idx == ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
-        if idx % ctx.training.checkpoint_interval == 0:
+        if (idx + 1) % ctx.training.checkpoint_interval == 0:
             write_ckpt(ctx)
+
 
 if __name__ == '__main__':
     main()
