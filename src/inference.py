@@ -7,7 +7,7 @@ from jax.experimental import PartitionSpec
 from jax.experimental import pjit
 from jax.experimental.maps import mesh
 
-from main import sharding
+from src.main import sharding
 from src.context import Context, WhilePredictContext
 from src.model import body_ctx, one_hot
 

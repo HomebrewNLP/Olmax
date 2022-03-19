@@ -1,1 +1,1 @@
-LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4 XRT_TPU_CONFIG="localservice;0;localhost:51011" XLA_FLAGS="--xla_force_host_platform_device_count=48" TF_CPP_MIN_LOG_LEVEL=4 TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD=60000000000 python3 main.py config.yaml
+python3 main.py config.yaml
