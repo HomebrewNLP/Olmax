@@ -8,10 +8,10 @@ import typing
 from tpunicorn.tpu import list_tpus
 
 
-def exec_tpu(host: str, command: str):
+def exec_tpu(host: str, zone: str, command: str):
     print(f"running '{command}' ...", end='')
     start_time = time.time()
-    os.system(f"gcloud alpha compute tpus tpu-vm ssh ubuntu@{host} --command '{command}'")
+    os.system(f"gcloud alpha compute tpus tpu-vm ssh ubuntu@{host} --zone {zone} --command '{command}'")
     print(f"done after {time.time() - start_time:.1f}s")
 
 
@@ -26,14 +26,14 @@ def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_ve
                   f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
                   f'do echo "Trying again.."; done')
 
-        exec_tpu(host, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
-        exec_tpu(host, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
-        exec_tpu(host, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
-        exec_tpu(host, "cd HomebrewNLP-Jax && bash setup.sh")
-        exec_tpu(host, f"wandb login {wandb_key}")
-        exec_tpu(host, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
-                       f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
-                       f'&> log.txt 2> error.txt &')
+        exec_tpu(host, zone, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
+        exec_tpu(host, zone, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
+        exec_tpu(host, zone, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
+        exec_tpu(host, zone, "cd HomebrewNLP-Jax && bash setup.sh")
+        exec_tpu(host, zone, f"wandb login {wandb_key}")
+        exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
+                             f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
+                             f'&> log.txt 2> error.txt &')
 
         while host in tpu_names(zone):
             time.sleep(60)
