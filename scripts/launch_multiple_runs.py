@@ -19,14 +19,18 @@ def tpu_names(zone: str):
     return [t['name'].split('/')[-1] for t in list_tpus(zone)]
 
 
+def delete_one_tpu(prefix: str, host: str, zone: str):
+    if prefix not in host:
+        return
+    os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone} --async")
+
+
 def delete_all(prefix: str, zone: str):
-    for host in tpu_names(zone):
-        if prefix not in host:
-            continue
-        try:
-            os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone} --async")
-        except KeyboardInterrupt:
-            break
+    threads = [threading.Thread(target=delete_one_tpu, args=(prefix, host, zone)) for host in tpu_names(zone)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
