@@ -45,8 +45,8 @@ def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_ve
             exec_tpu(host, zone, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
             exec_tpu(host, zone, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
             exec_tpu(host, zone, "cd HomebrewNLP-Jax && bash setup.sh")
-            exec_tpu(host, zone, f"wandb login {wandb_key}")
-            exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && wandb agent --count 1 {sweep_id} ; '
+            exec_tpu(host, zone, f".local/bin/wandb login {wandb_key}")
+            exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && .local/bin/wandb agent --count 1 {sweep_id} ; '
                                  f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
                                  f'&> log.txt 2> error.txt &')
 
