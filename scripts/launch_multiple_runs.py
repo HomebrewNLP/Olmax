@@ -37,6 +37,7 @@ def delete_all(prefix: str, zone: str):
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
     host = f"{prefix}-{tpu_id}"
+    time.sleep(tpu_id)
     while True:
         try:
             os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
