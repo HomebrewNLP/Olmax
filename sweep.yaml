@@ -1,0 +1,68 @@
+program: main.py
+method: bayes
+metric:
+  name: Loss/Current
+  goal: minimize
+early_terminate:
+  type: hyperband
+  max_iter: 5103
+  s: 4
+  eta: 3
+parameters:
+  optimizer.weight_decay:
+    distribution: log_uniform
+    min: 0.003
+    max: 0.3
+  optimizer.adam_beta2:
+    distribution: log_uniform
+    min: 0.0001
+    max: 0.1
+  optimizer.adam_beta1:
+    distribution: log_uniform
+    min: 0.0001
+    max: 0.1
+  optimizer.gradient_clip:
+    distribution: log_uniform
+    min: 0.0001
+    max: 0.1
+  optimizer.learning_rate:
+    distribution: log_uniform
+    min: 0.0001
+    max: 0.1
+  optimizer.momentum_beta:
+    distribution: log_uniform
+    min: 0.003
+    max: 0.3
+  dims.sizes.full_conv_kernel:
+    distribution: q_log_uniform
+    min: 1
+    max: 27
+  dims.sizes.depthwise_conv_kernel:
+    distribution: q_log_uniform
+    min: 1
+    max: 243
+  dims.sizes.features_per_head:
+    distribution: q_log_uniform
+    min: 128
+    max: 1024
+    q: 128
+  dims.sizes.batch:
+    distribution: q_log_uniform
+    min: 1
+    max: 128
+  model.rezero_learning_rate_scale:
+    distribution: log_uniform
+    min: 0.0001
+    max: 1
+  model.group_linear_factor:
+    distribution: q_log_uniform
+    min: 1
+    max: 8
+  model.leaky_relu_slope:
+    distribution: log_uniform
+    min: 0.002
+    max: 2
+  training.z_loss:
+    distribution: log_uniform
+    min: 0.0001
+    max: 0.1
