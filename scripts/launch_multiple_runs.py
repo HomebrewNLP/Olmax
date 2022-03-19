@@ -35,14 +35,14 @@ def delete_all(prefix: str, zone: str):
         t.join()
 
 
-def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
+def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
     host = f"{prefix}-{tpu_id}"
     time.sleep(tpu_id)
     while True:
         try:
             os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
                       f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
-                      f'do echo "Trying again.."; done')
+                      f'do echo sleep {tpus}; done')
 
             exec_tpu(host, zone, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
             exec_tpu(host, zone, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
@@ -64,8 +64,9 @@ def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_ve
 
 def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int = 3, zone: str = "europe-west4-a"):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
-    threads = [threading.Thread(target=start_single, args=(prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone),
-                                daemon=True) for tpu_id in range(tpus)]
+    threads = [
+        threading.Thread(target=start_single, args=(prefix, tpu_id + 1, tpus, sweep_id, wandb_key, tpu_version, zone),
+                         daemon=True) for tpu_id in range(tpus)]
     for t in threads:
         t.start()
     while all(t.is_alive() for t in threads):
