@@ -11,7 +11,7 @@ from jax import numpy as jnp
 
 from src.backend import loop
 from src.constants import ParallelAxes
-from src.context import Context, WhileTrainContext
+from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
@@ -102,6 +102,7 @@ def main():
     ctx.is_initializing = True
     if ctx.wandb.use_wandb:
         run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
+        init_class(ctx, run.config.as_dict())
         wblog = WandbLog(run)
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
