@@ -1,6 +1,7 @@
 import argparse
 import netrc
 import os
+import sys
 import threading
 import time
 import typing
@@ -26,7 +27,8 @@ def delete_one_tpu(prefix: str, host: str, zone: str):
 
 
 def delete_all(prefix: str, zone: str):
-    threads = [threading.Thread(target=delete_one_tpu, args=(prefix, host, zone)) for host in tpu_names(zone)]
+    threads = [threading.Thread(target=delete_one_tpu, args=(prefix, host, zone), daemon=True) for host in
+               tpu_names(zone)]
     for t in threads:
         t.start()
     for t in threads:
@@ -45,17 +47,18 @@ def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_ve
             exec_tpu(host, zone, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
             exec_tpu(host, zone, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
             exec_tpu(host, zone, "cd HomebrewNLP-Jax && bash setup.sh")
-            exec_tpu(host, zone, f".local/bin/wandb login {wandb_key}")
-            exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && .local/bin/wandb agent --count 1 {sweep_id} ; '
+            exec_tpu(host, zone, 'echo \"export PATH="/home/ubuntu/.local/bin:\\$PATH"\" >> ~/.bashrc')
+            exec_tpu(host, zone, 'cat ~/.bashrc')
+            exec_tpu(host, zone, f"/home/ubuntu/.local/bin/wandb login {wandb_key}")
+            exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && '
+                                 f'/home/ubuntu/.local/bin/wandb agent --count 1 {sweep_id} ; '
                                  f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
                                  f'&> log.txt 2> error.txt &')
 
             while host in tpu_names(zone):
                 time.sleep(60)
         except KeyboardInterrupt:
-            print(f"KeyboardInterrupt registered. Killing TPUs {host}. Don't press it a second time.")
-            break
-    delete_all(prefix, zone)
+            sys.exit()
 
 
 def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int = 3, zone: str = "europe-west4-a"):
@@ -68,9 +71,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int = 3, 
         try:
             time.sleep(10)
         except KeyboardInterrupt:
-            print("KeyboardInterrupt registered. Killing all TPUs. Don't press it a second time.")
-            break
-    delete_all(prefix, zone)
+            sys.exit()
 
 
 def parse_args() -> typing.Tuple[int, int, str, str, str, bool]:
@@ -79,11 +80,11 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, bool]:
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
     parser.add_argument("--prefix", type=str, default="homebrewnlp-preemptible-tuning", help="Name prefix for TPUs")
     parser.add_argument("--zone", type=str, default="europe-west4-a", help="GCP Zone TPUs get created in")
-    parser.add_argument("--sweep-id", type=str, help="ID of the Weights and Biases sweep that'll be resumed")
+    parser.add_argument("--sweep", type=str, help="ID of the Weights and Biases sweep that'll be resumed")
     parser.add_argument("--cleanup", default="0", type=str,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     args = parser.parse_args()
-    return args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep_id, bool(int(args.cleanup))
+    return args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep, bool(int(args.cleanup))
 
 
 def main():
