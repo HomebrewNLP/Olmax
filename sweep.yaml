@@ -8,6 +8,11 @@ early_terminate:
   max_iter: 5103
   s: 4
   eta: 3
+command:
+    - ${env}
+    - python3
+    - ${program}
+    - ${args}
 parameters:
   optimizer.weight_decay:
     distribution: log_uniform
