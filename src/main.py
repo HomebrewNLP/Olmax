@@ -103,6 +103,8 @@ def main():
         run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
         cfg = {}
         for param_name, param in run.config.items():
+            if '.' not in param_name:
+                continue
             inner_cfg = cfg
             split_name = param_name.split(".")
             for s in split_name[:-1]:
