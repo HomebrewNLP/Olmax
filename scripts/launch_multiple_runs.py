@@ -8,6 +8,8 @@ import typing
 
 from tpunicorn.tpu import list_tpus
 
+TIMEOUT_MULTIPLIER = 10
+
 
 def exec_tpu(host: str, zone: str, command: str):
     print(f"running '{command}' ...", end='')
@@ -16,8 +18,8 @@ def exec_tpu(host: str, zone: str, command: str):
     print(f"done after {time.time() - start_time:.1f}s")
 
 
-def tpu_names(zone: str):
-    return [t['name'].split('/')[-1] for t in list_tpus(zone)]
+def tpu_names(zone: str, preempted: bool = True):
+    return [t['name'].split('/')[-1] for t in list_tpus(zone) if preempted or t['state'] != "PREEMPTED"]
 
 
 def delete_one_tpu(prefix: str, host: str, zone: str):
@@ -37,27 +39,25 @@ def delete_all(prefix: str, zone: str):
 
 def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
     host = f"{prefix}-{tpu_id}"
-    time.sleep(tpu_id)
+    time.sleep(tpu_id * TIMEOUT_MULTIPLIER)
     while True:
         try:
             os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
                       f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
-                      f'do echo sleep {tpus}; done')
+                      f'do sleep {tpus * TIMEOUT_MULTIPLIER}; done')
 
             exec_tpu(host, zone, f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip")
             exec_tpu(host, zone, "rm -rf HomebrewNLP-Jax ; !pkill -f python3")
             exec_tpu(host, zone, "git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/")
             exec_tpu(host, zone, "cd HomebrewNLP-Jax && bash setup.sh")
-            exec_tpu(host, zone, 'echo \"export PATH="/home/ubuntu/.local/bin:\\$PATH"\" >> ~/.bashrc')
-            exec_tpu(host, zone, 'cat ~/.bashrc')
             exec_tpu(host, zone, f"/home/ubuntu/.local/bin/wandb login {wandb_key}")
-            exec_tpu(host, zone, f'nohup bash -c "cd HomebrewNLP-Jax && '
+            exec_tpu(host, zone, f'screen -dmS model bash -c "cd HomebrewNLP-Jax && '
                                  f'/home/ubuntu/.local/bin/wandb agent --count 1 {sweep_id} ; '
-                                 f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" '
-                                 f'&> log.txt 2> error.txt &')
+                                 f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}"')
 
-            while host in tpu_names(zone):
+            while host in tpu_names(zone, False):
                 time.sleep(60)
+            delete_one_tpu(prefix, host, zone)
         except KeyboardInterrupt:
             sys.exit()
 
