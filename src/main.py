@@ -101,7 +101,16 @@ def main():
     ctx.is_initializing = True
     if ctx.wandb.use_wandb:
         run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
-        init_class(ctx, run.config.as_dict())
+        cfg = {}
+        for param_name, param in run.config.items():
+            inner_cfg = cfg
+            split_name = param_name.split(".")
+            for s in split_name[:-1]:
+                if s not in inner_cfg:
+                    inner_cfg[s] = {}
+                inner_cfg = inner_cfg[s]
+            inner_cfg[split_name[-1]] = param
+        init_class(ctx, cfg)
         wblog = WandbLog(run)
     print(yaml.dump(ctx.config(), indent=4))
     total_steps = ctx.training.steps * ctx.training.device_steps
