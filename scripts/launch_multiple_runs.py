@@ -79,7 +79,6 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
             exec_tpu(host, zone, "bash setup.sh")
 
             while host in tpu_names(zone, False):
-                print(f"{host} - {datetime.datetime.now()}: SLEEPING")
                 time.sleep(5)
 
             delete_one_tpu(prefix, host, zone)
