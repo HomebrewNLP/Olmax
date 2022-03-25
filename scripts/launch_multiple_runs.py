@@ -16,10 +16,8 @@ def exec_command(wandb_key: str, sweep_id: str, host: str, zone: str):
     # Bottom one doesn't use , on purpose
     return ' && '.join((f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip",
                         f"(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
-                        f"git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/",
-                        f"cd HomebrewNLP-Jax",
-                        f"(bash setup.sh ; exit 0)",
-                        f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
+                        f"git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/", f"cd HomebrewNLP-Jax",
+                        f"(bash setup.sh ; exit 0)", f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
                         f'screen -dmS model bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent --count 1'
                         f' {sweep_id} ; echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" || '
                         f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}'))
@@ -66,24 +64,39 @@ def delete_all(prefix: str, zone: str):
             t.join()
 
 
+def create_tpu(host: str, zone: str, tpu_version: int, tpus: int):
+    os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
+              f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
+              f'do sleep {tpus * TIMEOUT_MULTIPLIER}; done')
+
+
+def synchronous_deletion(prefix: str, host: str, zone: str):
+    delete_one_tpu(prefix, host, zone)
+    while host in tpu_names(zone, deleting=True):
+        time.sleep(2)
+
+
 def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str):
     host = f"{prefix}-{tpu_id}"
     time.sleep(tpu_id * TIMEOUT_MULTIPLIER)
+    if host in tpu_names(zone, preempted=True, deleting=True):
+        if host not in tpu_names(zone, preempted=False, deleting=False):
+            synchronous_deletion(prefix, host, zone)
+            create_tpu(host, zone, tpu_version, tpus)
+    else:
+        create_tpu(host, zone, tpu_version, tpus)
+
     while True:
         try:
-            os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
-                      f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha --preemptible; '
-                      f'do sleep {tpus * TIMEOUT_MULTIPLIER}; done')
-
             send_commands_to_tpu(wandb_key, sweep_id, host, zone)
             exec_tpu(host, zone, "bash setup.sh")
 
-            while host in tpu_names(zone, False):
+            while host in tpu_names(zone, preempted=False):
                 time.sleep(5)
 
-            delete_one_tpu(prefix, host, zone)
-            while host in tpu_names(zone, deleting=True):
-                time.sleep(2)
+            synchronous_deletion(prefix, host, zone)
+            create_tpu(host, zone, tpu_version, tpus)
+
         except KeyboardInterrupt:
             print(f"{host} - {datetime.datetime.now()}: KeyboardInterrupt received. Killing TPU, then self.")
             delete_one_tpu(prefix, host, zone)
@@ -113,6 +126,8 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, bool]:
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
     parser.add_argument("--prefix", type=str, default="homebrewnlp-preemptible-tuning", help="Name prefix for TPUs")
     parser.add_argument("--zone", type=str, default="europe-west4-a", help="GCP Zone TPUs get created in")
+    parser.add_argument("--data-path", type=str, default="gs://ggpt4/the-char-pile/*",
+                        help="Where the data is stored. Should be changed to a bucket in the correct region")
     parser.add_argument("--sweep", type=str, help="ID of the Weights and Biases sweep that'll be resumed")
     parser.add_argument("--cleanup", default="0", type=str,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
