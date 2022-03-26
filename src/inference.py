@@ -17,8 +17,8 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
 def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhilePredictContext(while_ctx_dict)
 
-    one_hot_mask = one_hot(wctx.current_step, wctx.ctx.dims.dim_sizes[wctx.ctx.dims.sequence])
-    one_hot_mask = lax.broadcast(one_hot_mask, [wctx.ctx.dims.dim_sizes[wctx.ctx.dims.batch]])
+    one_hot_mask = one_hot(wctx.current_step, wctx.ctx.dims.sizes.sequence)
+    one_hot_mask = lax.broadcast(one_hot_mask, [wctx.ctx.dims.sizes.batch])
 
     out_token = body_ctx(wctx.ctx, wctx.data)
 
@@ -38,7 +38,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     out_token = out_token + temp
     out_token = out_token * top_k_mask
     out_token = jnp.argmax(out_token, -1)
-    out_token = jnp.right_shift(out_token, jnp.array([1] * wctx.ctx.dims.dim_sizes[wctx.ctx.dims.batch])[0])
+    out_token = jnp.right_shift(out_token, jnp.array([1] * wctx.ctx.dims.sizes.batch)[0])
 
     one_hot_mask = one_hot_mask * jnp.greater_equal(wctx.current_step, wctx.start_pos)[0]
     wctx.data = wctx.data * (1 - one_hot_mask) + out_token * one_hot_mask
@@ -68,8 +68,7 @@ def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp
 class Inference:
     def __init__(self, ctx: Context):
         ctx.initializing = True
-        dummy_data = np.zeros((ctx.dims.dim_sizes[ctx.dims.batch],
-                               ctx.dims.dim_sizes[ctx.dims.sequence]), dtype=np.int32)
+        dummy_data = np.zeros((ctx.dims.sizes.batch, ctx.dims.sizes.sequence), dtype=np.int32)
 
         body_ctx(ctx, dummy_data)
         self.parameters = ctx.parameters
@@ -79,16 +78,10 @@ class Inference:
                              out_axis=(None,))
         self.ctx = ctx
 
-        self.complete_tokens(dummy_data,
-                             np.zeros((ctx.dims.dim_sizes[ctx.dims.batch],)),
-                             np.ones((ctx.dims.dim_sizes[ctx.dims.batch]), ),
-                             np.zeros((ctx.dims.dim_sizes[ctx.dims.batch],)),
-                             np.ones((ctx.dims.dim_sizes[ctx.dims.batch],)))
+        self.complete_tokens(dummy_data, np.zeros((ctx.dims.sizes.batch,)), np.ones((ctx.dims.sizes.batch), ),
+                             np.zeros((ctx.dims.sizes.batch,)), np.ones((ctx.dims.sizes.batch,)))
 
-    def complete_tokens(self, prompt: np.array,
-                        sampling_temperature: np.array,
-                        top_k: np.array,
-                        start_pos: np.array,
+    def complete_tokens(self, prompt: np.array, sampling_temperature: np.array, top_k: np.array, start_pos: np.array,
                         stop_pos: np.array) -> np.array:
         return self.step(self.parameters, prompt, sampling_temperature, top_k, start_pos, stop_pos)
 
