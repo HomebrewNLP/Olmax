@@ -60,8 +60,8 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 class DataContext(DataClass):
     path: str = "gs://ggpt4/the-char-pile/*"
     shuffle_buffer: int = 0
-    parallel_workers: int = 128
-    interleaved_datasets: int = 256
+    parallel_workers: int = 64
+    interleaved_datasets: int = 64
     prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 256  # should be divisible by 128
@@ -263,19 +263,19 @@ class WhilePredictContext(WhileContext):
         self.start_pos = jnp.zeros([batch_dim_size])
         self.stop_pos = jnp.array([sequence_dim_size] * batch_dim_size)[0]
         self.sampling_temperature = jnp.zeros([batch_dim_size])
-        self.top_n = jnp.array([vocab_dim_size] * batch_dim_size)
+        self.top_k = jnp.array([vocab_dim_size] * batch_dim_size)
 
         if self.config is not None:
             self.start_pos = config['start_pos']
             self.stop_pos = config['stop_pos']
             self.sampling_temperature = config['sampling_temperature']
-            self.top_n = config['top_n']
+            self.top_k = config['top_k']
 
     def serialize(self):
         serialized = self._serialize()
         serialized['start_pos'] = self.start_pos
         serialized['stop_pos'] = self.stop_pos
         serialized['sampling_temperature'] = self.sampling_temperature
-        serialized['top_n'] = self.top_n
+        serialized['top_k'] = self.top_k
 
         return serialized
