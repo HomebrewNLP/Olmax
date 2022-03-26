@@ -155,7 +155,7 @@ def main():
                 jax.profiler.start_trace(ctx.training.trace.output_path)
             if idx == ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
-        if (idx + 1) % ctx.training.checkpoint_interval == 0:
+        if ctx.training.do_checkpoint and (idx + 1) % ctx.training.checkpoint_interval == 0:
             write_ckpt(ctx)
 
 

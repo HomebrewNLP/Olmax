@@ -150,6 +150,7 @@ class Model(DataClass):
 class Training(DataClass):
     checkpoint_path: str = "gs://ggpt4/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
+    do_checkpoint: bool = False
     z_loss: float = 0.01
     device_steps: int = 8
     device_unroll: int = 1
