@@ -7,6 +7,7 @@ from jax import lax, numpy as jnp, random
 
 from src.context import Context, WhilePredictContext
 from src.model import body_ctx, one_hot
+from src.constants import ParallelAxes
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
@@ -74,7 +75,8 @@ class Inference:
         self.parameters = ctx.parameters
 
         partition = {'parameters': {k: 0 for k in ctx.parameters.keys()}}
-        self.step = jax.pmap(jitless_prediction_step, in_axis=(partition, None, None, None, None, None),
+        self.step = jax.pmap(jitless_prediction_step, axis_name=ParallelAxes.model,
+                             in_axis=(partition, None, None, None, None, None),
                              out_axis=(None,))
         self.ctx = ctx
 
