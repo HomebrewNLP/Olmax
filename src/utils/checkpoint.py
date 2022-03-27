@@ -54,7 +54,7 @@ def write_ckpt(ctx: Context):
 
 def read_shard(ckpt_dir):
     out = []
-    for idx in range(16):
+    for idx in range(pieces):
         file_path = ckpt_dir + f"{idx}.npz"
         with open(file_path, "rb") as f:
             buf = f.read()
@@ -65,40 +65,20 @@ def read_shard(ckpt_dir):
     return out
 
 
-def read_ckpt(pytree, path, shards_in, load_opt=True):
-    old_flattened, structure = jax.tree_flatten(pytree)
+def read_ckpt(ctx: Context):
+    old_flattened, structure = jax.tree_flatten(ctx.parameters)
 
-    original_opt_state = pytree["opt_state"]
-
-    with multiprocessing.pool.ThreadPool(shards_in) as p:
+    with multiprocessing.pool.ThreadPool(ctx.dims.sizes.heads) as p:
         start = time.time()
-        shards = list((p.imap(read_shard, [f"{path}shard_{i}/" for i in range(shards_in)])))
+        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_path}/{i}_" for i in range(ctx.dims.sizes.heads)]))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
-    def _unshard(shards, old_flattened):
-        unsharded = []
+    unsharded = []
+    for old, *all_shards in zip(old_flattened, *shards):
+        x = np.stack(all_shards)
+        if x.dtype == np.dtype('V2'):
+            x.dtype = jnp.bfloat16
+        unsharded.append(x)
+        assert x.shape == old.shape, f"Incompatible checkpoints {x.shape} vs {old.shape}"
 
-        for old, *all_shards in zip(old_flattened, *shards):
-            x = np.stack(all_shards)
-            # No idea why this is V2...?
-            if x.dtype == np.dtype('V2'):
-                x.dtype = jnp.bfloat16
-
-            unsharded.append(x)
-
-            assert x.shape == old.shape, f"Incompatible checkpoints {x.shape} vs {old.shape}"
-        return unsharded
-
-    try:
-        unsharded = _unshard(shards, old_flattened)
-    except AssertionError:
-        load_opt = False  # no opt to load in ckpt
-        del pytree['opt_state']
-        old_flattened, structure = jax.tree_flatten(pytree)
-        unsharded = _unshard(shards, old_flattened)
-
-    loaded_pytree = jax.tree_unflatten(structure, unsharded)
-
-    if not load_opt:
-        loaded_pytree['opt_state'] = original_opt_state
-    return loaded_pytree
+    ctx.parameters = jax.tree_unflatten(structure, unsharded)
