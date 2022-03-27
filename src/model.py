@@ -64,11 +64,9 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
     return inp * scale
 
 
-def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float,
-         in_features: str, out_features: str, use_rezero: bool = False):
-    weight = get_param(ctx, "weight", [out_features,
-                                       in_features, conv_kernel],
-                       column_axes=2,
+def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float, in_features: str,
+         out_features: str, use_rezero: bool = False):
+    weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2,
                        scale=1 if use_rezero else scale)
     if use_rezero:
         weight = rezero(ctx, weight, scale)
@@ -125,15 +123,16 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0)
+    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
+                     learning_rate_scale=1 / ctx.dims.sizes.heads)
     inp = scale_norm(ctx, inp)
     if ctx.is_initializing:
         return inp
-    return matmul(inp, embd)
+    return psum(ctx, matmul(inp, embd))
 
 
-def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray], src: REVERSIBLE_CTX
-               ) -> REVERSIBLE_CTX:
+def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
+               src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
@@ -158,8 +157,8 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     @jax.custom_gradient
     def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, back_x0: jnp.ndarray, x1: jnp.ndarray,
             back_x1: jnp.ndarray):
-        def _grad(dy: REVERSIBLE_CTX) -> typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray,
-                                                      jnp.ndarray, jnp.ndarray]:
+        def _grad(dy: REVERSIBLE_CTX) -> typing.Tuple[
+            typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0)
             d_params, dx0 = grad_fn(dy1)
@@ -173,7 +172,6 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    src = psum(ctx, src)  # TODO: Split batch across model parallel
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
     log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
     loss = log_z - jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1)
