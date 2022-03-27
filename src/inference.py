@@ -90,7 +90,7 @@ class Inference:
         base = jnp.zeros(())
         start = base + tokens.shape[0]
         out = self.complete_tokens(tokens, base + sampling_temperature, base + top_k, start, start + length)[0]
-        return np.asarray(out).tobytes().decode()[start:]
+        return np.asarray(out).tobytes().decode()[len(text):]
 
 
 def main():
