@@ -143,7 +143,7 @@ class Model(DataClass):
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
     weight_sharing: bool = False
-    storage_dtype: str = "float32"  # valid jax.numpy.storage_dtype
+    storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
 
 

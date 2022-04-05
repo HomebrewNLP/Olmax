@@ -24,12 +24,19 @@ def psum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return lax.psum(inp, ParallelAxes.model)
 
 
+def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
+    return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
+
+
 def scale_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
-    weight = get_param(ctx, "scale", [ctx.dims.one], std=0)
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
+    weight = get_param(ctx, "scale", [ctx.dims.one], std=0, dtype=run_type)
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
+        original_dtype = src.dtype
+        src = promote_to(src, run_type)
         mean = src.mean(-1, keepdims=True)
         std = lax.rsqrt(jnp.square(src).mean(-1, keepdims=True) - jnp.square(mean))
 
@@ -39,9 +46,10 @@ def scale_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
             dy = dy * std * (1 + wgt)
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
-            return dy, d_wgt
+            return dy.astype(original_dtype), d_wgt
 
-        return (src - mean) * std * (1 + wgt), _grad
+        out = (src - mean) * std * (1 + wgt)
+        return out.astype(original_dtype), _grad
 
     return _fn(inp, weight)
 
@@ -105,7 +113,7 @@ def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("reduced_feed_forward")
     mid = full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
                     ctx.dims.intermediate)
-    mid = psum(ctx, mid)
+    mid = psum(ctx, mid)  # promote to fp32 before allreduce?
     mid = activate(ctx, mid)
     return output_conv(ctx, mid)
 
@@ -172,6 +180,7 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    src = promote_to(src, jnp.float32)
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
     log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
     loss = log_z - jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1)

@@ -106,7 +106,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1, split_dims: typing.Optional[typing.List[str]] = None,
               depth_indexing: bool = False, idx: typing.Optional[jnp.ndarray] = None,
-              learning_rate_scale: float = 1) -> jnp.ndarray:
+              learning_rate_scale: float = 1, dtype: typing.Optional[jnp.float32] = None) -> jnp.ndarray:
     if split_dims is None:
         split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
@@ -129,12 +129,14 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
             if mean is not None:
                 param += mean
         ctx.parameter_variance[prefix_name] = learning_rate_scale * scale
-        param = param.astype(ctx.model.storage_dtype)
+        param = param.astype(
+            ctx.model.storage_dtype if dtype is None else jnp.promote_types(ctx.model.storage_dtype, dtype))
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
     if depth_indexing:
         param = param[idx].reshape(param.shape[1:])
-    return param.astype(ctx.model.computation_dtype)
+    return param.astype(
+        ctx.model.computation_dtype if dtype is None else jnp.promote_types(ctx.model.computation_dtype, dtype))
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
