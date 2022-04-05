@@ -1,5 +1,5 @@
 CLEANUP="${1}"
-BASE_PREFIX="homebrew-"
+BASE_PREFIX="homebrew"
 
 run () {
   zone=$1
@@ -11,10 +11,11 @@ run () {
   if [ "$preemptible" = "1" ]; then
     prefix="$prefix-preemptible"
   fi
+  args="launch_multiple_runs.py --tpus $tpu_count --zone $zone --tpu-version $tpu_version --data-path $data_path --prefix $BASE_PREFIX-$prefix --preemptible $preemptible"
   if [ "$CLEANUP" == "1" ]; then
-    python3 launch_multiple_runs.py --tpus "$tpu_count" --cleanup "$CLEANUP" --zone "$zone" --tpu-version "$tpu_version" --data_path "$data_path" --prefix "$BASE_PREFIX-$prefix" --preemptible "$preemptible"
+    python3 "$args" --cleanup 1
   else
-    screen -dmS "$prefix" "python3 launch_multiple_runs.py --tpus $tpu_count --zone $zone --tpu-version $tpu_version --data_path $data_path --prefix $BASE_PREFIX-$prefix --preemptible $preemptible"
+    screen -dmS "$prefix" python3 "$args" --cleanup 0
   fi
 }
 
