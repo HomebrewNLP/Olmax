@@ -7,9 +7,13 @@ import threading
 import time
 import typing
 
-from tpunicorn.tpu import list_tpus
+import google.auth
+import googleapiclient.discovery
 
 TIMEOUT_MULTIPLIER = 10
+
+API = googleapiclient.discovery.build('tpu', 'v1')
+_, PROJECT = google.auth.default()
 
 
 def exec_command(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str):
@@ -40,9 +44,11 @@ def exec_tpu(host: str, zone: str, command: str):
 
 
 def tpu_names(zone: str, preempted: bool = True, deleting: bool = False, prefix: str = ''):
+    zone = 'projects/' + PROJECT + '/locations/' + zone
     while True:
         try:
-            tpus = [t['name'].split('/')[-1] for t in list_tpus(zone) if
+            tpus = API.projects().locations().nodes().list(parent=zone).execute().get('nodes', [])
+            tpus = [t['name'].split('/')[-1] for t in tpus if
                     (deleting or t['state'] != "DELETING") and (preempted or t['state'] != "PREEMPTED")]
             return [t for t in tpus if t.startswith(prefix)]
         except:
@@ -81,7 +87,7 @@ def synchronous_deletion(prefix: str, host: str, zone: str):
 def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
                  data_path: str, preemptible: bool):
     host = f"{prefix}-{tpu_id}"
-    time.sleep(tpu_id * TIMEOUT_MULTIPLIER)
+    time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER)
     if host in tpu_names(zone, preempted=True, deleting=True):
         if host not in tpu_names(zone, preempted=False, deleting=False):
             synchronous_deletion(prefix, host, zone)
@@ -111,9 +117,8 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
     procs = []
     for tpu_id in range(tpus):
-        proc = multiprocessing.Process(target=start_single, daemon=True,
-                                       args=(prefix, tpu_id + 1, tpus, sweep_id, wandb_key, tpu_version, zone,
-                                             data_path, preemptible))
+        proc = multiprocessing.Process(target=start_single, daemon=True, args=(
+            prefix, tpu_id + 1, tpus, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible))
         proc.start()
         procs.append(proc)
     while all(t.is_alive() for t in procs):
@@ -136,7 +141,7 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool]:
     parser.add_argument("--sweep", type=str, help="ID of the Weights and Biases sweep that'll be resumed")
     parser.add_argument("--cleanup", default="0", type=str,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
-    parser.add_argument("--preemptible", default="0", type=str,
+    parser.add_argument("--preemptible", default="1", type=str,
                         help="Whether to create preemptible or non-preemptible TPUs")
     args = parser.parse_args()
     return args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep, args.data_path, bool(
