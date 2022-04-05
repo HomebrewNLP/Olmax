@@ -58,10 +58,10 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 
 
 class DataContext(DataClass):
-    path: str = "gs://ggpt4/the-char-pile/*"
+    path: str = "gs://ggpt4/the-big-char-pile/*"
     shuffle_buffer: int = 0
-    parallel_workers: int = 64
-    interleaved_datasets: int = 64
+    parallel_workers: int = 8
+    interleaved_datasets: int = 8
     prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 256  # should be divisible by 128
