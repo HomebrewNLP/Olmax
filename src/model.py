@@ -36,19 +36,20 @@ def scale_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
-        src = promote_to(src, run_type)
-        mean = src.mean(-1, keepdims=True)
-        std = lax.rsqrt(jnp.square(src).mean(-1, keepdims=True) - jnp.square(mean))
+        src_fp32 = promote_to(src, run_type)
+        mean = src_fp32.mean(-1, keepdims=True)
+        std = lax.rsqrt(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean))
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            out = (src - mean) * std
+            src_fp32 = promote_to(src, run_type)
+            out = (src_fp32 - mean) * std
             d_wgt = (dy * out).sum().reshape((1,))
             dy = dy * std * (1 + wgt)
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
             return dy.astype(original_dtype), d_wgt
 
-        out = (src - mean) * std * (1 + wgt)
+        out = (src_fp32 - mean) * std * (1 + wgt)
         return out.astype(original_dtype), _grad
 
     return _fn(inp, weight)
