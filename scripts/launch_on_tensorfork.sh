@@ -18,7 +18,7 @@ run () {
   fi
 }
 
-# TPUv3
+# TPUv3 (Total: 330 v3-8's - 2640  v3-cores)
 run europe-west4-a 3 "gs://ggpt4/the-big-char-pile/" 250 1
 run europe-west4-b 3 "gs://ggpt4/the-big-char-pile/" 15 1
 run europe-west4-c 3 "gs://ggpt4/the-big-char-pile/" 15 1
@@ -29,7 +29,7 @@ run europe-west4-b 3 "gs://ggpt4/the-big-char-pile/" 5 0
 run europe-west4-c 3 "gs://ggpt4/the-big-char-pile/" 5 0
 run us-central1-c 3 "gs://ggpt4-us/the-big-char-pile/" 5 0
 
-# TPUv2
+# TPUv2 (Total: 470 v2-8's - 3760  v2-cores)
 run europe-west4-b 2 "gs://ggpt4/the-big-char-pile/" 15 1
 run europe-west4-c 2 "gs://ggpt4/the-big-char-pile/" 15 1
 run us-central1-b 2 "gs://ggpt4-us/the-big-char-pile/" 150 1
