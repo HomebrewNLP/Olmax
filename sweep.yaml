@@ -34,6 +34,10 @@ parameters:
     distribution: log_uniform
     min: -9
     max: -2
+  optimizer.warmup_end:
+    distribution: q_log_uniform
+    min: 4
+    max: 10
   optimizer.momentum_beta:
     distribution: log_uniform
     min: -6
@@ -41,8 +45,12 @@ parameters:
   dims.sizes.full_conv_kernel:
     distribution: q_log_uniform
     min: 0
-    max: 4
+    max: 5
   dims.sizes.depthwise_conv_kernel:
+    distribution: q_log_uniform
+    min: 0
+    max: 8
+  dims.sizes.depth:
     distribution: q_log_uniform
     min: 0
     max: 6
@@ -71,4 +79,9 @@ parameters:
   training.z_loss:
     distribution: log_uniform
     min: -9
-    max: -1
+    max: 0
+  model.weight_sharing:
+    distribution: categorical
+    values:
+      - yes
+      - no
