@@ -1,7 +1,7 @@
 program: main.py
 method: bayes
 metric:
-  name: Loss/Median1024
+  name: Loss/Median256
   goal: minimize
 command:
   - ${env}
