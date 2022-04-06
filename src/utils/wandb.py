@@ -38,4 +38,11 @@ class WandbLog:
                       "Optimizer/Learning Rate": current_lr.astype(float), "Optimizer/Beta1": ctx.optimizer.adam_beta1,
                       "Optimizer/Beta2": ctx.optimizer.adam_beta2}, step=step)
 
-        return self.loss_medians[0] < self.loss_medians[-1]
+        if self.loss_medians[0] < (self.loss_medians[-1] * (1 - ctx.training.minimum_relative_loss_change)):
+            # Not improving
+            return True
+        if all(loss > (self.loss_medians[-1] * ctx.training.maximum_spike_size)
+               for loss in self.losses[-ctx.training.maximum_spike_duration // device_steps:]):
+            # Spiking
+            return True
+        return False

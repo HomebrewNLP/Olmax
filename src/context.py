@@ -158,6 +158,9 @@ class Training(DataClass):
     steps: int = 2 ** 16
     print_interval: int = 1
     trace: TensorboardTrace = TensorboardTrace()
+    minimum_relative_loss_change: float = 0.01
+    maximum_spike_size: float = 3
+    maximum_spike_duration: int = 24
 
 
 class Context(DataClass):
