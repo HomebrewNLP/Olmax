@@ -18,20 +18,20 @@ def main():
     for zone, tpu_version, tpu_count, preemptible in [("europe-west4-a", 3, 250, 1),  #
                                                       # ("europe-west4-b", 3, 15, 1),  # missing permissions
                                                       # ("europe-west4-c", 3, 15, 1),  # missing permissions
-                                                      ("us-central1-a", 3, 200, 1),  #
-                                                      ("us-central1-c", 3, 15, 1),  #
+                                                      # ("us-central1-a", 3, 200, 1),  # broken region
+                                                      # ("us-central1-c", 3, 15, 1),  # broken region
                                                       # ("europe-west4-a", 3, 25, 0),  # actively used, so not occupying
                                                       # ("europe-west4-b", 3, 5, 0),  # missing permissions
                                                       # ("europe-west4-c", 3, 5, 0),  # missing permissions
-                                                      ("us-central1-c", 3, 5, 0),  #
+                                                      # ("us-central1-c", 3, 5, 0),  # broken region
                                                       # ("europe-west4-b", 2, 15, 1),  # missing permissions
                                                       # ("europe-west4-c", 2, 15, 1),  # missing permissions
-                                                      ("us-central1-b", 2, 150, 1),  #
-                                                      ("us-central1-c", 2, 150, 1),  #
+                                                      # ("us-central1-b", 2, 150, 1),  # broken region
+                                                      # ("us-central1-c", 2, 150, 1),  # broken region
                                                       ("us-central1-f", 2, 150, 1),  #
                                                       # ("europe-west4-b", 2, 5, 0),  # missing permissions
                                                       # ("europe-west4-c", 2, 5, 0),  # missing permissions
-                                                      ("us-central1-a", 2, 5, 0),  #
+                                                      # ("us-central1-a", 2, 5, 0),  # broken region
                                                       ("us-central1-f", 2, 25, 0),  #
                                                       ]:
         us_tpu = zone.startswith('us')
