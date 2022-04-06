@@ -43,7 +43,7 @@ def main():
         if preemptible:
             prefix += "-preemptible"
         os.system(f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone}'
-                  f' --tpu-version {tpu_version} --data-path gs://ggpt4{"us" * us_tpu}/the-big-char-pile/ '
+                  f' --tpu-version {tpu_version} --data-path gs://ggpt4{"-us" * us_tpu}/the-big-char-pile/ '
                   f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep} --cleanup {cleanup} '
                   f'--timeout-multiplier {len(CONFIGS)}')
 
