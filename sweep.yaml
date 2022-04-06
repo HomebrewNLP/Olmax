@@ -1,13 +1,13 @@
 program: main.py
 method: bayes
 metric:
-  name: Loss/Current
+  name: Loss/Median1024
   goal: minimize
 command:
-    - ${env}
-    - python3
-    - ${program}
-    - ${args}
+  - ${env}
+  - python3
+  - ${program}
+  - ${args}
 parameters:
   optimizer.weight_decay:
     distribution: log_uniform_values
@@ -56,9 +56,9 @@ parameters:
     q: 128
   dims.sizes.batch:
     distribution: q_log_uniform_values
-    min: 8
+    min: 2
     max: 128
-    q: 8
+    q: 2
   model.rezero_learning_rate_scale:
     distribution: log_uniform_values
     min: 0.0001
