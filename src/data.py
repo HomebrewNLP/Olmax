@@ -41,7 +41,7 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
 def text_dataset(ctx: Context) -> NumpyIterator:
     filenames = tf.io.gfile.glob(ctx.data.path)
 
-    rng = random.Random(seed)
+    rng = random.Random(ctx.data.seed)
     rng.shuffle(filenames)
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
