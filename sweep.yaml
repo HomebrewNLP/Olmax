@@ -3,11 +3,6 @@ method: bayes
 metric:
   name: Loss/Current
   goal: minimize
-early_terminate:
-  type: hyperband
-  max_iter: 5103
-  s: 4
-  eta: 3
 command:
     - ${env}
     - python3
@@ -79,7 +74,7 @@ parameters:
   training.z_loss:
     distribution: log_uniform
     min: -9
-    max: 0
+    max: 1
   model.weight_sharing:
     distribution: categorical
     values:
