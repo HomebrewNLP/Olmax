@@ -86,9 +86,9 @@ def synchronous_deletion(prefix: str, host: str, zone: str):
 
 
 def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
-                 data_path: str, preemptible: bool):
+                 data_path: str, preemptible: bool, timeout_multiplier: int):
     host = f"{prefix}-{tpu_id}"
-    time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER)
+    time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER * timeout_multiplier)
     if host in tpu_names(zone, preempted=True, deleting=True):
         if host not in tpu_names(zone, preempted=False, deleting=False):
             synchronous_deletion(prefix, host, zone)
@@ -114,12 +114,13 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
 
 
 def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone: str, data_path: str,
-                   preemptible: bool):
+                   preemptible: bool, timeout_multiplier: int):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
     procs = []
     for tpu_id in range(tpus):
         proc = multiprocessing.Process(target=start_single, daemon=True, args=(
-            prefix, tpu_id + 1, tpus, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible))
+            prefix, tpu_id + 1, tpus, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible,
+            timeout_multiplier))
         proc.start()
         procs.append(proc)
     while all(t.is_alive() for t in procs):
@@ -131,7 +132,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
             return
 
 
-def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool]:
+def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool, int]:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tpus", type=int, default=1, help="How many TPUs should be launched")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
@@ -140,21 +141,23 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool]:
     parser.add_argument("--data-path", type=str, default="gs://ggpt4/the-char-pile/",
                         help="Where the data is stored. Should be changed to a bucket in the correct region")
     parser.add_argument("--sweep", type=str, help="ID of the Weights and Biases sweep that'll be resumed")
-    parser.add_argument("--cleanup", default="0", type=str,
+    parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
-    parser.add_argument("--preemptible", default="1", type=str,
+    parser.add_argument("--preemptible", default=1, type=int,
                         help="Whether to create preemptible or non-preemptible TPUs")
+    parser.add_argument("--timeout-multiplier", default=1, type=int,
+                        help="additional timeout multiplier (for launching many scripts in parallel)")
     args = parser.parse_args()
-    return args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep, args.data_path, bool(
-        int(args.cleanup)), bool(int(args.preemptible))
+    return (args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep, args.data_path, bool(args.cleanup),
+            bool(args.preemptible), args.timeout_multiplier)
 
 
 def main():
-    tpus, tpu_version, prefix, zone, sweep_id, data_path, cleanup, preemptible = parse_args()
+    tpus, tpu_version, prefix, zone, sweep_id, data_path, cleanup, preemptible, timeout_multiplier = parse_args()
     if cleanup:
         delete_all(prefix, zone)
     else:
-        start_multiple(prefix, tpus, sweep_id, tpu_version, zone, data_path, preemptible)
+        start_multiple(prefix, tpus, sweep_id, tpu_version, zone, data_path, preemptible, timeout_multiplier)
 
 
 if __name__ == '__main__':
