@@ -180,6 +180,19 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     return _fn(*src)
 
 
+def z_loss(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
+    # forward: 0 (-> to not change loss)
+    # backward: grad(jnp.square(log_z).mean() * ctx.training.z_loss)
+    @jax.custom_gradient
+    def _fn(inp: jnp.ndarray):
+        def _grad(dy):
+            return inp * (dy * (ctx.training.z_loss / inp.size))
+
+        return jnp.zeros((), dtype=inp.dtype), _grad
+
+    return _fn(src)
+
+
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     src = promote_to(src, jnp.float32)
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
@@ -188,7 +201,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     loss = loss.mean()
     accuracy = (jnp.argmax(src, 2) == tgt).astype(jnp.float32).mean()
     if ctx.training.z_loss:
-        loss += jnp.square(log_z).mean() * ctx.training.z_loss
+        loss += z_loss(ctx, log_z)
     return loss, accuracy
 
 
