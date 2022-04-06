@@ -5,7 +5,7 @@ CONFIGS = [("europe-west4-a", 3, 250, 1),  #
            # ("europe-west4-b", 3, 15, 1),  # missing permissions
            # ("europe-west4-c", 3, 15, 1),  # missing permissions
            ("us-central1-a", 3, 200, 1),  # broken region?
-           ("us-central1-c", 3, 15, 1),  # broken region?
+           # ("us-central1-c", 3, 15, 1),  # broken region
            # ("europe-west4-a", 3, 25, 0),  # actively used, so not occupying
            # ("europe-west4-b", 3, 5, 0),  # missing permissions
            # ("europe-west4-c", 3, 5, 0),  # missing permissions

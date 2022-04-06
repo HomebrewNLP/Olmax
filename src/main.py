@@ -16,8 +16,8 @@ from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
-from src.utils.wandb import WandbLog
 from src.utils.checkpoint import write_ckpt
+from src.utils.wandb import WandbLog
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -155,8 +155,11 @@ def main():
                   f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {millions_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
+        if jnp.isnan(wctx.loss) or wctx.top_loss == 0:
+            return
         if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
-            wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step))
+            if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
+                return
         if ctx.training.trace.do_trace:
             if idx == ctx.training.trace.start_step:
                 jax.profiler.start_trace(ctx.training.trace.output_path)
