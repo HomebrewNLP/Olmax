@@ -122,7 +122,7 @@ class WandB(DataClass):
     entity: str = 'homebrewnlp'
     model_log_type: typing.Optional[str] = None  # One of "gradients", "parameters", "all", or None
     log_frequency: int = 1
-    median_sizes: typing.List[int] = [256, 1024]
+    median_sizes: typing.List[int] = [256]
 
 
 class Optimizer(DataClass):
