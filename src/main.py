@@ -99,7 +99,6 @@ def main():
     # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
     ctx = wctx.ctx
-    ctx.is_initializing = True
     if ctx.wandb.use_wandb:
         run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
         cfg = {}
@@ -118,6 +117,10 @@ def main():
         with open("config.yaml", 'w') as f:
             f.write(yaml.dump(ctx.config(), indent=4))
         sys.argv.insert(1, "config.yaml")
+        run.config.update(ctx.config())
+    wctx = WhileTrainContext()
+    ctx = wctx.ctx
+    ctx.is_initializing = True
     print(yaml.dump(ctx.config(), indent=4))
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
