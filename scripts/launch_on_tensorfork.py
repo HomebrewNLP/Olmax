@@ -10,7 +10,7 @@ def parse_args():
     parser.add_argument("--cleanup", default="0", type=str,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     args = parser.parse_args()
-    return args.sweep, bool(int(args.use_us)), bool(int(args.cleanup)), args.prefix
+    return args.sweep, bool(int(args.use_us)), args.cleanup, args.prefix
 
 
 def main():
@@ -40,13 +40,9 @@ def main():
         prefix = zone
         if preemptible:
             prefix += "-preemptible"
-        data_path = f"gs://ggpt4{'us' * us_tpu}/the-big-char-pile/"
-        args = f"launch_multiple_runs.py --tpus {tpu_count} --zone {zone} --tpu-version {tpu_version} " \
-               f"--data-path {data_path} --prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep}"
-        if cleanup == 1:
-            os.system(f'python3 {args} --cleanup 1')
-            continue
-        os.system(f'screen -dmS "{prefix}" python3 {args} --cleanup 0')
+        os.system(f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone}'
+                  f' --tpu-version {tpu_version} --data-path gs://ggpt4{"us" * us_tpu}/the-big-char-pile/ '
+                  f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep} --cleanup {cleanup}')
 
 
 if __name__ == '__main__':
