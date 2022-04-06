@@ -1,4 +1,5 @@
 import copy
+import sys
 import time
 import typing
 import warnings
@@ -114,6 +115,9 @@ def main():
             inner_cfg[split_name[-1]] = param
         init_class(ctx, cfg)
         wblog = WandbLog(run)
+        with open("config.yaml", 'w') as f:
+            f.write(yaml.dump(ctx.config(), indent=4))
+        sys.argv.insert(1, "config.yaml")
     print(yaml.dump(ctx.config(), indent=4))
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
