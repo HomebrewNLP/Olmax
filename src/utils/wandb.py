@@ -21,7 +21,7 @@ class WandbLog:
 
         self.run.log({"Loss/Current": curr_loss.astype(float),
                       "Loss/Mean": self.mean_loss.astype(float),
-                      "Loss/Current Max": (wctx.top_loss / wctx.ctx.training.device_steps).astype(float),
+                      "Accuracy/Current": (wctx.top_loss / wctx.ctx.training.device_steps).astype(float),
                       "Speed/Batches per Second": rate,
                       "Speed/Tokens per Day": tokens_per_day,
                       "Optimizer/Learning Rate": current_lr.astype(float),
