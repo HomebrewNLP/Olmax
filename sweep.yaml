@@ -9,6 +9,10 @@ command:
   - ${program}
   - ${args}
 parameters:
+  optimizer.exponential_decay:
+    distribution: log_uniform_values
+    min: 0.000001
+    max: 0.001
   optimizer.weight_decay:
     distribution: log_uniform_values
     min: 0.0001
