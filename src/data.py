@@ -9,14 +9,17 @@ from .context import Context
 tf1 = tf.compat.v1
 
 
-def decoder(int_string: bool, data: tf.Tensor, batch_prod: int):
+def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_batch: int):
     """
     Read a given tfrecord and windowed text dataset out of it.
     :param int_string: whether the entire dataset is in int64 or byte
     :param data: protobuf object to decode
-    :param batch_prod: sub_batch * (context + 1)
+    :param seed: rng seed
+    :param context_p1: context + 1
+    :param sub_batch: number of samples should be taken from this dataset per batch
     :return: tensorflow dataset of tokens
     """
+    batch_prod = context_p1 * sub_batch
 
     def chunk(proto):
         if int_string:
@@ -27,6 +30,8 @@ def decoder(int_string: bool, data: tf.Tensor, batch_prod: int):
             dat = tf.strings.unicode_decode(text_slice, 'UTF-8')
         dat = tf.reshape(dat, (-1,))
         dat = tf.slice(dat, (0,), (tf.size(dat) // batch_prod * batch_prod,))
+        dat = tf.reshape(dat, (-1, context_p1))
+        dat = tf.random.shuffle(dat, seed=seed)
         dat = tf.reshape(dat, (-1, batch_prod))
         return tf.data.Dataset.from_tensor_slices(dat)
 
@@ -36,8 +41,8 @@ def decoder(int_string: bool, data: tf.Tensor, batch_prod: int):
 def text_dataset(ctx: Context) -> NumpyIterator:
     filenames = tf.io.gfile.glob(ctx.data.path)
 
-    random.seed(ctx.seed)
-    random.shuffle(filenames)
+    rng = random.Random(seed)
+    rng.shuffle(filenames)
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
     sequence_length = ctx.dims.sizes.sequence
@@ -61,12 +66,12 @@ def text_dataset(ctx: Context) -> NumpyIterator:
         x = tf.transpose(x, (1, 0, 2))
         return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
 
-    dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x,
-                                             sequence_length_1 * full_batch // ctx.data.datasets_used_per_step),
+    dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, rng.randint(0, 2 ** 32),
+                                             sequence_length_1, full_batch // ctx.data.datasets_used_per_step),
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_workers)
     if ctx.data.shuffle_buffer > 0:
-        dset = dset.shuffle(ctx.data.shuffle_buffer, seed=ctx.data.seed)
+        dset = dset.shuffle(ctx.data.shuffle_buffer, seed=rng.randint(0, 2 ** 32))
     dset = dset.batch(ctx.data.datasets_used_per_step).map(_slice_target)
     if ctx.data.prefetch_buffer > 0:
         dset = dset.prefetch(ctx.data.prefetch_buffer)
