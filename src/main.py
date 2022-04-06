@@ -117,7 +117,7 @@ def main():
         with open("config.yaml", 'w') as f:
             f.write(yaml.dump(ctx.config(), indent=4))
         sys.argv.insert(1, "config.yaml")
-        run.config.update(ctx.config())
+        run.config.update(ctx.config(), allow_val_change=True)
     wctx = WhileTrainContext()
     ctx = wctx.ctx
     ctx.is_initializing = True
