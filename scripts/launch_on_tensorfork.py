@@ -40,6 +40,7 @@ def parse_args():
 
 def main():
     sweep, use_us, dry, cleanup, base_prefix, us_service_account, eu_service_account = parse_args()
+    scripts_folder = pathlib.Path(os.path.abspath(__file__)).parent
     for zone, tpu_version, tpu_count, preemptible in CONFIGS:
         us_tpu = zone.startswith('us')
         if us_tpu and not use_us:
@@ -50,9 +51,10 @@ def main():
         if preemptible:
             prefix += "-preemptible"
 
-        cmd = (f'export PYTHONPATH="{str(pathlib.Path(os.path.abspath(__file__)).parent.parent)}:$PYTHONPATH" && '
-               f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone} '
-               f'--tpu-version {tpu_version} --data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
+        cmd = (f'export PYTHONPATH="{scripts_folder.parent}:$PYTHONPATH" && '
+               f'screen -dmS "{prefix}" python3 {scripts_folder}/launch_multiple_runs.py --tpus {tpu_count} '
+               f'--zone {zone} --tpu-version {tpu_version} '
+               f'--data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep} --cleanup {cleanup} '
                f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account}')
         print(cmd)
