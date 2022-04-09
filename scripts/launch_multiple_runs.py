@@ -28,8 +28,8 @@ def exec_command(wandb_key: str, sweep_id: str, data_path: str):
                         f"git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/", f"cd HomebrewNLP-Jax",
                         f"(bash setup.sh ; exit 0)", f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
                         f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
-                        f'screen -dmS model bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent --count 1'
-                        f' {sweep_id}"'))
+                        f'screen -dmS model '
+                        f'bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent {sweep_id}"'))
 
 
 def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str):
