@@ -17,7 +17,7 @@ TIMEOUT_MULTIPLIER = 10
 
 API = googleapiclient.discovery.build('tpu', 'v1')
 _, PROJECT = google.auth.default()
-OLD_DATA_PATH = DataContext.path
+OLD_DATA_PATH = DataContext.path.replace("/", "\\/")[:-1]  # remove * at the end
 
 
 def exec_command(wandb_key: str, sweep_id: str, data_path: str):
@@ -27,7 +27,7 @@ def exec_command(wandb_key: str, sweep_id: str, data_path: str):
                         f"(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
                         f"git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/", f"cd HomebrewNLP-Jax",
                         f"(bash setup.sh ; exit 0)", f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
-                        f'sed -i "s/{OLD_DATA_PATH}//{data_path}/g" src/context.py',
+                        f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
                         f'screen -dmS model bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent --count 1'
                         f' {sweep_id}"'))
 
@@ -43,7 +43,8 @@ def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, da
 def exec_tpu(host: str, zone: str, command: str):
     print(f"running '{command}' ...", end='')
     start_time = time.time()
-    ret = subprocess.call([f"gcloud alpha compute tpus tpu-vm ssh ubuntu@{host} --zone {zone} --command '{command}'"])
+    ret = subprocess.call(["gcloud", "alpha", "compute", "tpus", "tpu-vm", "ssh", f"ubuntu@{host}",
+                           f"--zone", zone, "--command", command])
     if not ret:
         print(f"done after {time.time() - start_time:.1f}s")
         return
@@ -130,6 +131,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
             timeout_multiplier, service_account))
         proc.start()
         procs.append(proc)
+    time.sleep(1000)
     while all(t.is_alive() for t in procs):
         try:
             time.sleep(10)
