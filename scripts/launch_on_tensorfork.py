@@ -1,5 +1,6 @@
 import argparse
 import os
+import pathlib
 
 CONFIGS = [("europe-west4-a", 3, 250, 1),  #
            # ("europe-west4-b", 3, 15, 1),  # missing permissions
@@ -47,7 +48,9 @@ def main():
         prefix = zone
         if preemptible:
             prefix += "-preemptible"
-        cmd = (f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone} '
+
+        cmd = (f'export PYTHONPATH="{str(pathlib.Path(os.path.abspath(__file__)).parent)}:$PYTHONPATH" && '
+               f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone} '
                f'--tpu-version {tpu_version} --data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep} --cleanup {cleanup} '
                f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account}')
