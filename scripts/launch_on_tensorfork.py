@@ -26,26 +26,34 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prefix", type=str, default="homebrewnlp-preemptible-tuning", help="Name prefix for TPUs")
     parser.add_argument("--sweep", type=str, help="ID of the Weights and Biases sweep that'll be resumed")
-    parser.add_argument("--use-us", default="0", type=str, help="Whether to use TPUs from the USA")
-    parser.add_argument("--cleanup", default="0", type=str,
+    parser.add_argument("--us-service-account", type=str, help="EMail of the service account used for american TPUs")
+    parser.add_argument("--eu-service-account", type=str, help="EMail of the service account used for european TPUs")
+    parser.add_argument("--use-us", default=0, type=int, help="Whether to use TPUs from the USA")
+    parser.add_argument("--dry", default=1, type=int, help="Whether to only show what it'd do rather than doing it.")
+    parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     args = parser.parse_args()
-    return args.sweep, bool(int(args.use_us)), args.cleanup, args.prefix
+    return (args.sweep, bool(args.use_us), bool(args.dry), args.cleanup, args.prefix, args.us_service_account,
+            args.eu_service_account)
 
 
 def main():
-    sweep, use_us, cleanup, base_prefix = parse_args()
+    sweep, use_us, dry, cleanup, base_prefix, us_service_account, eu_service_account = parse_args()
     for zone, tpu_version, tpu_count, preemptible in CONFIGS:
         us_tpu = zone.startswith('us')
         if us_tpu and not use_us:
             continue
+        service_account = us_service_account if us_tpu else eu_service_account
         prefix = zone
         if preemptible:
             prefix += "-preemptible"
-        os.system(f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone}'
-                  f' --tpu-version {tpu_version} --data-path gs://ggpt4{"-us" * us_tpu}/the-big-char-pile/ '
-                  f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep} --cleanup {cleanup} '
-                  f'--timeout-multiplier {len(CONFIGS)}')
+        cmd = (f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone} '
+               f'--tpu-version {tpu_version} --data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
+               f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep} --cleanup {cleanup} '
+               f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account}')
+        print(cmd)
+        if not dry:
+            os.system(cmd)
 
 
 if __name__ == '__main__':

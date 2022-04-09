@@ -73,8 +73,8 @@ def delete_all(prefix: str, zone: str):
             t.join()
 
 
-def create_tpu(host: str, zone: str, tpu_version: int, tpus: int, preemptible: bool):
-    os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} '
+def create_tpu(host: str, zone: str, tpu_version: int, tpus: int, preemptible: bool, service_account: str):
+    os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} --service-account {service_account} '
               f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha {"--preemptible" * preemptible}; '
               f'do sleep {tpus * TIMEOUT_MULTIPLIER}; done')
 
@@ -86,15 +86,15 @@ def synchronous_deletion(prefix: str, host: str, zone: str):
 
 
 def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
-                 data_path: str, preemptible: bool, timeout_multiplier: int):
+                 data_path: str, preemptible: bool, timeout_multiplier: int, service_account: str):
     host = f"{prefix}-{tpu_id}"
     time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER * timeout_multiplier)
     if host in tpu_names(zone, preempted=True, deleting=True):
         if host not in tpu_names(zone, preempted=False, deleting=False):
             synchronous_deletion(prefix, host, zone)
-            create_tpu(host, zone, tpu_version, tpus, preemptible)
+            create_tpu(host, zone, tpu_version, tpus, preemptible, service_account)
     else:
-        create_tpu(host, zone, tpu_version, tpus, preemptible)
+        create_tpu(host, zone, tpu_version, tpus, preemptible, service_account)
 
     while True:
         try:
@@ -105,7 +105,7 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
                 time.sleep(5)
 
             synchronous_deletion(prefix, host, zone)
-            create_tpu(host, zone, tpu_version, tpus, preemptible)
+            create_tpu(host, zone, tpu_version, tpus, preemptible, service_account)
 
         except KeyboardInterrupt:
             print(f"{host} - {datetime.datetime.now()}: KeyboardInterrupt received. Killing TPU, then self.")
@@ -114,13 +114,13 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
 
 
 def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone: str, data_path: str,
-                   preemptible: bool, timeout_multiplier: int):
+                   preemptible: bool, timeout_multiplier: int, service_account: str):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
     procs = []
     for tpu_id in range(tpus):
         proc = multiprocessing.Process(target=start_single, daemon=True, args=(
             prefix, tpu_id + 1, tpus, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible,
-            timeout_multiplier))
+            timeout_multiplier, service_account))
         proc.start()
         procs.append(proc)
     while all(t.is_alive() for t in procs):
@@ -132,7 +132,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
             return
 
 
-def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool, int]:
+def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool, int, str]:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tpus", type=int, default=1, help="How many TPUs should be launched")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
@@ -147,17 +147,21 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool, int]:
                         help="Whether to create preemptible or non-preemptible TPUs")
     parser.add_argument("--timeout-multiplier", default=1, type=int,
                         help="additional timeout multiplier (for launching many scripts in parallel)")
+    parser.add_argument("--service-account", type=str,
+                        help="Service account that controls permissions of TPU (for example, to ensure EU TPUs won't use US data)")
     args = parser.parse_args()
     return (args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep, args.data_path, bool(args.cleanup),
-            bool(args.preemptible), args.timeout_multiplier)
+            bool(args.preemptible), args.timeout_multiplier, args.service_account)
 
 
 def main():
-    tpus, tpu_version, prefix, zone, sweep_id, data_path, cleanup, preemptible, timeout_multiplier = parse_args()
+    (tpus, tpu_version, prefix, zone, sweep_id, data_path, cleanup, preemptible, timeout_multiplier,
+     service_account) = parse_args()
     if cleanup:
         delete_all(prefix, zone)
     else:
-        start_multiple(prefix, tpus, sweep_id, tpu_version, zone, data_path, preemptible, timeout_multiplier)
+        start_multiple(prefix, tpus, sweep_id, tpu_version, zone, data_path, preemptible, timeout_multiplier,
+                       service_account)
 
 
 if __name__ == '__main__':
