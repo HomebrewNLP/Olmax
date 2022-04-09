@@ -3,6 +3,7 @@ import datetime
 import multiprocessing
 import netrc
 import os
+import subprocess
 import threading
 import time
 import typing
@@ -10,27 +11,29 @@ import typing
 import google.auth
 import googleapiclient.discovery
 
+from src.context import DataContext
+
 TIMEOUT_MULTIPLIER = 10
 
 API = googleapiclient.discovery.build('tpu', 'v1')
 _, PROJECT = google.auth.default()
+OLD_DATA_PATH = DataContext.path
 
 
-def exec_command(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str):
+def exec_command(wandb_key: str, sweep_id: str, data_path: str):
     data_path = data_path.replace("/", "\\/")
     # Bottom one doesn't use , on purpose
     return ' && '.join((f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip",
                         f"(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
                         f"git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/", f"cd HomebrewNLP-Jax",
                         f"(bash setup.sh ; exit 0)", f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
-                        f'sed -i "s/gs:\\/\\/ggpt4\\/the-big-char-pile\\//{data_path}/g" src/context.py',
+                        f'sed -i "s/{OLD_DATA_PATH}//{data_path}/g" src/context.py',
                         f'screen -dmS model bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent --count 1'
-                        f' {sweep_id} ; echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}" || '
-                        f'echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone}'))
+                        f' {sweep_id}"'))
 
 
 def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str):
-    command = exec_command(wandb_key, sweep_id, host, zone, data_path)
+    command = exec_command(wandb_key, sweep_id, data_path)
     with open(f'.{host}.sh', 'w') as f:
         f.write(command)
     os.system(f"gcloud alpha compute tpus tpu-vm scp .{host}.sh ubuntu@{host}:~/setup.sh --zone {zone}")
@@ -40,8 +43,12 @@ def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, da
 def exec_tpu(host: str, zone: str, command: str):
     print(f"running '{command}' ...", end='')
     start_time = time.time()
-    os.system(f"gcloud alpha compute tpus tpu-vm ssh ubuntu@{host} --zone {zone} --command '{command}'")
-    print(f"done after {time.time() - start_time:.1f}s")
+    ret = subprocess.call([f"gcloud alpha compute tpus tpu-vm ssh ubuntu@{host} --zone {zone} --command '{command}'"])
+    if not ret:
+        print(f"done after {time.time() - start_time:.1f}s")
+        return
+
+    delete_one_tpu(host, host, zone)
 
 
 def tpu_names(zone: str, preempted: bool = True, deleting: bool = False, prefix: str = ''):
@@ -80,7 +87,8 @@ def create_tpu(host: str, zone: str, tpu_version: int, tpus: int, preemptible: b
 
 
 def synchronous_deletion(prefix: str, host: str, zone: str):
-    delete_one_tpu(prefix, host, zone)
+    if host in tpu_names(zone):
+        delete_one_tpu(prefix, host, zone)
     while host in tpu_names(zone, deleting=True):
         time.sleep(2)
 
@@ -103,7 +111,6 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
 
             while host in tpu_names(zone, preempted=False):
                 time.sleep(5)
-
             synchronous_deletion(prefix, host, zone)
             create_tpu(host, zone, tpu_version, tpus, preemptible, service_account)
 
