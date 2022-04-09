@@ -45,11 +45,12 @@ def main():
         if us_tpu and not use_us:
             continue
         service_account = us_service_account if us_tpu else eu_service_account
-        prefix = zone
+        prefix = zone.split('-')
+        prefix = prefix[0][:2] + prefix[1][0] + prefix[1][-1] + prefix[2][-1]  # us-central1-f -> usc1f
         if preemptible:
             prefix += "-preemptible"
 
-        cmd = (f'export PYTHONPATH="{str(pathlib.Path(os.path.abspath(__file__)).parent)}:$PYTHONPATH" && '
+        cmd = (f'export PYTHONPATH="{str(pathlib.Path(os.path.abspath(__file__)).parent.parent)}:$PYTHONPATH" && '
                f'screen -dmS "{prefix}" python3 launch_multiple_runs.py --tpus {tpu_count} --zone {zone} '
                f'--tpu-version {tpu_version} --data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} --sweep {sweep} --cleanup {cleanup} '
