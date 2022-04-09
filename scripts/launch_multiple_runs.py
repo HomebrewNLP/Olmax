@@ -131,7 +131,6 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
             timeout_multiplier, service_account))
         proc.start()
         procs.append(proc)
-    time.sleep(1000)
     while all(t.is_alive() for t in procs):
         try:
             time.sleep(10)
