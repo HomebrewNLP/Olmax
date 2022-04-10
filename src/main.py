@@ -178,7 +178,7 @@ def main():
         ctx.dims.sizes.depthwise_conv_kernel = trial.suggest_int("depthwise_conv_kernel", low=1, high=2048, log=True)
         ctx.dims.sizes.depth = trial.suggest_int("depth", low=1, high=256, log=True)
         ctx.dims.sizes.features_per_head = 128 * trial.suggest_int("features_per_head//128", low=1, high=8, log=True)
-        ctx.dims.sizes.batch = trial.suggest_int("batch", low=1, high=128, log=True)
+        ctx.dims.sizes.batch = 2 * trial.suggest_int("batch//2", low=1, high=128, log=True)
         ctx.model.rezero_lr_scale = trial.suggest_float("rezero_lr_scale", low=1e-3, high=2, log=True)
         ctx.model.group_linear_factor = trial.suggest_int("group_linear_factor", low=1, high=32, log=True)
         ctx.model.leaky_relu_slope = trial.suggest_float("leaky_relu_slope", low=1e-3, high=2, log=True)

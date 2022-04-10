@@ -57,28 +57,30 @@ def main():
     (use_us, dry, cleanup, base_prefix, us_service_account, eu_service_account, storage_tpu_name,
      storage_tpu_zone, percentile) = parse_args()
 
-    with open("sweep.yaml", 'r') as f:
-        config = yaml.safe_load(f.read())
-    sweep = wandb.sweep(config, entity=WandB.entity, project=WandB.project)
+    if not cleanup:
+        with open("sweep.yaml", 'r') as f:
+            config = yaml.safe_load(f.read())
+        sweep = wandb.sweep(config, entity=WandB.entity, project=WandB.project)
+        synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
+        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
+                  f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
 
-    synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
-    os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
-              f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
-
-    exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt install -y redis", "redis-cli flushall",
-                                                            "sudo sed -i 's/127.0.0.1/0.0.0.0/g' /etc/redis/redis.conf",
-                                                            "sudo systemctl restart redis"]))
-    storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
-                                                                  "describe", storage_tpu_name, "--zone",
-                                                                  storage_tpu_zone]))
-    internal_ip = storage_description['networkEndpoints'][0]['ipAddress']
-    external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
-    startup_trials = len(CONFIGS) * 16  # on average, there should be 16 TPUs in parallel per region
-    optuna.create_study(f'redis://{external_ip}:6379', optuna.samplers.TPESampler(n_startup_trials=startup_trials),
-                        optuna.pruners.PercentilePruner(percentile, n_startup_trials=startup_trials,
-                                                        n_warmup_steps=4096),  # ~4x max useful warmup
-                        direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
-
+        exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt install -y redis", "redis-cli flushall",
+                                                                "sudo sed -i 's/127.0.0.1/0.0.0.0/g' /etc/redis/redis.conf",
+                                                                "sudo systemctl restart redis"]))
+        storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
+                                                                      "describe", storage_tpu_name, "--zone",
+                                                                      storage_tpu_zone]))
+        internal_ip = storage_description['networkEndpoints'][0]['ipAddress']
+        external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
+        startup_trials = len(CONFIGS) * 16  # on average, there should be 16 TPUs in parallel per region
+        optuna.create_study(f'redis://{external_ip}:6379', optuna.samplers.TPESampler(n_startup_trials=startup_trials),
+                            optuna.pruners.PercentilePruner(percentile, n_startup_trials=startup_trials,
+                                                            n_warmup_steps=4096),  # ~4x max useful warmup
+                            direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
+    else:
+        external_ip = ""
+        sweep = ""
     main_folder = pathlib.Path(os.path.abspath(__file__)).parent
     for zone, tpu_version, tpu_count, preemptible in CONFIGS:
         us_tpu = zone.startswith('us')
@@ -91,7 +93,7 @@ def main():
             prefix += "-preemptible"
 
         cmd = (f'export PYTHONPATH="{main_folder}:$PYTHONPATH" && '
-               f'screen -dmS "{prefix}" python3 {main_folder}/scripts/launch_multiple_runs.py --tpus {tpu_count} '
+               f'screen -dmS "{prefix}" python3 {main_folder}/script/launch_multiple_runs.py --tpus {tpu_count} '
                f'--zone {zone} --tpu-version {tpu_version} '
                f'--data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
