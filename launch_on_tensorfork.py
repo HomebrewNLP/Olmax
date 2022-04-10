@@ -8,7 +8,7 @@ import optuna
 import yaml
 
 import wandb
-from script.launch_multiple_runs import synchronous_deletion, exec_tpu
+from script.launch_multiple_runs import synchronous_deletion
 from src.context import WandB
 
 CONFIGS = [("europe-west4-a", 3, 250, 1),  #
@@ -67,26 +67,27 @@ def main():
                   f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
         password = base64.b32encode(os.urandom(16)).decode().lower().strip('=')
         exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt update",
+                                                                "sudo apt upgrade -y",
                                                                 "sudo apt install -y postgresql postgresql-contrib",
-                                                                "systemctl start postgresql.service",
-                                                                "systemctl restart postgresql.service",
-                                                                "echo 'host  all  all 0.0.0.0/0 md5' > "
-                                                                "sudo tee /etc/postgresql/12/main/pg_hba.conf",
-                                                                "sudo sed -i 's/localhost/*/g' "
+                                                                "sudo systemctl start postgresql",
+                                                                "echo 'host  all  all 0.0.0.0/0 md5' | "
+                                                                "sudo tee -a /etc/postgresql/12/main/pg_hba.conf",
+                                                                "sudo sed -i \"s/\\#listen_addresses = 'localhost'/"
+                                                                "listen_addresses = '*'/g\" "
                                                                 "/etc/postgresql/12/main/postgresql.conf",
                                                                 "sudo -u postgres psql -c "
                                                                 f"\"ALTER USER postgres PASSWORD '{password}';\"",
-                                                                "sudo systemctl restart redis"]))
+                                                                "sudo systemctl restart postgresql"]))
         storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
                                                                       "describe", storage_tpu_name, "--zone",
                                                                       storage_tpu_zone]))
         external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
-        optuna.create_study(f'redis://{external_ip}:6379', direction=optuna.study.StudyDirection.MINIMIZE,
-                            study_name=WandB.entity)
+        storage = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
+        print(storage)
+        optuna.create_study(storage, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
     else:
-        external_ip = ""
         sweep = ""
-        password = ""
+        storage = ""
     main_folder = pathlib.Path(os.path.abspath(__file__)).parent
     for zone, tpu_version, tpu_count, preemptible in CONFIGS:
         us_tpu = zone.startswith('us')
@@ -105,7 +106,7 @@ def main():
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
                f'--sweep {WandB.entity}/{WandB.project}/{sweep} --cleanup {cleanup} '
                f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account} '
-               f'--storage \'postgresql://postgres:{password}@{external_ip}:6379/postgres\'')
+               f"--storage '{storage}\'")
         print(cmd)
         if not dry:
             os.system(cmd)
