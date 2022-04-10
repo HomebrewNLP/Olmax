@@ -53,13 +53,12 @@ def exec_tpu(host: str, zone: str, command: str):
 
 
 def main():
-    sweep = wandb.sweep({"method": "random", "program": "main.py",
-                         "command": ["${env}", "python3", "${program}", "${args}"],
-                         "parameters": {"placeholder": {"distribution": "uniform", "min": 0, "max": 1}}},
-                        entity=WandB.entity, project=WandB.project)
-
     (use_us, dry, cleanup, base_prefix, us_service_account, eu_service_account, storage_tpu_name,
      storage_tpu_zone, percentile) = parse_args()
+
+    with open("config.yaml", 'r') as f:
+        config = yaml.safe_load(f.read())
+    sweep = wandb.sweep(config, entity=WandB.entity, project=WandB.project)
     exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt install -y redis", "redis-cli flushall",
                                                             "sudo sed -i 's/127.0.0.1/0.0.0.0/g' /etc/redis/redis.conf",
                                                             "sudo systemctl restart redis"]))

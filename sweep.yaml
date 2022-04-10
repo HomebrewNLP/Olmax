@@ -1,10 +1,8 @@
 program: main.py
 method: random
 command:
-  - ${env}
-  - python3
-  - ${program}
-  - ${args}
+  - bash
+  - run.sh
 parameters:
   placeholder:
     distribution: uniform
