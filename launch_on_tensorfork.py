@@ -91,7 +91,8 @@ def main():
                f'--data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
                f'--sweep {WandB.entity}/{WandB.project}/{sweep} --cleanup {cleanup} '
-               f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account} --storage {internal_ip}')
+               f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account} '
+               f'--storage \'redis://{internal_ip}:6379\'')
         print(cmd)
         if not dry:
             os.system(cmd)
