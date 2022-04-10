@@ -109,12 +109,37 @@ def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return output_conv(ctx, mid)
 
 
+def activated_allsum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray):
+        dtype = src.dtype
+        src = promote_to(src, jnp.float32)
+        out = activate(ctx, psum(ctx, src))
+        out = out.astype(dtype)
+
+        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+            return jnp.where(out >= 0, dy, ctx.model.leaky_relu_slope * dy).astype(dtype)
+
+        return out, _grad
+
+    return _fn(inp)
+
+
 def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("reduced_feed_forward")
-    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
-                    ctx.dims.intermediate)
-    mid = psum(ctx, mid)  # promote to fp32 before allreduce?
-    mid = activate(ctx, mid)
+
+    def _fn():
+        return full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
+                         ctx.dims.intermediate)
+
+    mid = _fn()
+    if ctx.model.glu_mode >= 1:
+        mid = mid * _fn()
+    if ctx.model.glu_mode >= 3:
+        mid = mid + _fn()
+    mid = activated_allsum(ctx, mid)
+    if ctx.model.glu_mode >= 2:
+        mid = scale_norm(ctx, mid)
     return output_conv(ctx, mid)
 
 

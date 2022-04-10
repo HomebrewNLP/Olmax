@@ -186,6 +186,7 @@ def main():
         ctx.model.group_linear_factor = trial.suggest_int("group_linear_factor", low=1, high=32, log=True)
         ctx.model.leaky_relu_slope = trial.suggest_float("leaky_relu_slope", low=1e-3, high=2, log=True)
         ctx.model.weight_sharing = trial.suggest_int("weight_sharing", low=0, high=1)
+        ctx.model.glu_mode = trial.suggest_int("glu_mode", low=0, high=3)
         ctx.training.z_loss = trial.suggest_float("z_loss", low=1e-3, high=2, log=True)
 
         with open("config.yaml", 'w') as f:
