@@ -6,13 +6,14 @@ import warnings
 
 import jax
 import jax._src.util as util
+import optuna
 import wandb
 import yaml
 from jax import numpy as jnp
 
 from src.backend import loop
 from src.constants import ParallelAxes
-from src.context import Context, WhileTrainContext, init_class
+from src.context import Context, WhileTrainContext
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
@@ -94,30 +95,7 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
     return _fn
 
 
-def main():
-    warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
-    # jax.config.update("jax_disable_jit", True)
-    wctx = WhileTrainContext()
-    ctx = wctx.ctx
-    if ctx.wandb.use_wandb:
-        run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
-        cfg = {}
-        for param_name, param in run.config.items():
-            if '.' not in param_name:
-                continue
-            inner_cfg = cfg
-            split_name = param_name.split(".")
-            for s in split_name[:-1]:
-                if s not in inner_cfg:
-                    inner_cfg[s] = {}
-                inner_cfg = inner_cfg[s]
-            inner_cfg[split_name[-1]] = param
-        init_class(ctx, cfg)
-        wblog = WandbLog(run)
-        with open("config.yaml", 'w') as f:
-            f.write(yaml.dump(ctx.config(), indent=4))
-        sys.argv.insert(1, "config.yaml")
-        run.config.update(ctx.config(), allow_val_change=True)
+def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optuna.Trial] = None):
     wctx = WhileTrainContext()
     ctx = wctx.ctx
     ctx.is_initializing = True
@@ -156,10 +134,14 @@ def main():
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {millions_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
         if jnp.isnan(wctx.loss) or wctx.top_loss == 0:
-            return
+            return -1
         if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
             if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
-                return
+                return -1
+        if trial is not None:
+            trial.report(wblog.loss_medians[-1], idx * ctx.training.device_steps)
+            if trial.should_prune():
+                return -1
         if ctx.training.trace.do_trace:
             if idx == ctx.training.trace.start_step:
                 jax.profiler.start_trace(ctx.training.trace.output_path)
@@ -167,6 +149,53 @@ def main():
                 jax.profiler.stop_trace()
         if ctx.training.do_checkpoint and (idx + 1) % ctx.training.checkpoint_interval == 0:
             write_ckpt(ctx)
+
+
+def main():
+    warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
+    # jax.config.update("jax_disable_jit", True)
+    wctx = WhileTrainContext()
+    ctx = wctx.ctx
+    if not ctx.wandb.use_wandb:
+        return run_one()
+
+    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
+    wblog = WandbLog(run)
+
+    if "placeholder" not in run.config:
+        return run_one(wblog)
+
+    def objective(trial: optuna.trial.Trial) -> typing.Optional[float]:
+        ctx.optimizer.exponential_decay = trial.suggest_float("exponential_decay", low=1e-6, high=1e-3, log=True)
+        ctx.optimizer.weight_decay = trial.suggest_float("weight_decay", low=1e-5, high=1, log=True)
+        ctx.optimizer.adam_beta1 = trial.suggest_float("adam_beta1", low=1e-3, high=1, log=True)
+        ctx.optimizer.adam_beta2 = trial.suggest_float("adam_beta2", low=1e-4, high=1, log=True)
+        ctx.optimizer.gradient_clip = trial.suggest_float("gradient_clip", low=1e-5, high=1, log=True)
+        ctx.optimizer.learning_rate = trial.suggest_float("learning_rate", low=1e-5, high=1, log=True)
+        ctx.optimizer.warmup_end = trial.suggest_int("warmup_end", low=16, high=8192, log=True)
+        ctx.optimizer.momentum_beta = trial.suggest_float("momentum_beta", low=1e-4, high=1, log=True)
+        ctx.dims.sizes.full_conv_kernel = trial.suggest_int("full_conv_kernel", low=1, high=128, log=True)
+        ctx.dims.sizes.depthwise_conv_kernel = trial.suggest_int("depthwise_conv_kernel", low=1, high=2048, log=True)
+        ctx.dims.sizes.depth = trial.suggest_int("depth", low=1, high=256, log=True)
+        ctx.dims.sizes.features_per_head = 128 * trial.suggest_int("features_per_head//128", low=1, high=8, log=True)
+        ctx.dims.sizes.batch = trial.suggest_int("batch", low=1, high=128, log=True)
+        ctx.model.rezero_lr_scale = trial.suggest_float("rezero_lr_scale", low=1e-3, high=2, log=True)
+        ctx.model.group_linear_factor = trial.suggest_int("group_linear_factor", low=1, high=32, log=True)
+        ctx.model.leaky_relu_slope = trial.suggest_float("leaky_relu_slope", low=1e-3, high=2, log=True)
+        ctx.model.weight_sharing = trial.suggest_int("weight_sharing", low=0, high=1)
+        ctx.training.z_loss = trial.suggest_float("z_loss", low=1e-3, high=2, log=True)
+
+        with open("config.yaml", 'w') as f:
+            f.write(yaml.dump(ctx.config(), indent=4))
+        sys.argv.insert(1, "config.yaml")
+        run.config.update(ctx.config(), allow_val_change=True)
+        out = run_one(wblog, trial)
+        if out == -1:
+            raise optuna.TrialPruned()
+        return out
+
+    study = optuna.load_study(study_name=ctx.wandb.entity, storage=ctx.wandb.storage)
+    return study.optimize(objective, 1)
 
 
 if __name__ == '__main__':

@@ -120,7 +120,7 @@ class WandB(DataClass):
     use_wandb: bool = True
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
-    model_log_type: typing.Optional[str] = None  # One of "gradients", "parameters", "all", or None
+    storage: str = 'redis://0.0.0.0:51367'  # used for sweeps with external tuners
     log_frequency: int = 1
     median_sizes: typing.List[int] = [256]
 
@@ -137,7 +137,7 @@ class Optimizer(DataClass):
 
 
 class Model(DataClass):
-    rezero_learning_rate_scale: float = 0.01
+    rezero_lr_scale: float = 0.01
     device_halo_size: int = 3
     scan_unroll: int = 1
     group_linear_factor: int = 2

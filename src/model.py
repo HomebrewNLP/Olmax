@@ -68,8 +68,7 @@ def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("rezero")
-    scale = get_param(ctx, "scale", [ctx.dims.one], std=0,
-                      learning_rate_scale=ctx.model.rezero_learning_rate_scale * scale)
+    scale = get_param(ctx, "scale", [ctx.dims.one], std=0, lr_scale=ctx.model.rezero_lr_scale * scale)
     return inp * scale
 
 
@@ -133,7 +132,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
     embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
-                     learning_rate_scale=1 / ctx.dims.sizes.heads)
+                     lr_scale=1 / ctx.dims.sizes.heads)
     inp = scale_norm(ctx, inp)
     if ctx.is_initializing:
         return inp
