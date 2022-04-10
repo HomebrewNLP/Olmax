@@ -121,6 +121,7 @@ class WandB(DataClass):
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
     storage: str = 'redis://0.0.0.0:51367'  # used for sweeps with external tuners
+    percentile: float = 25
     log_frequency: int = 1
     median_sizes: typing.List[int] = [256]
 

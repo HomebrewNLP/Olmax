@@ -99,7 +99,10 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
     wctx = WhileTrainContext()
     ctx = wctx.ctx
     ctx.is_initializing = True
+    storage = ctx.wandb.storage
+    ctx.wandb.storage = ""  # mask to avoid logging it publicly
     print(yaml.dump(ctx.config(), indent=4))
+    ctx.wandb.storage = storage
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
@@ -188,13 +191,16 @@ def main():
         with open("config.yaml", 'w') as f:
             f.write(yaml.dump(ctx.config(), indent=4))
         sys.argv.insert(1, "config.yaml")
+        ctx.wandb.storage = ""
         run.config.update(ctx.config(), allow_val_change=True)
         out = run_one(wblog, trial)
         if out == -1:
             raise optuna.TrialPruned()
         return out
 
-    study = optuna.load_study(study_name=ctx.wandb.entity, storage=ctx.wandb.storage)
+    study = optuna.load_study(ctx.wandb.entity, ctx.wandb.storage, optuna.samplers.TPESampler(n_startup_trials=128),
+                              optuna.pruners.PercentilePruner(ctx.wandb.percentile, n_startup_trials=128,
+                                                              n_warmup_steps=4096))
     return study.optimize(objective, 1)
 
 
