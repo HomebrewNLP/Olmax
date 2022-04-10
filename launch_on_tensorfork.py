@@ -7,6 +7,7 @@ import optuna
 import yaml
 
 import wandb
+from script.launch_multiple_runs import synchronous_deletion, exec_tpu
 from src.context import WandB
 
 CONFIGS = [("europe-west4-a", 3, 250, 1),  #
@@ -56,9 +57,14 @@ def main():
     (use_us, dry, cleanup, base_prefix, us_service_account, eu_service_account, storage_tpu_name,
      storage_tpu_zone, percentile) = parse_args()
 
-    with open("config.yaml", 'r') as f:
+    with open("sweep.yaml", 'r') as f:
         config = yaml.safe_load(f.read())
     sweep = wandb.sweep(config, entity=WandB.entity, project=WandB.project)
+
+    synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
+    os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
+              f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
+
     exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt install -y redis", "redis-cli flushall",
                                                             "sudo sed -i 's/127.0.0.1/0.0.0.0/g' /etc/redis/redis.conf",
                                                             "sudo systemctl restart redis"]))
@@ -91,7 +97,7 @@ def main():
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
                f'--sweep {WandB.entity}/{WandB.project}/{sweep} --cleanup {cleanup} '
                f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account} '
-               f'--storage \'redis://{internal_ip}:6379\'')
+               f'--storage \'redis://{external_ip}:6379\'')
         print(cmd)
         if not dry:
             os.system(cmd)

@@ -158,7 +158,7 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool, int, 
     parser.add_argument("--preemptible", default=1, type=int,
                         help="Whether to create preemptible or non-preemptible TPUs")
     parser.add_argument("--timeout-multiplier", default=1, type=int,
-                        help="additional timeout multiplier (for launching many scripts in parallel)")
+                        help="additional timeout multiplier (for launching many script in parallel)")
     parser.add_argument("--service-account", type=str,
                         help="Service account that controls permissions of TPU (for example, to ensure EU TPUs won't use US data)")
     args = parser.parse_args()
