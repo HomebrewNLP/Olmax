@@ -21,7 +21,6 @@ OLD_DATA_PATH = DataContext.path.replace("/", "\\/")[:-1]  # remove * at the end
 OLD_STORAGE = WandB.storage.replace("/", "\\/")
 MANAGER = multiprocessing.Manager()
 GLOBAL_DICT = MANAGER.dict()
-GLOBAL_DICT["last_write"] = 0
 CACHE_TIME = 10
 
 
@@ -60,7 +59,7 @@ def exec_tpu(host: str, zone: str, command: str):
 
 
 def all_tpus(zone: str):
-    if GLOBAL_DICT[f"last_write_{zone}"] < time.time() - CACHE_TIME:
+    if GLOBAL_DICT.get(f"last_write_{zone}", 0) < time.time() - CACHE_TIME:
         GLOBAL_DICT[f"last_write_{zone}"] = time.time()
         GLOBAL_DICT[f"tpus_{zone}"] = API.projects().locations().nodes().list(parent=zone).execute().get('nodes', [])
     return GLOBAL_DICT[f"tpus_{zone}"]
@@ -74,6 +73,8 @@ def tpu_names(zone: str, preempted: bool = True, deleting: bool = False, prefix:
             tpus = [t['name'].split('/')[-1] for t in tpus if
                     (deleting or t['state'] != "DELETING") and (preempted or t['state'] != "PREEMPTED")]
             return [t for t in tpus if t.startswith(prefix)]
+        except KeyboardInterrupt as exc:
+            raise exc
         except:
             pass
 
