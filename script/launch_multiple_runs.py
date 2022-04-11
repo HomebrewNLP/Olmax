@@ -157,7 +157,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
             return
 
 
-def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool, int, str]:
+def parse_args() -> typing.Tuple[int, int, str, str, str, str, bool, bool, int, str, str]:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tpus", type=int, default=1, help="How many TPUs should be launched")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
