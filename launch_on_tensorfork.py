@@ -82,7 +82,9 @@ def main():
                                                                       "describe", storage_tpu_name, "--zone",
                                                                       storage_tpu_zone]))
         external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
-        storage = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
+        storage = optuna.storages.RDBStorage(url=f"postgresql://postgres:{password}@{external_ip}:5432/postgres",
+                                             heartbeat_interval=60,
+                                             grace_period=120)
         optuna.create_study(storage, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
     else:
         sweep = ""
