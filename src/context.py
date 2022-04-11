@@ -73,15 +73,14 @@ class DimSizes(DataClass):
     full_conv_kernel: int = 9
     depthwise_conv_kernel: int = 81
     features_per_head: int = 256
+    intermediate: int = 512
     heads: int = 8
     sequence: int = 65536
     one: int = 1
     depth: int = 4
 
-    def __init__(self, data: DataContext, group_linear_factor: float):
+    def __init__(self, data: DataContext):
         self.vocab: int = data.vocab_size
-        self.intermediate = int(self.features_per_head * group_linear_factor)
-        self.multiplier: int = group_linear_factor
 
     def __getitem__(self, item: str):
         return getattr(self, item)
@@ -101,8 +100,8 @@ class Dims(DataClass):
     multiplier: str = "multiplier"
     vocab: str = "vocab"
 
-    def __init__(self, data: DataContext, group_linear_factor: float):
-        self.sizes: DimSizes = DimSizes(data, group_linear_factor)
+    def __init__(self, data: DataContext):
+        self.sizes: DimSizes = DimSizes(data)
 
 
 class TensorboardTrace(DataClass):
@@ -142,7 +141,6 @@ class Model(DataClass):
     rezero_lr_scale: float = 0.01
     device_halo_size: int = 3
     scan_unroll: int = 1
-    group_linear_factor: int = 2
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
     weight_sharing: bool = False
@@ -178,7 +176,7 @@ class Context(DataClass):
         self.model = Model()
         self.training = Training()
         self.wandb = WandB()
-        self.dims = Dims(self.data, self.model.group_linear_factor)
+        self.dims = Dims(self.data)
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
