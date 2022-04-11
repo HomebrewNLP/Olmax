@@ -127,25 +127,26 @@ def activated_allsum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def full_inp_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    return full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
-                     ctx.dims.intermediate)
-
-
 def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("reduced_feed_forward")
-    mid = full_inp_conv(ctx, inp)
+    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
+                    ctx.dims.intermediate)
     mid = activated_allsum(ctx, mid)
     return output_conv(ctx, mid)
 
 
 def glu_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("glu_feed_forward")
-    mid = full_inp_conv(ctx, inp)
+
+    def _fn():
+        return full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
+                         ctx.dims.features_per_head)
+
+    mid = _fn()
     if ctx.model.glu_mode >= 1:
-        mid = mid * full_inp_conv(ctx, inp)
+        mid = mid * _fn()
     if ctx.model.glu_mode >= 3:
-        mid = mid + full_inp_conv(ctx, inp)
+        mid = mid + _fn()
     mid = activate(ctx, mid)
     if ctx.model.glu_mode >= 2:
         mid = scale_norm(ctx, mid)
