@@ -19,6 +19,10 @@ API = googleapiclient.discovery.build('tpu', 'v1')
 _, PROJECT = google.auth.default()
 OLD_DATA_PATH = DataContext.path.replace("/", "\\/")[:-1]  # remove * at the end
 OLD_STORAGE = WandB.storage.replace("/", "\\/")
+MANAGER = multiprocessing.Manager()
+GLOBAL_DICT = MANAGER.dict()
+GLOBAL_DICT["last_write"] = 0
+CACHE_TIME = 10
 
 
 def exec_command(wandb_key: str, sweep_id: str, data_path: str, storage: str):
@@ -55,11 +59,18 @@ def exec_tpu(host: str, zone: str, command: str):
     delete_one_tpu(host, host, zone)
 
 
+def all_tpus(zone: str):
+    if GLOBAL_DICT[f"last_write_{zone}"] < time.time() - CACHE_TIME:
+        GLOBAL_DICT[f"last_write_{zone}"] = time.time()
+        GLOBAL_DICT[f"tpus_{zone}"] = API.projects().locations().nodes().list(parent=zone).execute().get('nodes', [])
+    return GLOBAL_DICT[f"tpus_{zone}"]
+
+
 def tpu_names(zone: str, preempted: bool = True, deleting: bool = False, prefix: str = ''):
     zone = 'projects/' + PROJECT + '/locations/' + zone
     while True:
         try:
-            tpus = API.projects().locations().nodes().list(parent=zone).execute().get('nodes', [])
+            tpus = all_tpus(zone)
             tpus = [t['name'].split('/')[-1] for t in tpus if
                     (deleting or t['state'] != "DELETING") and (preempted or t['state'] != "PREEMPTED")]
             return [t for t in tpus if t.startswith(prefix)]
@@ -95,7 +106,7 @@ def synchronous_deletion(prefix: str, host: str, zone: str):
     if host in tpu_names(zone):
         delete_one_tpu(prefix, host, zone)
     while host in tpu_names(zone, deleting=True):
-        time.sleep(2)
+        time.sleep(CACHE_TIME)
 
 
 def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
@@ -116,7 +127,7 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
             exec_tpu(host, zone, "bash setup.sh")
 
             while host in tpu_names(zone, preempted=False):
-                time.sleep(5)
+                time.sleep(CACHE_TIME)
             synchronous_deletion(prefix, host, zone)
             create_tpu(host, zone, tpu_version, tpus, preemptible, service_account, creation_semaphore)
 
