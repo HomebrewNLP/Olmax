@@ -1,4 +1,5 @@
 import copy
+import math
 import operator
 import typing
 
@@ -95,9 +96,10 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: s
     return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, ctx.dims.one, out_features, use_rezero)
 
 
-def output_conv(ctx: Context, inp: jnp.ndarray):
+def output_conv(ctx: Context, inp: jnp.ndarray, features: typing.Optional[str] = None):
     ctx = ctx.add_to_prefix("output_conv")
-    return full_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5, ctx.dims.intermediate, ctx.dims.features_per_head, True)
+    return full_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5, ctx.dims.intermediate if features is None else features,
+                     ctx.dims.features_per_head, True)
 
 
 def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -141,6 +143,24 @@ def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.model.glu_mode >= 2:
         mid = scale_norm(ctx, mid)
     return output_conv(ctx, mid)
+
+
+def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+    dtype = forget.dtype
+    forget = promote_to(forget, jnp.float32)
+    x = promote_to(x, jnp.float32)
+    forget = jax.nn.hard_sigmoid(forget)
+    for i in range(int(math.log2(ctx.dims.sizes.sequence))):
+        x += jnp.concatenate([jnp.zeros((2 ** i,)), x[:- 2 ** i] * forget[2 ** i:]])
+        forget *= jnp.concatenate([jnp.ones((2 ** i,)), forget[:-2 ** i]])
+    return x.astype(dtype)
+
+
+def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    forget = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head)
+    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head)
+    out = qrnn(ctx, forget, mid)
+    return output_conv(ctx, out, ctx.dims.features_per_head)
 
 
 def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
@@ -247,6 +267,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     for i in range(ctx.dims.sizes.depth):
         src = reversible(ctx, group_feed_forward, src)
         src = reversible(ctx, reduced_feed_forward, src)
+        src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
