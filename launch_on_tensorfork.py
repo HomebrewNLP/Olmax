@@ -62,9 +62,9 @@ def main():
         with open("sweep.yaml", 'r') as f:
             config = yaml.safe_load(f.read())
         sweep = wandb.sweep(config, entity=WandB.entity, project=WandB.project)
-        synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
-        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
-                  f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
+        #synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
+        #os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
+        #          f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
         password = base64.b32encode(os.urandom(16)).decode().lower().strip('=')
         exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt update",
                                                                 "sudo apt upgrade -y",
@@ -82,12 +82,17 @@ def main():
                                                                       "describe", storage_tpu_name, "--zone",
                                                                       storage_tpu_zone]))
         external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
-        storage = optuna.storages.RDBStorage(url=f"postgresql://postgres:{password}@{external_ip}:5432/postgres",
-                                             heartbeat_interval=60, grace_period=300)
-        optuna.create_study(storage, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
+
+        url = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
+        storage = optuna.storages.RDBStorage(url=url, heartbeat_interval=60, grace_period=300)
+        try:
+            optuna.delete_study(WandB.entity, storage)
+        except:
+            pass
+        optuna.create_study(storage.url, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
     else:
         sweep = ""
-        storage = ""
+        url = ""
     main_folder = pathlib.Path(os.path.abspath(__file__)).parent
     for zone, tpu_version, tpu_count, preemptible in CONFIGS:
         us_tpu = zone.startswith('us')
@@ -106,7 +111,7 @@ def main():
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
                f'--sweep {WandB.entity}/{WandB.project}/{sweep} --cleanup {cleanup} '
                f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account} '
-               f"--storage '{storage}\'")
+               f"--storage '{url}'")
         print(cmd)
         if not dry:
             os.system(cmd)
