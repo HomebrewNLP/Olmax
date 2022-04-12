@@ -62,9 +62,9 @@ def main():
         with open("sweep.yaml", 'r') as f:
             config = yaml.safe_load(f.read())
         sweep = wandb.sweep(config, entity=WandB.entity, project=WandB.project)
-        #synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
-        #os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
-        #          f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
+        synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
+        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
+                  f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
         password = base64.b32encode(os.urandom(16)).decode().lower().strip('=')
         exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt update",
                                                                 "sudo apt upgrade -y",
