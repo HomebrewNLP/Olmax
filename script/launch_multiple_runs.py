@@ -99,8 +99,9 @@ def delete_all(prefix: str, zone: str):
 def create_tpu(host: str, zone: str, tpu_version: int, tpus: int, preemptible: bool, service_account: str,
                semaphore: multiprocessing.Semaphore):
     with semaphore:
-        os.system(f'while ! tpu-vm create {host}  {service_account} --zone {zone} --accelerator-type v{tpu_version}-8 '
-                  f'--version v2-alpha {"--preemptible" * preemptible}; do sleep {tpus * TIMEOUT_MULTIPLIER}; done')
+        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host}  {service_account} --zone {zone}'
+                  f'--accelerator-type v{tpu_version}-8 --version v2-alpha {"--preemptible" * preemptible}; '
+                  f'do sleep {tpus * TIMEOUT_MULTIPLIER}; done')
 
 
 def synchronous_deletion(prefix: str, host: str, zone: str):
