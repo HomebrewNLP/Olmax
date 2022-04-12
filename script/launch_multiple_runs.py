@@ -86,9 +86,16 @@ def delete_one_tpu(prefix: str, host: str, zone: str):
     os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone} --async")
 
 
+def synchronous_deletion(prefix: str, host: str, zone: str):
+    if host in tpu_names(zone):
+        delete_one_tpu(prefix, host, zone)
+    while host in tpu_names(zone, deleting=True):
+        time.sleep(CACHE_TIME)
+
+
 def delete_all(prefix: str, zone: str):
     while tpu_names(zone, prefix=prefix):
-        threads = [threading.Thread(target=delete_one_tpu, args=(prefix, host, zone), daemon=True) for host in
+        threads = [threading.Thread(target=synchronous_deletion, args=(prefix, host, zone), daemon=True) for host in
                    tpu_names(zone)]
         for t in threads:
             t.start()
@@ -102,13 +109,6 @@ def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, servic
         os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} --service-account {service_account} '
                   f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha '
                   f'{"--preemptible" * preemptible}; do echo; done')
-
-
-def synchronous_deletion(prefix: str, host: str, zone: str):
-    if host in tpu_names(zone):
-        delete_one_tpu(prefix, host, zone)
-    while host in tpu_names(zone, deleting=True):
-        time.sleep(CACHE_TIME)
 
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
