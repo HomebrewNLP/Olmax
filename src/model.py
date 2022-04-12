@@ -159,7 +159,7 @@ def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     x = promote_to(x, jnp.float32)
     forget = jax.nn.hard_sigmoid(forget)
     for i in range(int(math.log2(ctx.dims.sizes.sequence))):
-        x += jnp.concatenate([jnp.zeros((x.shape[0], 2 ** i, x.shape[2])), x[:, - 2 ** i] * forget[:, 2 ** i:]], 1)
+        x += jnp.concatenate([jnp.zeros((x.shape[0], 2 ** i, x.shape[2])), x[:, :-2 ** i] * forget[:, 2 ** i:]], 1)
         forget *= jnp.concatenate([jnp.ones((x.shape[0], 2 ** i, x.shape[2])), forget[:, :-2 ** i]], 1)
     return x.astype(dtype)
 
