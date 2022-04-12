@@ -145,6 +145,10 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
             trial.report(wblog.loss_medians[-1], idx * ctx.training.device_steps)
             if trial.should_prune():
                 return -1
+        thres = min((k for k, v in ctx.training.loss_thresholds.items() if k > idx * ctx.training.device_steps),
+                    default=10 ** 9)
+        if wblog.loss_medians[-1] > thres:
+            return -1
         if ctx.training.trace.do_trace:
             if idx == ctx.training.trace.start_step:
                 jax.profiler.start_trace(ctx.training.trace.output_path)
@@ -202,7 +206,7 @@ def main():
 
     study = optuna.load_study(ctx.wandb.entity, ctx.wandb.storage, optuna.samplers.TPESampler(n_startup_trials=128),
                               optuna.pruners.PercentilePruner(ctx.wandb.percentile, n_startup_trials=128,
-                                                              n_warmup_steps=4096))
+                                                              n_warmup_steps=2048))
     return study.optimize(objective, 1)
 
 

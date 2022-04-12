@@ -158,10 +158,10 @@ class Training(DataClass):
     steps: int = 2 ** 16
     print_interval: int = 1
     trace: TensorboardTrace = TensorboardTrace()
-    minimum_relative_loss_change: float = 0.01
+    minimum_relative_loss_change: float = 0.003
     maximum_spike_size: float = 3
     maximum_spike_duration: int = 24
-
+    loss_thresholds: typing.Dict[int, int] = {128: 5, 256: 4, 512: 3.5, 1024: 3, 2048: 2.5, 3072: 2.1, 4096: 2}
 
 class Context(DataClass):
     data: DataContext = DataContext()
