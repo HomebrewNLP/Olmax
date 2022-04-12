@@ -144,7 +144,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
     procs = []
     for tpu_id in range(tpus):
-        creation_semaphore = multiprocessing.Semaphore(1)
+        creation_semaphore = multiprocessing.Semaphore(2)
         proc = multiprocessing.Process(target=start_single, daemon=True, args=(
             prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible,
             timeout_multiplier, service_account, storage, creation_semaphore))
