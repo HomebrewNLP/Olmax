@@ -66,6 +66,7 @@ def all_tpus(zone: str):
     if GLOBAL_DICT.get(f"last_write_{zone}", 0) < time.time() - CACHE_TIME:
         GLOBAL_DICT[f"last_write_{zone}"] = time.time()
         GLOBAL_DICT[f"tpus_{zone}"] = API.projects().locations().nodes().list(parent=zone).execute().get('nodes', [])
+    print(GLOBAL_DICT[f"tpus_{zone}"], GLOBAL_DICT.get(f"last_write_{zone}", 0), time.time())
     return GLOBAL_DICT[f"tpus_{zone}"]
 
 

@@ -145,7 +145,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
             trial.report(wblog.loss_medians[-1], idx * ctx.training.device_steps)
             if trial.should_prune():
                 return -1
-        thres = min((v for k, v in ctx.training.loss_thresholds.items() if k > idx * ctx.training.device_steps),
+        thres = min((v for k, v in ctx.training.loss_thresholds.items() if idx * ctx.training.device_steps > k),
                     default=10 ** 9)
         if wblog.loss_medians[-1] > thres:
             return -1
