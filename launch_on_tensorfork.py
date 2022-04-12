@@ -74,7 +74,7 @@ def main():
                              "echo 'host  all  all 0.0.0.0/0 md5' | sudo tee -a /etc/postgresql/12/main/pg_hba.conf",
                              "sudo sed -i \"s/\\#listen_addresses = 'localhost'/listen_addresses = '*'/g\" "
                              "/etc/postgresql/12/main/postgresql.conf",
-                             "sudo sed -i \"s/\\max_connections = 100/max_connections = 100000/g\" "
+                             "sudo sed -i \"s/\\max_connections = 100/max_connections = 5000/g\" "
                              "/etc/postgresql/12/main/postgresql.conf",
                              "sudo sed -i \"s/\\shared_buffers = 128MB/shared_buffers = 128GB/g\" "
                              "/etc/postgresql/12/main/postgresql.conf",
@@ -87,7 +87,7 @@ def main():
         storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
                                                                       "describe", storage_tpu_name, "--zone",
                                                                       storage_tpu_zone]))
-        time.sleep(60)  # Ensure postgres is up and running. Yes, it can be starting up even after accessing it.
+        time.sleep(5)  # Ensure postgres is up and running. Yes, it can be starting up even after accessing it.
         external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
 
         url = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
