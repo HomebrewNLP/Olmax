@@ -79,7 +79,7 @@ def main():
                              "sudo sed -i \"s/\\shared_buffers = 128MB/shared_buffers = 128GB/g\" "
                              "/etc/postgresql/12/main/postgresql.conf",
                              f"sudo -u postgres psql -c \"ALTER USER postgres PASSWORD '{password}';\"",
-                             "sudo -u postgres psql -c \"alter system set"
+                             "sudo -u postgres psql -c \"alter system set "
                              "idle_in_transaction_session_timeout='15min';\"",
                              "sudo systemctl restart postgresql"])
         send_to_tpu(storage_tpu_zone, storage_tpu_name, "setup.sh", command)

@@ -41,7 +41,7 @@ def exec_command(wandb_key: str, sweep_id: str, data_path: str, storage: str):
 def send_to_tpu(zone: str, host: str, filename: str, command: str):
     with open(host, 'w') as f:
         f.write(command)
-    os.system(f"gcloud alpha compute tpus tpu-vm scp .{host}.sh ubuntu@{host}:~/{filename} --zone {zone}")
+    os.system(f"gcloud alpha compute tpus tpu-vm scp {host} ubuntu@{host}:~/{filename} --zone {zone}")
     os.remove(host)
 
 
