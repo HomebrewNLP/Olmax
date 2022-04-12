@@ -76,18 +76,26 @@ def main():
                                                                 "sudo sed -i \"s/\\#listen_addresses = 'localhost'/"
                                                                 "listen_addresses = '*'/g\" "
                                                                 "/etc/postgresql/12/main/postgresql.conf",
+                                                                "sudo sed -i \"s/\\max_connections = 100/"
+                                                                "max_connections = 100000/g\" "
+                                                                "/etc/postgresql/12/main/postgresql.conf",
+                                                                "sudo sed -i \"s/\\shared_buffers = 128MB/"
+                                                                "shared_buffers = 128GB/g\" "
+                                                                "/etc/postgresql/12/main/postgresql.conf",
                                                                 "sudo -u postgres psql -c "
                                                                 f"\"ALTER USER postgres PASSWORD '{password}';\"",
-                                                                "sudo systemctl restart postgresql"])   )
+                                                                "sudo -u postgres psql -c "
+                                                                f"\"alter system set "
+                                                                f"idle_in_transaction_session_timeout='15min';\"",
+                                                                "sudo systemctl restart postgresql"] * 2))
         storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
                                                                       "describe", storage_tpu_name, "--zone",
-                                                                      storage_tpu_zone]))
+                                                                      storage_tpu_zone]))  # 201326592
         time.sleep(5)  # Ensure postgres is up and running. Yes, it can be starting up even after accessing it.
         external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
 
         url = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
-        storage = optuna.storages.RDBStorage(url=url, heartbeat_interval=60, grace_period=300)
-        optuna.create_study(storage, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
+        optuna.create_study(url, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
     else:
         sweep = ""
         url = ""
