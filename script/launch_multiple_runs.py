@@ -96,12 +96,12 @@ def delete_all(prefix: str, zone: str):
             t.join()
 
 
-def create_tpu(host: str, zone: str, tpu_version: int, tpus: int, preemptible: bool, service_account: str,
+def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, service_account: str,
                semaphore: multiprocessing.Semaphore):
     with semaphore:
         os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} --service-account {service_account} '
                   f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha '
-                  f'{"--preemptible" * preemptible}; do sleep {tpus * TIMEOUT_MULTIPLIER}; done')
+                  f'{"--preemptible" * preemptible}; do echo; done')
 
 
 def synchronous_deletion(prefix: str, host: str, zone: str):
@@ -111,7 +111,7 @@ def synchronous_deletion(prefix: str, host: str, zone: str):
         time.sleep(CACHE_TIME)
 
 
-def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
+def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
                  data_path: str, preemptible: bool, timeout_multiplier: int, service_account: str, storage: str,
                  creation_semaphore: multiprocessing.Semaphore):
     host = f"{prefix}-{tpu_id}"
@@ -119,9 +119,9 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
     if host in tpu_names(zone, preempted=True, deleting=True):
         if host not in tpu_names(zone, preempted=False, deleting=False):
             synchronous_deletion(prefix, host, zone)
-            create_tpu(host, zone, tpu_version, tpus, preemptible, service_account, creation_semaphore)
+            create_tpu(host, zone, tpu_version, preemptible, service_account, creation_semaphore)
     else:
-        create_tpu(host, zone, tpu_version, tpus, preemptible, service_account, creation_semaphore)
+        create_tpu(host, zone, tpu_version, preemptible, service_account, creation_semaphore)
 
     while True:
         try:
@@ -131,7 +131,7 @@ def start_single(prefix: str, tpu_id: int, tpus: int, sweep_id: str, wandb_key: 
             while host in tpu_names(zone, preempted=False):
                 time.sleep(CACHE_TIME)
             synchronous_deletion(prefix, host, zone)
-            create_tpu(host, zone, tpu_version, tpus, preemptible, service_account, creation_semaphore)
+            create_tpu(host, zone, tpu_version, preemptible, service_account, creation_semaphore)
 
         except KeyboardInterrupt:
             print(f"{host} - {datetime.datetime.now()}: KeyboardInterrupt received. Killing TPU, then self.")
@@ -146,7 +146,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
     for tpu_id in range(tpus):
         creation_semaphore = multiprocessing.Semaphore(1)
         proc = multiprocessing.Process(target=start_single, daemon=True, args=(
-            prefix, tpu_id + 1, tpus, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible,
+            prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible,
             timeout_multiplier, service_account, storage, creation_semaphore))
         proc.start()
         procs.append(proc)

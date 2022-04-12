@@ -85,11 +85,7 @@ def main():
 
         url = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
         storage = optuna.storages.RDBStorage(url=url, heartbeat_interval=60, grace_period=300)
-        try:
-            optuna.delete_study(WandB.entity, storage)
-        except:
-            pass
-        optuna.create_study(storage.url, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
+        optuna.create_study(storage, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
     else:
         sweep = ""
         url = ""
