@@ -97,7 +97,7 @@ def delete_all(prefix: str, zone: str):
 
 
 def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, service_account: str,
-               semaphore: multiprocessing.Semaphore):
+               semaphore: threading.Semaphore):
     with semaphore:
         os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} --service-account {service_account} '
                   f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha '
@@ -143,8 +143,8 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
                    preemptible: bool, timeout_multiplier: int, service_account: str, storage: str):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
     procs = []
+    creation_semaphore = multiprocessing.Semaphore(2)
     for tpu_id in range(tpus):
-        creation_semaphore = multiprocessing.Semaphore(2)
         proc = multiprocessing.Process(target=start_single, daemon=True, args=(
             prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone, data_path, preemptible,
             timeout_multiplier, service_account, storage, creation_semaphore))
