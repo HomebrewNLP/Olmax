@@ -38,12 +38,16 @@ def exec_command(wandb_key: str, sweep_id: str, data_path: str, storage: str):
                         f'bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent {sweep_id}"'))
 
 
+def send_to_tpu(zone: str, host: str, filename: str, command: str):
+    with open(host, 'w') as f:
+        f.write(command)
+    os.system(f"gcloud alpha compute tpus tpu-vm scp .{host}.sh ubuntu@{host}:~/{filename} --zone {zone}")
+    os.remove(host)
+
+
 def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str, storage: str):
     command = exec_command(wandb_key, sweep_id, data_path, storage)
-    with open(f'.{host}.sh', 'w') as f:
-        f.write(command)
-    os.system(f"gcloud alpha compute tpus tpu-vm scp .{host}.sh ubuntu@{host}:~/setup.sh --zone {zone}")
-    os.remove(f'.{host}.sh')
+    send_to_tpu(zone, host, "setup.sh", command)
 
 
 def exec_tpu(host: str, zone: str, command: str):

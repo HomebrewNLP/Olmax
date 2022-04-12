@@ -9,7 +9,7 @@ import optuna
 import yaml
 
 import wandb
-from script.launch_multiple_runs import synchronous_deletion
+from script.launch_multiple_runs import synchronous_deletion, send_to_tpu
 from src.context import WandB
 
 CONFIGS = [("europe-west4-a", 3, 250, 1),  #
@@ -67,31 +67,27 @@ def main():
         os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
                   f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
         password = base64.b32encode(os.urandom(16)).decode().lower().strip('=')
-        exec_tpu(storage_tpu_name, storage_tpu_zone, '&&'.join(["sudo apt update",
-                                                                "sudo apt upgrade -y",
-                                                                "sudo apt install -y postgresql postgresql-contrib",
-                                                                "sudo systemctl start postgresql",
-                                                                "echo 'host  all  all 0.0.0.0/0 md5' | "
-                                                                "sudo tee -a /etc/postgresql/12/main/pg_hba.conf",
-                                                                "sudo sed -i \"s/\\#listen_addresses = 'localhost'/"
-                                                                "listen_addresses = '*'/g\" "
-                                                                "/etc/postgresql/12/main/postgresql.conf",
-                                                                "sudo sed -i \"s/\\max_connections = 100/"
-                                                                "max_connections = 100000/g\" "
-                                                                "/etc/postgresql/12/main/postgresql.conf",
-                                                                "sudo sed -i \"s/\\shared_buffers = 128MB/"
-                                                                "shared_buffers = 128GB/g\" "
-                                                                "/etc/postgresql/12/main/postgresql.conf",
-                                                                "sudo -u postgres psql -c "
-                                                                f"\"ALTER USER postgres PASSWORD '{password}';\"",
-                                                                "sudo -u postgres psql -c "
-                                                                f"\"alter system set "
-                                                                f"idle_in_transaction_session_timeout='15min';\"",
-                                                                "sudo systemctl restart postgresql"] * 2))
+        command = '&&'.join(["sudo apt update",
+                             "sudo apt upgrade -y",
+                             "sudo apt install -y postgresql postgresql-contrib",
+                             "sudo systemctl start postgresql",
+                             "echo 'host  all  all 0.0.0.0/0 md5' | sudo tee -a /etc/postgresql/12/main/pg_hba.conf",
+                             "sudo sed -i \"s/\\#listen_addresses = 'localhost'/listen_addresses = '*'/g\" "
+                             "/etc/postgresql/12/main/postgresql.conf",
+                             "sudo sed -i \"s/\\max_connections = 100/max_connections = 100000/g\" "
+                             "/etc/postgresql/12/main/postgresql.conf",
+                             "sudo sed -i \"s/\\shared_buffers = 128MB/shared_buffers = 128GB/g\" "
+                             "/etc/postgresql/12/main/postgresql.conf",
+                             f"sudo -u postgres psql -c \"ALTER USER postgres PASSWORD '{password}';\"",
+                             "sudo -u postgres psql -c \"alter system set"
+                             "idle_in_transaction_session_timeout='15min';\"",
+                             "sudo systemctl restart postgresql"])
+        send_to_tpu(storage_tpu_zone, storage_tpu_name, "setup.sh", command)
+        exec_tpu(storage_tpu_name, storage_tpu_zone, "bash setup.sh")
         storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
                                                                       "describe", storage_tpu_name, "--zone",
-                                                                      storage_tpu_zone]))  # 201326592
-        time.sleep(5)  # Ensure postgres is up and running. Yes, it can be starting up even after accessing it.
+                                                                      storage_tpu_zone]))
+        time.sleep(60)  # Ensure postgres is up and running. Yes, it can be starting up even after accessing it.
         external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
 
         url = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
