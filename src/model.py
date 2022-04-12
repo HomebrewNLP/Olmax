@@ -150,7 +150,7 @@ def glu_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     mid = activate(ctx, mid)
     if ctx.model.glu_mode >= 2:
         mid = scale_norm(ctx, mid)
-    return output_conv(ctx, mid)
+    return output_conv(ctx, mid, ctx.dims.features_per_head)
 
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:

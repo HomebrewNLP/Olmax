@@ -3,6 +3,7 @@ import base64
 import os
 import pathlib
 import subprocess
+import time
 
 import optuna
 import yaml
@@ -77,10 +78,11 @@ def main():
                                                                 "/etc/postgresql/12/main/postgresql.conf",
                                                                 "sudo -u postgres psql -c "
                                                                 f"\"ALTER USER postgres PASSWORD '{password}';\"",
-                                                                "sudo systemctl restart postgresql"]))
+                                                                "sudo systemctl restart postgresql"])   )
         storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
                                                                       "describe", storage_tpu_name, "--zone",
                                                                       storage_tpu_zone]))
+        time.sleep(5)  # Ensure postgres is up and running. Yes, it can be starting up even after accessing it.
         external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
 
         url = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
