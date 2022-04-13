@@ -96,9 +96,10 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: s
     return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, ctx.dims.one, out_features, use_rezero)
 
 
-def output_conv(ctx: Context, inp: jnp.ndarray, features: typing.Optional[str] = None):
+def output_conv(ctx: Context, inp: jnp.ndarray, in_features: typing.Optional[str] = None):
     ctx = ctx.add_to_prefix("output_conv")
-    return full_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5, ctx.dims.intermediate if features is None else features,
+    return full_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5,
+                     ctx.dims.intermediate if in_features is None else in_features,
                      ctx.dims.features_per_head, True)
 
 
@@ -153,6 +154,63 @@ def glu_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return output_conv(ctx, mid, ctx.dims.features_per_head)
 
 
+def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
+    return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
+
+
+def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    # prepare shapes
+    batch, sequence, experts = gate.shape
+    features = x.shape[-1]
+    tokens = batch * sequence
+    overflow = tokens // experts
+    gate = gate.reshape(batch * sequence, experts)
+
+    # parallel-softmax gate
+    gate = jnp.exp(gate - lax.pmax(lax.stop_gradient(gate), ParallelAxes.model))
+    gate /= lax.psum(gate, ParallelAxes.model)
+    balanced = gate / lax.stop_gradient(gate).sum(0)  # balance gates across batch
+
+    # shuffle to avoid imbalances across token position (https://arxiv.org/abs/2109.10465)
+    ctx.prng_key, key = jax.random.split(ctx.prng_key)
+    indices = jnp.argsort(jax.random.normal(key, (x.shape[0],)))
+    balanced = jnp.take_along_axis(balanced, indices, 0)
+
+    # avoid overflow / get best index
+    assignments = jnp.argsort(balanced, -1)
+    square_hot = one_hot(assignments, features)
+    mask = (square_hot.cumsum(0) > overflow).cumsum(2) < 1
+    square_hot = jnp.bitwise_and(square_hot, mask)
+    mask = square_hot.sum(-1)
+    mask = mask * experts
+    assignments = jnp.argsort(assignments, -1)
+    assignments = assignments - mask
+    assignments = jnp.argmax(assignments, -1)
+
+    # unshuffle
+    indices = jnp.argsort(indices)
+    assignments = jnp.take_along_axis(assignments, indices, 0)
+
+    # get slice of tokens
+    own_indices = jnp.argsort(assignments == ctx.device_idx)[:overflow]
+    weight = jnp.take_along_axis(gate, assignments.reshape(*assignments.shape, 1), -1)
+    weight = jnp.take_along_axis(weight, own_indices, 0)
+    x = x.reshape(batch * sequence, features)
+    x = jnp.take_along_axis(x, own_indices, 0)
+    x = x * weight
+
+    return x, own_indices
+
+
+def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    gates = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.heads)
+    inp, indices = top1_gating(ctx, gates, inp)
+    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.moe_intermediate)
+    mid = activate(ctx, mid)
+    out = output_conv(ctx, mid, ctx.dims.moe_intermediate)
+    return jnp.zeros_like(inp).at[indices].set(out)
+
+
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     dtype = forget.dtype
     forget = promote_to(forget, jnp.float32)
@@ -169,10 +227,6 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head)
     out = qrnn(ctx, forget, mid)
     return output_conv(ctx, out, ctx.dims.features_per_head)
-
-
-def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
-    return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
 
 
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -281,8 +335,10 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
 
-def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray, device_idx: jnp.ndarray
+            ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
+    ctx.device_idx = device_idx
     src, tgt = inp
     return cross_entropy_loss(ctx, body_ctx(ctx, src), tgt)

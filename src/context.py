@@ -78,9 +78,16 @@ class DimSizes(DataClass):
     sequence: int = 65536
     one: int = 1
     depth: int = 4
+    moe_intermediate_override: typing.Optional[int] = None
 
     def __init__(self, data: DataContext):
         self.vocab: int = data.vocab_size
+
+    @property
+    def moe_intermediate(self):
+        if self.moe_intermediate_override is None:
+            return self.heads * self.intermediate
+        return self.moe_intermediate_override
 
     def __getitem__(self, item: str):
         return getattr(self, item)
@@ -90,6 +97,7 @@ class Dims(DataClass):
     batch: str = "batch"
     features_per_head: str = "features_per_head"
     heads: str = "heads"
+    moe_intermediate: str = "moe_intermediate"
     full_conv_kernel: str = "full_conv_kernel"
     depthwise_conv_kernel: str = "depthwise_conv_kernel"
     depth: str = "depth"
@@ -163,6 +171,7 @@ class Training(DataClass):
     maximum_spike_duration: int = 24
     loss_thresholds: typing.Dict[int, int] = {128: 5, 256: 4, 512: 3.5, 1024: 3, 2048: 2.5, 3072: 2.1, 4096: 2}
 
+
 class Context(DataClass):
     data: DataContext = DataContext()
     optimizer: Optimizer = Optimizer()
@@ -192,6 +201,7 @@ class Context(DataClass):
         self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
+        self.device_idx: typing.Optional[jnp.ndarray] = None
 
         if config is not None:
             self.__dict__.update(config)
@@ -212,7 +222,7 @@ class Context(DataClass):
     def config(self) -> dict:
         cfg = self.__dict__.copy()
         del cfg['name_cache'], cfg['parameters'], cfg['parameter_dims'], cfg['prng_key'], cfg['is_initializing']
-        del cfg['parameter_variance']
+        del cfg['parameter_variance'], cfg['device_idx']
         return serialize(cfg)
 
 

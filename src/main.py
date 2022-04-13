@@ -21,11 +21,13 @@ from src.utils.checkpoint import write_ckpt
 from src.utils.wandb import WandbLog
 
 
-def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+def train_step(inp: typing.Tuple[typing.Dict[str, typing.Any], jnp.ndarray]) -> typing.Dict[str, typing.Any]:
+    while_ctx_dict, device_idx = inp
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
     (loss, accuracy), grads = grad_fn(wctx.ctx.parameters,
-                                      wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
+                                      wctx.data[wctx.current_step % wctx.ctx.training.device_steps],
+                                      device_idx)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
     wctx.top_loss += accuracy
@@ -33,9 +35,10 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     return wctx.serialize()
 
 
-def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any], device_idx:jnp.ndarray) -> typing.Dict[str, typing.Any]:
     training = WhileTrainContext(while_ctx_dict).ctx.training
-    return loop(train_step, while_ctx_dict, training.device_steps, training.device_unroll)
+
+    return loop(train_step, (while_ctx_dict, device_idx), training.device_steps, training.device_unroll)
 
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):
@@ -118,10 +121,10 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
                  'parameter_variance': {k: None for k in ctx.parameter_variance.keys()}, 'data': None,
                  'current_step': None, 'loss': None, 'top_loss': None}
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
-                                   in_axes=(partition,), out_axes=partition))
+                                   in_axes=(partition, 0), out_axes=partition))
 
-    timeit("Compiling model and performing first step", step, next(data))
-    timeit("Running second step", step, next(data))
+    timeit("Compiling model and performing first step", step, next(data), jnp.arange(ctx.dims.sizes.heads))
+    timeit("Running second step", step, next(data), jnp.arange(ctx.dims.sizes.heads))
     print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
 
     start_time = time.time()
