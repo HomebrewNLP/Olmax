@@ -78,16 +78,10 @@ class DimSizes(DataClass):
     sequence: int = 65536
     one: int = 1
     depth: int = 4
-    pooled_intermediate_override: typing.Optional[int] = None
+    pooled_intermediate: int = 512
 
     def __init__(self, data: DataContext):
         self.vocab: int = data.vocab_size
-
-    @property
-    def pooled_intermediate(self):
-        if self.pooled_intermediate_override is None:
-            return self.heads * self.intermediate
-        return self.pooled_intermediate_override
 
     def __getitem__(self, item: str):
         return getattr(self, item)
