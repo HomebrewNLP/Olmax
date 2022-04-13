@@ -78,16 +78,16 @@ class DimSizes(DataClass):
     sequence: int = 65536
     one: int = 1
     depth: int = 4
-    moe_intermediate_override: typing.Optional[int] = None
+    pooled_intermediate_override: typing.Optional[int] = None
 
     def __init__(self, data: DataContext):
         self.vocab: int = data.vocab_size
 
     @property
-    def moe_intermediate(self):
-        if self.moe_intermediate_override is None:
+    def pooled_intermediate(self):
+        if self.pooled_intermediate_override is None:
             return self.heads * self.intermediate
-        return self.moe_intermediate_override
+        return self.pooled_intermediate_override
 
     def __getitem__(self, item: str):
         return getattr(self, item)
@@ -97,7 +97,7 @@ class Dims(DataClass):
     batch: str = "batch"
     features_per_head: str = "features_per_head"
     heads: str = "heads"
-    moe_intermediate: str = "moe_intermediate"
+    pooled_intermediate: str = "pooled_intermediate"
     full_conv_kernel: str = "full_conv_kernel"
     depthwise_conv_kernel: str = "depthwise_conv_kernel"
     depth: str = "depth"
@@ -149,6 +149,7 @@ class Model(DataClass):
     rezero_lr_scale: float = 0.01
     device_halo_size: int = 3
     scan_unroll: int = 1
+    pooling: int = 8
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
     weight_sharing: bool = False
