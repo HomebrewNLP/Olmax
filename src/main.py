@@ -137,18 +137,18 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {millions_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
         if jnp.isnan(wctx.loss) or wctx.top_loss == 0:
-            return -1
+            return wblog.loss_medians[-1]
         if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
             if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
-                return -1
+                return wblog.loss_medians[-1]
         if trial is not None:
             trial.report(wblog.loss_medians[-1], idx * ctx.training.device_steps)
             if trial.should_prune():
-                return -1
+                return wblog.loss_medians[-1]
         thres = min((v for k, v in ctx.training.loss_thresholds.items() if idx * ctx.training.device_steps > k),
                     default=10 ** 9)
         if wblog.loss_medians[-1] > thres:
-            return -1
+            return wblog.loss_medians[-1]
         if ctx.training.trace.do_trace:
             if idx == ctx.training.trace.start_step:
                 jax.profiler.start_trace(ctx.training.trace.output_path)
@@ -199,10 +199,8 @@ def main():
         sys.argv.insert(1, "config.yaml")
         ctx.wandb.storage = ""
         run.config.update(ctx.config(), allow_val_change=True)
-        out = run_one(wblog, trial)
-        if out == -1:
-            raise optuna.TrialPruned()
-        return out
+        return run_one(wblog, trial)
+
 
     study = optuna.load_study(ctx.wandb.entity, ctx.wandb.storage, optuna.samplers.TPESampler(n_startup_trials=128),
                               optuna.pruners.PercentilePruner(ctx.wandb.percentile, n_startup_trials=128,
