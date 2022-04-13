@@ -103,8 +103,8 @@ def output_conv(ctx: Context, inp: jnp.ndarray, in_features: typing.Optional[str
                      ctx.dims.features_per_head, True)
 
 
-def group_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("group_feed_forward")
+def depthwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("depthwise")
     mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.intermediate)
     mid = activate(ctx, mid)
     mid = depthwise_conv(ctx, mid, 1 / ctx.model.activation_std, ctx.dims.intermediate)
@@ -128,16 +128,16 @@ def activated_allsum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return _fn(inp)
 
 
-def reduced_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("reduced_feed_forward")
+def reduced_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("reduced")
     mid = full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
                     ctx.dims.intermediate)
     mid = activated_allsum(ctx, mid)
     return output_conv(ctx, mid)
 
 
-def glu_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("glu_feed_forward")
+def glu_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("glu")
 
     def _fn():
         return full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
@@ -154,19 +154,20 @@ def glu_feed_forward(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return output_conv(ctx, mid, ctx.dims.features_per_head)
 
 
-def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
-    return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
-
-
-def pooled_conv(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def pooled_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("pooled")
+    weight_sharing = ctx.model.weight_sharing
+    ctx.model.weight_sharing = True
     pooling = (1, ctx.model.pooling, 1)
-    inp = lax.reduce_window(inp, 0, lax.add, pooling, pooling, ((0, 0), ctx.model.pooling - 1, (0, 0)))  # avg pool
+    inp = lax.reduce_window(inp, 0, lax.add, pooling, pooling, ((0, 0), (ctx.model.pooling - 1, 0), (0, 0)))  # avg pool
+    inp = inp / ctx.model.pooling
     mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.pooled_intermediate)
-    mid = activate(ctx, mid)
+    mid = activated_allsum(ctx, mid)
     out = output_conv(ctx, mid, ctx.dims.pooled_intermediate)
     out = jnp.repeat(out, ctx.model.pooling, 1)  # broadcast back to original shape
     pad = jnp.zeros((out.shape[0], ctx.model.pooling - 1, out.shape[2]), dtype=out.dtype)
-    return jnp.concatenate([pad, out[:, :1 - ctx.model.pooling]], 1)
+    ctx.model.weight_sharing = weight_sharing
+    return jnp.concatenate([pad, out[:, :1 - ctx.model.pooling]], 1)  # "slice" away first tokens to stop leaking
 
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
@@ -181,6 +182,7 @@ def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
 
 
 def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("qrnn")
     forget = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head)
     mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head)
     out = qrnn(ctx, forget, mid)
@@ -285,10 +287,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.sizes.depth):
-        src = reversible(ctx, group_feed_forward, src)
-        src = reversible(ctx, glu_feed_forward, src)
-        src = reversible(ctx, reduced_feed_forward, src)
+        src = reversible(ctx, depthwise_block, src)
+        src = reversible(ctx, glu_block, src)
+        src = reversible(ctx, reduced_block, src)
         src = reversible(ctx, qrnn_block, src)
+        src = reversible(ctx, pooled_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
