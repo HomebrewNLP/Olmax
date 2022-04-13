@@ -192,7 +192,7 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
     assignments = jnp.take_along_axis(assignments, indices, 0)
 
     # get slice of tokens
-    own_indices = jnp.argsort(assignments == ctx.device_idx)[:overflow]
+    own_indices = jnp.argsort(assignments == ctx.device_idx)[overflow:]
     weight = jnp.take_along_axis(gate, assignments.reshape(*assignments.shape, 1), -1)
     weight = jnp.take_along_axis(weight, own_indices, 0)
     x = x.reshape(batch * sequence, features)
