@@ -69,7 +69,7 @@ class DataContext(DataClass):
 
 
 class DimSizes(DataClass):
-    batch: int = 8
+    batch: int = 2
     full_conv_kernel: int = 9
     depthwise_conv_kernel: int = 81
     features_per_head: int = 256
@@ -128,12 +128,12 @@ class WandB(DataClass):
 class Optimizer(DataClass):
     momentum_beta: float = 0.1
     learning_rate: float = 0.001
-    gradient_clip: float = 0.01
+    gradient_clip: float = 0.0001
     adam_beta1: float = 0.1
     adam_beta2: float = 0.01
     weight_decay: float = 0.1
-    warmup_end: int = 4096
-    exponential_decay: float = 1e-5
+    warmup_end: int = 1024
+    exponential_decay: float = 1e-4
 
 
 class Model(DataClass):
@@ -149,7 +149,7 @@ class Training(DataClass):
     checkpoint_path: str = "gs://ggpt4/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False
-    z_loss: float = 0.01
+    z_loss: float = 0.1
     device_steps: int = 4
     device_unroll: int = 1
     steps: int = 2 ** 16
@@ -158,7 +158,9 @@ class Training(DataClass):
     minimum_relative_loss_change: float = 0.003
     maximum_spike_size: float = 3
     maximum_spike_duration: int = 24
-    loss_thresholds: typing.Dict[int, int] = {128: 5, 256: 4, 512: 3.5, 1024: 3, 2048: 2.5, 3072: 2.1, 4096: 2}
+    # Best run + ~20%: {128: 5, 256: 4, 512: 3.5, 1024: 3, 2048: 2.5, 3072: 2.1, 4096: 2, 8192: 1}
+    # add another 50%, so the hyperparameter optimizer gets more information and doesn't stop everything simultaneously
+    loss_thresholds: typing.Dict[int, int] = {128: 8, 256: 6, 512: 5, 1024: 4.5, 2048: 4, 3072: 3.5, 4096: 3, 8192: 2}
 
 
 class Context(DataClass):
@@ -175,6 +177,7 @@ class Context(DataClass):
         self.training = Training()
         self.wandb = WandB()
         self.dims = Dims(self.data)
+        self.dims.sizes.intermediate = self.dims.sizes.features_per_head * 2
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:

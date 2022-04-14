@@ -13,7 +13,7 @@ from jax import numpy as jnp
 
 from src.backend import loop
 from src.constants import ParallelAxes
-from src.context import Context, WhileTrainContext
+from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
 from src.model import compute, body_ctx
 from src.optimizer import get_current_lr, update
@@ -159,6 +159,14 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
             write_ckpt(ctx)
 
 
+def dump_ctx(ctx: Context, run):
+    with open("config.yaml", 'w') as f:
+        f.write(yaml.dump(ctx.config(), indent=4))
+    sys.argv.insert(1, "config.yaml")
+    ctx.wandb.storage = ""
+    run.config.update(ctx.config(), allow_val_change=True)
+
+
 def main():
     warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
     # jax.config.update("jax_disable_jit", True)
@@ -171,6 +179,19 @@ def main():
     wblog = WandbLog(run)
 
     if "placeholder" not in run.config:
+        cfg = {}
+        for param_name, param in run.config.items():
+            if '.' not in param_name:
+                continue
+            inner_cfg = cfg
+            split_name = param_name.split(".")
+            for s in split_name[:-1]:
+                if s not in inner_cfg:
+                    inner_cfg[s] = {}
+                inner_cfg = inner_cfg[s]
+            inner_cfg[split_name[-1]] = param
+        init_class(ctx, cfg)
+        dump_ctx(ctx, run)
         return run_one(wblog)
 
     def objective(trial: optuna.trial.Trial) -> typing.Optional[float]:
@@ -193,12 +214,7 @@ def main():
         ctx.model.leaky_relu_slope = trial.suggest_float("leaky_relu_slope", 1e-3, 2, log=True)
         # ctx.model.glu_mode = trial.suggest_int("glu_mode", 0, 3)
         ctx.training.z_loss = trial.suggest_float("z_loss", 1e-3, 2, log=True)
-
-        with open("config.yaml", 'w') as f:
-            f.write(yaml.dump(ctx.config(), indent=4))
-        sys.argv.insert(1, "config.yaml")
-        ctx.wandb.storage = ""
-        run.config.update(ctx.config(), allow_val_change=True)
+        dump_ctx(ctx, run)
         return run_one(wblog, trial)
 
     study = optuna.load_study(ctx.wandb.entity, ctx.wandb.storage, optuna.samplers.TPESampler(n_startup_trials=128),

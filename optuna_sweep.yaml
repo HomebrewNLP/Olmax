@@ -1,0 +1,10 @@
+program: main.py
+method: random
+command:
+  - bash
+  - run.sh
+parameters:
+  placeholder:
+    distribution: uniform
+    min: 0
+    max: 1
