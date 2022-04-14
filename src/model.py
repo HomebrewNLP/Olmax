@@ -124,24 +124,6 @@ def reduced_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return output_conv(ctx, mid)
 
 
-def glu_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("glu")
-
-    def _fn():
-        return full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
-                         ctx.dims.features_per_head)
-
-    mid = _fn()
-    if ctx.model.glu_mode >= 1:
-        mid = mid * _fn()
-    if ctx.model.glu_mode >= 3:
-        mid = mid + _fn()
-    mid = activate(ctx, mid)
-    if ctx.model.glu_mode >= 2:
-        mid = scale_norm(ctx, mid)
-    return output_conv(ctx, mid, ctx.dims.features_per_head)
-
-
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     dtype = forget.dtype
     forget = promote_to(forget, jnp.float32)
@@ -155,8 +137,8 @@ def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
 
 def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("qrnn")
-    forget = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head)
-    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.features_per_head)
+    forget = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
+    mid = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
     out = qrnn(ctx, forget, mid)
     return output_conv(ctx, out, ctx.dims.features_per_head)
 
@@ -261,7 +243,6 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     for i in range(ctx.dims.sizes.depth):
         src = reversible(ctx, reduced_block, src)
         src = reversible(ctx, depthwise_block, src)
-        src = reversible(ctx, glu_block, src)
         src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
