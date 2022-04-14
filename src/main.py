@@ -122,7 +122,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
                                    in_axes=(partition,), out_axes=partition))
 
     timeit("Compiling model and performing first step", step, next(data))
-    timeit("Running second step", step, next(data), jnp.arange(ctx.dims.sizes.heads))
+    timeit("Running second step", step, next(data))
     print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
 
     start_time = time.time()
