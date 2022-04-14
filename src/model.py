@@ -296,10 +296,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
 
-def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray, device_idx: jnp.ndarray
-            ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
-    ctx.device_idx = device_idx
     src, tgt = inp
     return cross_entropy_loss(ctx, body_ctx(ctx, src), tgt)

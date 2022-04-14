@@ -196,7 +196,6 @@ class Context(DataClass):
         self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
-        self.device_idx: typing.Optional[jnp.ndarray] = None
 
         if config is not None:
             self.__dict__.update(config)
@@ -217,7 +216,7 @@ class Context(DataClass):
     def config(self) -> dict:
         cfg = self.__dict__.copy()
         del cfg['name_cache'], cfg['parameters'], cfg['parameter_dims'], cfg['prng_key'], cfg['is_initializing']
-        del cfg['parameter_variance'], cfg['device_idx']
+        del cfg['parameter_variance']
         return serialize(cfg)
 
 
