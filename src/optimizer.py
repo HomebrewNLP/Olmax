@@ -75,9 +75,8 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
     wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
-    do_clip = jnp.greater(grd_norm * jnp.reciprocal(wgt_norm), ctx.optimizer.gradient_clip)
-    clipped = wgt_norm * jnp.reciprocal(grd_norm) * ctx.optimizer.gradient_clip * grad
-    return clipped * do_clip + grad * (1 - do_clip)
+    grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
+    return grad * grad_scale
 
 
 def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
