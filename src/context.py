@@ -137,7 +137,6 @@ class Optimizer(DataClass):
 
 
 class Model(DataClass):
-    glu_mode: int = 3  # 0->No GLU; 1->GLU; 2->GLU+Norm; 3->GLUv2;
     rezero_lr_scale: float = 0.01
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
