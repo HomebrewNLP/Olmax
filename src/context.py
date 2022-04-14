@@ -72,12 +72,12 @@ class DimSizes(DataClass):
     batch: int = 2
     full_conv_kernel: int = 7
     depthwise_conv_kernel: int = 81
-    features_per_head: int = 256
-    intermediate: int = 512
+    features_per_head: int = 512
+    intermediate: int = 1024
     heads: int = 8
     sequence: int = 65536
     one: int = 1
-    depth: int = 32
+    depth: int = 8
 
     def __init__(self, data: DataContext):
         self.vocab: int = data.vocab_size
