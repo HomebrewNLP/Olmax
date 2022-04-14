@@ -141,12 +141,8 @@ class Optimizer(DataClass):
 class Model(DataClass):
     glu_mode: int = 3  # 0->No GLU; 1->GLU; 2->GLU+Norm; 3->GLUv2;
     rezero_lr_scale: float = 0.01
-    device_halo_size: int = 3
-    scan_unroll: int = 1
-    pooling: int = 8
     leaky_relu_slope: float = 0.02
     activation_std: float = 0.5893595616022745
-    weight_sharing: bool = False
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
 

@@ -191,8 +191,6 @@ def main():
         ctx.dims.sizes.intermediate = ctx.dims.sizes.features_per_head
         ctx.dims.sizes.intermediate *= trial.suggest_int("group_linear_factor", 1, 4, log=True)
         ctx.model.leaky_relu_slope = trial.suggest_float("leaky_relu_slope", 1e-3, 2, log=True)
-        ctx.model.pooling = trial.suggest_int("pooling", 1, 8, log=True)
-        ctx.dims.sizes.pooled_intermediate = ctx.dims.sizes.intermediate * ctx.model.pooling
         # ctx.model.glu_mode = trial.suggest_int("glu_mode", 0, 3)
         ctx.training.z_loss = trial.suggest_float("z_loss", 1e-3, 2, log=True)
 
@@ -202,7 +200,6 @@ def main():
         ctx.wandb.storage = ""
         run.config.update(ctx.config(), allow_val_change=True)
         return run_one(wblog, trial)
-
 
     study = optuna.load_study(ctx.wandb.entity, ctx.wandb.storage, optuna.samplers.TPESampler(n_startup_trials=128),
                               optuna.pruners.PercentilePruner(ctx.wandb.percentile, n_startup_trials=128,

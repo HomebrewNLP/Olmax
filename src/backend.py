@@ -105,27 +105,17 @@ def stacked_orthogonal_init(ctx: Context, str_shape: typing.List[str], column_ax
 def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[str]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1, split_dims: typing.Optional[typing.List[str]] = None,
-              weight_sharing: bool = False, idx: typing.Optional[jnp.ndarray] = None,
               lr_scale: float = 1, dtype: typing.Optional[jnp.float32] = None) -> jnp.ndarray:
     if split_dims is None:
         split_dims = [ctx.dims.depth]
     prefix_name = prefixed_name(ctx, name)
-    weight_sharing |= ctx.model.weight_sharing
+
     if dtype is None:
         computation_dtype = ctx.model.computation_dtype
         storage_dtype = ctx.model.storage_dtype
     else:
         computation_dtype = jnp.promote_types(ctx.model.computation_dtype, dtype)
         storage_dtype = jnp.promote_types(ctx.model.storage_dtype, dtype)
-
-    if weight_sharing:
-        split_name = [n.split(':')[0] + ':' for n in name.split('/')]
-        for pname, param in ctx.parameters.items():
-            if ctx.parameter_dims[pname] != str_shape:
-                continue
-            pname = pname.split('/')
-            if all(p.startswith(s) for p, s in zip(pname, split_name)):
-                return param.astype(computation_dtype)
 
     shape = dims_to_shape(ctx, str_shape)
     if prefix_name not in ctx.parameters:

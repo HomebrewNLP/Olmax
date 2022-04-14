@@ -1,6 +1,5 @@
 import copy
 import math
-import operator
 import typing
 
 import jax
@@ -54,17 +53,6 @@ def scale_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return out.astype(original_dtype), _grad
 
     return _fn(inp, weight)
-
-
-def pool_heads(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    out = inp
-    for shift in [operator.add, operator.sub]:
-        for halo_idx in range(1, 1 + ctx.model.device_halo_size // 2):
-            permutation = []
-            for device_idx in range(ctx.dims.sizes.heads):
-                permutation.append((device_idx, shift(device_idx, halo_idx) % ctx.dims.sizes.heads))
-            out = out + lax.ppermute(inp, ParallelAxes.model, permutation)
-    return out
 
 
 def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
@@ -152,22 +140,6 @@ def glu_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.model.glu_mode >= 2:
         mid = scale_norm(ctx, mid)
     return output_conv(ctx, mid, ctx.dims.features_per_head)
-
-
-def pooled_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("pooled")
-    weight_sharing = ctx.model.weight_sharing
-    ctx.model.weight_sharing = True
-    pooling = (1, ctx.model.pooling, 1)
-    inp = lax.reduce_window(inp, 0, lax.add, pooling, pooling, ((0, 0), (ctx.model.pooling - 1, 0), (0, 0)))  # avg pool
-    inp = inp / ctx.model.pooling
-    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.pooled_intermediate)
-    mid = activated_allsum(ctx, mid)
-    out = output_conv(ctx, mid, ctx.dims.pooled_intermediate)
-    out = jnp.repeat(out, ctx.model.pooling, 1)  # broadcast back to original shape
-    pad = jnp.zeros((out.shape[0], ctx.model.pooling - 1, out.shape[2]), dtype=out.dtype)
-    ctx.model.weight_sharing = weight_sharing
-    return jnp.concatenate([pad, out[:, :1 - ctx.model.pooling]], 1)  # "slice" away first tokens to stop leaking
 
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
@@ -287,11 +259,10 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.sizes.depth):
+        src = reversible(ctx, reduced_block, src)
         src = reversible(ctx, depthwise_block, src)
         src = reversible(ctx, glu_block, src)
-        src = reversible(ctx, reduced_block, src)
         src = reversible(ctx, qrnn_block, src)
-        src = reversible(ctx, pooled_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
