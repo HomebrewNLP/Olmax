@@ -143,6 +143,20 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return output_conv(ctx, out, ctx.dims.features_per_head)
 
 
+def reduced_self_conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    sequence = ctx.dims.sizes.sequence
+    features = ctx.dims.features_per_head * ctx.dims.sizes.batch
+    weight = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
+    inp = inp.transpose(1, 0, 2).reshape(1, sequence, features)
+    weight = weight.transpose(0, 2, 1).reshape(features, 1, sequence)
+    weight = jnp.flip(weight, 2)
+    mid = lax_conv(inp, weight, [(sequence - 1, 0)], features)
+    mid = mid.reshape(sequence, ctx.dims.sizes.batch, ctx.dims.sizes.features_per_head).transpose(1, 0, 2)
+    mid = scale_norm(ctx, mid)
+    mid = activated_allsum(ctx, mid)
+    return output_conv(ctx, mid, ctx.dims.features_per_head)
+
+
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features_per_head], std=1e-5)
@@ -243,6 +257,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     for i in range(ctx.dims.sizes.depth):
         src = reversible(ctx, reduced_block, src)
         src = reversible(ctx, depthwise_block, src)
+        src = reversible(ctx, reduced_self_conv_block, src)
         src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
