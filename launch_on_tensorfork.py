@@ -51,8 +51,9 @@ def parse_args():
 
 
 def exec_tpu(host: str, zone: str, command: str):
-    subprocess.call(["gcloud", "alpha", "compute", "tpus", "tpu-vm", "ssh", f"ubuntu@{host}",
-                     f"--zone", zone, "--command", command])
+    while subprocess.call(["gcloud", "alpha", "compute", "tpus", "tpu-vm", "ssh", f"ubuntu@{host}",
+                           f"--zone", zone, "--command", command]):
+        pass
 
 
 def main():
