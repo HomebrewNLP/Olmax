@@ -78,7 +78,6 @@ class DimSizes(DataClass):
     sequence: int = 65536
     one: int = 1
     depth: int = 4
-    pooled_intermediate: int = 512
 
     def __init__(self, data: DataContext):
         self.vocab: int = data.vocab_size
@@ -91,7 +90,6 @@ class Dims(DataClass):
     batch: str = "batch"
     features_per_head: str = "features_per_head"
     heads: str = "heads"
-    pooled_intermediate: str = "pooled_intermediate"
     full_conv_kernel: str = "full_conv_kernel"
     depthwise_conv_kernel: str = "depthwise_conv_kernel"
     depth: str = "depth"
