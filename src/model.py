@@ -145,7 +145,7 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def reduced_self_conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     sequence = ctx.dims.sizes.sequence
-    features = ctx.dims.features_per_head * ctx.dims.sizes.batch
+    features = ctx.dims.sizes.features_per_head * ctx.dims.sizes.batch
     weight = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
     inp = inp.transpose(1, 0, 2).reshape(1, sequence, features)
     weight = weight.transpose(0, 2, 1).reshape(features, 1, sequence)
