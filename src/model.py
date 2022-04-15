@@ -143,6 +143,89 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return output_conv(ctx, out, ctx.dims.features_per_head)
 
 
+def z_loss(ctx: Context, src: jnp.ndarray, use_previous_grad: bool = True) -> jnp.ndarray:
+    # forward: 0 (-> to not change loss)
+    # backward: grad(jnp.square(log_z).mean() * ctx.training.z_loss)
+    @jax.custom_gradient
+    def _fn(inp: jnp.ndarray):
+        def _grad(dy):
+            grad = ctx.training.z_loss / inp.size
+            if use_previous_grad:
+                grad = grad * dy
+            return inp * grad
+
+        return jnp.zeros((), dtype=inp.dtype), _grad
+
+    return _fn(src)
+
+
+def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
+    return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
+
+
+def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    # prepare shapes
+    batch, sequence, experts = gate.shape
+    features = x.shape[-1]
+    tokens = batch * sequence
+    overflow = tokens // experts
+    gate = gate.reshape(batch * sequence, experts)
+
+    # parallel-softmax gate
+    max_gate = lax.pmax(lax.stop_gradient(gate), ParallelAxes.model)
+    lse = lax.psum(jnp.exp(gate - max_gate), ParallelAxes.model) + max_gate
+    lse += z_loss(ctx, lse, False)  # actual zloss
+    gate = jnp.exp(gate)
+    gate += z_loss(ctx, gate, False)  # aux loss
+    balanced = gate / lax.stop_gradient(gate).sum(0)  # balance gates across batch
+
+    # shuffle to avoid imbalances across token position (https://arxiv.org/abs/2109.10465)
+    ctx.prng_key, key = jax.random.split(ctx.prng_key)
+    indices = jnp.argsort(jax.random.normal(key, (x.shape[0],)))
+    balanced = jnp.take_along_axis(balanced, indices, 0)
+
+    # avoid overflow / get best index
+    assignments = jnp.argsort(balanced, -1)
+    square_hot = one_hot(assignments, features)
+    mask = (square_hot.cumsum(0) > overflow).cumsum(2) < 1
+    square_hot = jnp.bitwise_and(square_hot, mask)
+    mask = square_hot.sum(-1)
+    mask = mask * experts
+    assignments = jnp.argsort(assignments, -1)
+    assignments = assignments - mask
+    assignments = jnp.argmax(assignments, -1)
+
+    # unshuffle
+    indices = jnp.argsort(indices)
+    assignments = jnp.take_along_axis(assignments, indices, 0)
+
+    # get slice of tokens
+    index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) / ctx.dims.sizes.heads
+    own_indices = jnp.argsort(assignments == index)[overflow:]
+    weight = jnp.take_along_axis(gate, assignments.reshape(*assignments.shape, 1), -1)
+    weight = jnp.take_along_axis(weight, own_indices, 0)
+    x = x.reshape(batch * sequence, features)
+    x = jnp.take_along_axis(x, own_indices, 0)
+    x = x * weight
+
+    return x, own_indices
+
+
+def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("moe")
+    inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features_per_head, ctx.dims.moe_intermediate],
+                        scale=1 / ctx.model.activation_std)
+    out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features_per_head])
+    out_wgt = rezero(ctx, out_wgt, ctx.dims.sizes.depth ** -0.5)
+
+    gates = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.heads)
+    inp, indices = top1_gating(ctx, gates, inp)
+    mid = matmul(inp, inp_wgt)
+    mid = activate(ctx, mid)
+    out = matmul(mid, out_wgt)
+    return jnp.zeros_like(inp).at[indices].set(out)
+
+
 def reduced_self_conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     # Uses 4x padding
     sequence = ctx.dims.sizes.sequence
@@ -215,19 +298,6 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     return _fn(*src)
 
 
-def z_loss(ctx: Context, src: jnp.ndarray) -> jnp.ndarray:
-    # forward: 0 (-> to not change loss)
-    # backward: grad(jnp.square(log_z).mean() * ctx.training.z_loss)
-    @jax.custom_gradient
-    def _fn(inp: jnp.ndarray):
-        def _grad(dy):
-            return inp * (dy * (ctx.training.z_loss / inp.size))
-
-        return jnp.zeros((), dtype=inp.dtype), _grad
-
-    return _fn(src)
-
-
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     src = promote_to(src, jnp.float32)
     max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
@@ -259,6 +329,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = reversible(ctx, reduced_block, src)
         src = reversible(ctx, depthwise_block, src)
         # src = reversible(ctx, reduced_self_conv_block, src)
+        # src = reversible(ctx, moe, src)
         src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
