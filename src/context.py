@@ -128,10 +128,10 @@ class WandB(DataClass):
 class Optimizer(DataClass):
     momentum_beta: float = 0.1
     learning_rate: float = 0.001
-    gradient_clip: float = 0.0001
+    gradient_clip: float = 0.001
     adam_beta1: float = 0.1
     adam_beta2: float = 0.01
-    weight_decay: float = 0.1
+    weight_decay: float = 0.01
     warmup_end: int = 1024
     exponential_decay: float = 1e-4
 
@@ -148,7 +148,7 @@ class Training(DataClass):
     checkpoint_path: str = "gs://ggpt4/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False
-    z_loss: float = 0.1
+    z_loss: float = 0.01
     device_steps: int = 4
     device_unroll: int = 1
     steps: int = 2 ** 16
