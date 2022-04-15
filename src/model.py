@@ -257,7 +257,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     for i in range(ctx.dims.sizes.depth):
         src = reversible(ctx, reduced_block, src)
         src = reversible(ctx, depthwise_block, src)
-        src = reversible(ctx, reduced_self_conv_block, src)
+        # src = reversible(ctx, reduced_self_conv_block, src)
         src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
