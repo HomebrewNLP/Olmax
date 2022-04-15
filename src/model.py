@@ -144,6 +144,7 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def reduced_self_conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    # Uses 4x padding
     sequence = ctx.dims.sizes.sequence
     features = ctx.dims.sizes.features_per_head * ctx.dims.sizes.batch
     weight = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)

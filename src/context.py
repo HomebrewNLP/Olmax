@@ -72,8 +72,8 @@ class DimSizes(DataClass):
     batch: int = 2
     full_conv_kernel: int = 7
     depthwise_conv_kernel: int = 81
-    features_per_head: int = 512
-    intermediate: int = 1024
+    features_per_head: int = 256
+    intermediate: int = 512
     heads: int = 8
     sequence: int = 65536
     one: int = 1
