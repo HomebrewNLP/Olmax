@@ -138,6 +138,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {millions_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
         if jnp.isnan(wctx.loss) or wctx.top_loss == 0:
+            print("Loss is NaN or Accuracy is 0")
             return wblog.loss_medians[-1]
         if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
             if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
@@ -145,10 +146,12 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
         if trial is not None:
             trial.report(wblog.loss_medians[-1], idx * ctx.training.device_steps)
             if trial.should_prune():
+                print("Optuna says it should prune")
                 return wblog.loss_medians[-1]
         thres = min((v for k, v in ctx.training.loss_thresholds.items() if idx * ctx.training.device_steps > k),
                     default=10 ** 9)
         if wblog.loss_medians[-1] > thres:
+            print(f"Worse than threshold | Current Median: {wblog.loss_medians[-1]:9.6f} - Threshold: {thres:4.1f}")
             return wblog.loss_medians[-1]
         if ctx.training.trace.do_trace:
             if idx == ctx.training.trace.start_step:

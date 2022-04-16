@@ -39,10 +39,12 @@ class WandbLog:
                       "Optimizer/Beta2": ctx.optimizer.adam_beta2}, step=step)
 
         if self.loss_medians[0] < (self.loss_medians[-1] * (1 - ctx.training.minimum_relative_loss_change)):
-            # Not improving
+            print(f"Not Improving | Oldest Loss Median: {self.loss_medians[0]:9.6f} - "
+                  f"Current Loss Median: {self.loss_medians[-1]:9.6f}")
             return True
         if all(loss > (self.loss_medians[-1] * ctx.training.maximum_spike_size)
                for loss in self.losses[-ctx.training.maximum_spike_duration // device_steps:]):
-            # Spiking
+            print(f"Spiking | Loss Median: {self.loss_medians[-1]:9.6f} - "
+                  f"Last Losses: {self.losses[-ctx.training.maximum_spike_duration // device_steps:]}")
             return True
         return False
