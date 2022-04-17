@@ -58,7 +58,7 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 
 
 class DataContext(DataClass):
-    path: str = "gs://ggpt4/the-big-char-pile/*"
+    path: str = "gs://homebrewnlp-eu/the-char-pile/*"
     shuffle_buffer: int = 0
     parallel_workers: int = 8
     interleaved_datasets: int = 8
@@ -71,14 +71,14 @@ class DataContext(DataClass):
 class DimSizes(DataClass):
     batch: int = 2
     full_conv_kernel: int = 7
-    depthwise_conv_kernel: int = 81
+    depthwise_conv_kernel: int = 49
     features_per_head: int = 256
     intermediate: int = 512  # should be features_per_head * 2
     moe_intermediate: int = 4096  # should be intermediate * heads
     heads: int = 8
     sequence: int = 65536
     one: int = 1
-    depth: int = 8
+    depth: int = 16
 
     def __init__(self, data: DataContext):
         self.vocab: int = data.vocab_size
@@ -124,7 +124,7 @@ class WandB(DataClass):
     storage: str = 'redis://0.0.0.0:51367'  # used for sweeps with external tuners
     percentile: float = 25
     log_frequency: int = 1
-    median_sizes: typing.List[int] = [256]
+    median_sizes: typing.List[int] = [64, 256, 1024]
 
 
 class Optimizer(DataClass):
@@ -147,7 +147,7 @@ class Model(DataClass):
 
 
 class Training(DataClass):
-    checkpoint_path: str = "gs://ggpt4/homebrewnlp-checkpoint"
+    checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False
     z_loss: float = 0.01

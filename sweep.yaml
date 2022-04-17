@@ -1,7 +1,7 @@
 program: main.py
 method: bayes
 metric:
-  name: Loss/Median256
+  name: Loss/Median1024
   goal: minimize
 command:
   - bash
@@ -11,19 +11,19 @@ command:
 parameters:
   optimizer.learning_rate:
     distribution: log_uniform_values
-    min: 0.00001
-    max: 10
+    min: 0.001  # See https://wandb.ai/homebrewnlp/gpt/sweeps/1xiemhjd for initial sweep space
+    max: 0.1
   optimizer.adam_beta2:
     distribution: log_uniform_values
     min: 0.00001
     max: 1
   optimizer.adam_beta1:
     distribution: log_uniform_values
-    min: 0.0001
+    min: 0.001
     max: 1
   optimizer.momentum_beta:
     distribution: log_uniform_values
-    min: 0.0001
+    min: 0.01
     max: 1
 
   dims.sizes.depthwise_conv_kernel:
