@@ -309,14 +309,20 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     # Forward: max(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
+    devices = ctx.dims.sizes.heads
+
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray):
+        inp = inp.reshape(ctx.dims.sizes.batch * ctx.dims.sizes.sequence, ctx.dims.sizes.vocab)
         inp = lax.psum_scatter(inp, ParallelAxes.model)
+        index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
+        index = index.astype(jnp.int32)
+        inner_tgt = inner_tgt[index * inp.shape[0] // devices:(index + 1) * inp.shape[0] // devices]
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]):
             dy, _ = dy
             dy = promote_to(dy, jnp.float32)
-            dy = dy / (ctx.dims.sizes.heads * src.size / ctx.dims.vocab)
+            dy = dy / (src.size / ctx.dims.vocab)
             tmp = promote_to(inp, jnp.float32)
             lse = jax.nn.logsumexp(tmp)
             dx = lax.exp(tmp - lse)
