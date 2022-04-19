@@ -4,11 +4,13 @@ import typing
 
 import jax
 from jax import lax, numpy as jnp
+from jax.experimental.compilation_cache import compilation_cache
 
 from src.backend import get_param, matmul, conv as lax_conv
 from src.constants import ParallelAxes
 from src.context import Context
 
+compilation_cache.initialize_cache("compilation_cache")
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
 
@@ -304,15 +306,36 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    src = promote_to(src, jnp.float32)
-    max_logit = lax.stop_gradient(src).max(-1, keepdims=True)
-    log_z = lax.log(lax.exp(src - max_logit).sum(-1, keepdims=True)) + max_logit
-    loss = log_z - jnp.take_along_axis(src, tgt.reshape(*tgt.shape, 1), -1)
-    loss = loss.mean()
-    accuracy = (jnp.argmax(src, 2) == tgt).astype(jnp.float32).mean()
-    if ctx.training.z_loss:
-        loss += z_loss(ctx, log_z)
-    return loss, accuracy
+    # Forward: max(x) - x[target]
+    # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
+    # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
+    @jax.custom_gradient
+    def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray):
+        inp = lax.psum_scatter(inp, ParallelAxes.model)
+
+        def _grad(dy: typing.Tuple[jnp.ndarray, None]):
+            dy, _ = dy
+            dy = promote_to(dy, jnp.float32)
+            dy = dy / (ctx.dims.sizes.heads * src.size / ctx.dims.vocab)
+            tmp = promote_to(inp, jnp.float32)
+            lse = jax.nn.logsumexp(tmp)
+            dx = lax.exp(tmp - lse)
+
+            zloss = dx * lse * (ctx.training.z_loss * dy)
+            dx = dx.at[inner_tgt].add(-1) * dy
+            dx = dx + zloss
+            d_src = lax.all_gather(dx, ParallelAxes.model).reshape(src.shape)
+            return d_src, None
+
+        loss = inp.max(-1) - jnp.take_along_axis(inp, inner_tgt.reshape(*inner_tgt.shape, 1), -1)
+        accuracy = jnp.argmax(lax.stop_gradient(inp), 2) == inner_tgt
+        loss = promote_to(loss, jnp.float32)
+        accuracy = promote_to(accuracy, jnp.float32)
+        loss = lax.psum(loss.mean() / ctx.dims.sizes.heads, ParallelAxes.model)
+        accuracy = lax.psum(accuracy.mean() / ctx.dims.sizes.heads, ParallelAxes.model)
+        return (loss, accuracy), _grad
+
+    return _fn(src, tgt)
 
 
 def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
