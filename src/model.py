@@ -68,7 +68,7 @@ def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scal
     if use_rezero:
         weight = rezero(ctx, weight, scale)
     if ctx.is_initializing:
-        return inp
+        return jnp.zeros(inp.shape[:-1] + (ctx.dims.sizes[out_features],))
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes[out_features] if depthwise else 1)
 
 
@@ -169,6 +169,9 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
     features = x.shape[-1]
     tokens = batch * sequence
     overflow = tokens // experts
+    dtype = x.dtype
+    gate = promote_to(gate, jnp.float32)
+    x = promote_to(x, jnp.float32)
     gate = gate.reshape(batch * sequence, experts)
 
     # parallel-softmax gate
@@ -181,8 +184,8 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
 
     # shuffle to avoid imbalances across token position (https://arxiv.org/abs/2109.10465)
     ctx.prng_key, key = jax.random.split(ctx.prng_key)
-    indices = jnp.argsort(jax.random.normal(key, (x.shape[0],)))
-    balanced = jnp.take_along_axis(balanced, indices, 0)
+    indices = jnp.argsort(jax.random.normal(key, (gate.shape[0],)), 0)
+    balanced = jnp.take_along_axis(balanced, jnp.broadcast_to(indices.reshape(-1, 1), gate.shape), 0)
 
     # avoid overflow / get best index
     assignments = jnp.argsort(balanced, -1)
@@ -201,12 +204,13 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
 
     # get slice of tokens
     index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) / ctx.dims.sizes.heads
-    own_indices = jnp.argsort(assignments == index)[overflow:]
+    own_indices = jnp.argsort(assignments == index)[-overflow:]
     weight = jnp.take_along_axis(gate, assignments.reshape(*assignments.shape, 1), -1)
-    weight = jnp.take_along_axis(weight, own_indices, 0)
+    weight = jnp.take_along_axis(weight, own_indices.reshape(-1, 1), 0)
     x = x.reshape(batch * sequence, features)
-    x = jnp.take_along_axis(x, own_indices, 0)
+    x = jnp.take_along_axis(x, jnp.broadcast_to(own_indices.reshape(-1, 1), (overflow, features)), 0)
     x = x * weight
+    x = x.astype(dtype)
 
     return x, own_indices
 
@@ -219,11 +223,11 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     out_wgt = rezero(ctx, out_wgt, ctx.dims.sizes.depth ** -0.5)
 
     gates = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.heads)
-    inp, indices = top1_gating(ctx, gates, inp)
-    mid = matmul(inp, inp_wgt)
+    mid, indices = top1_gating(ctx, gates, inp)
+    mid = matmul(mid, inp_wgt)
     mid = activate(ctx, mid)
     out = matmul(mid, out_wgt)
-    return jnp.zeros_like(inp).at[indices].set(out)
+    return jnp.zeros_like(inp).reshape(-1, inp.shape[-1]).at[indices].set(out).reshape(inp.shape)
 
 
 def reduced_self_conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
