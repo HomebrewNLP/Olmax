@@ -140,6 +140,7 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     forget = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
     mid = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
     out = qrnn(ctx, forget, mid)
+    out = scale_norm(ctx, out)
     return output_conv(ctx, out, ctx.dims.features_per_head)
 
 
@@ -334,7 +335,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = reversible(ctx, depthwise_block, src)
         # src = reversible(ctx, reduced_self_conv_block, src)
         # src = reversible(ctx, moe, src)
-        # src = reversible(ctx, qrnn_block, src)
+        src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
