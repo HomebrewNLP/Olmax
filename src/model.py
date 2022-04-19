@@ -317,7 +317,8 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
         inp = lax.psum_scatter(inp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
-        inner_tgt = inner_tgt[index * inp.shape[0] // devices:(index + 1) * inp.shape[0] // devices]
+        slice_size = inp.shape[0] // devices
+        inner_tgt = lax.dynamic_slice_in_dim(inner_tgt, index * slice_size, (index + 1) * slice_size)
         inner_tgt = inner_tgt.reshape(-1, ctx.dims.sizes.vocab)
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]):
