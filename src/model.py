@@ -306,10 +306,11 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
 
 def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    # Forward: max(x) - x[target]
+    # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
     devices = ctx.dims.sizes.heads
+    dtype = src.dtype
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray):
@@ -317,25 +318,24 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
         inp = lax.psum_scatter(inp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
-        slice_size = inp.shape[0] // devices
-        inner_tgt = lax.dynamic_slice_in_dim(inner_tgt.reshape(-1), index * slice_size, slice_size)
+        inner_tgt = lax.dynamic_slice_in_dim(inner_tgt.reshape(-1), index * inp.shape[0], inp.shape[0])
+        lse = jax.nn.logsumexp(promote_to(inp, jnp.float32), 1, keepdims=True)
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]):
             dy, _ = dy
             dy = promote_to(dy, jnp.float32)
-            dy = dy / (src.size / ctx.dims.vocab)
+            dy = dy / inner_tgt.size
             tmp = promote_to(inp, jnp.float32)
-            lse = jax.nn.logsumexp(tmp)
             dx = lax.exp(tmp - lse)
 
             zloss = dx * lse * (ctx.training.z_loss * dy)
-            dx = dx.at[inner_tgt].add(-1) * dy
+            dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), inner_tgt.reshape(-1, 1)].add(-1) * dy
             dx = dx + zloss
             d_src = lax.all_gather(dx, ParallelAxes.model).reshape(src.shape)
-            return d_src, None
+            return d_src.astype(dtype), None
 
-        loss = inp.max(-1) - jnp.take_along_axis(inp, inner_tgt.reshape(*inner_tgt.shape, 1), -1)
-        accuracy = jnp.argmax(lax.stop_gradient(inp), 2) == inner_tgt
+        loss = lse - jnp.take_along_axis(inp, inner_tgt.reshape(*inner_tgt.shape, 1), -1)
+        accuracy = jnp.argmax(lax.stop_gradient(inp), 1) == inner_tgt
         loss = promote_to(loss, jnp.float32)
         accuracy = promote_to(accuracy, jnp.float32)
         loss = lax.psum(loss.mean() / ctx.dims.sizes.heads, ParallelAxes.model)
