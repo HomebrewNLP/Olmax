@@ -149,6 +149,7 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
             dy_rev = lax.rev(dy, (1,))
             dx = lax.rev(qrnn(ctx, dy_rev, f), (1,))
             df = lax.rev(qrnn(ctx, f, dy_rev), (1,)) * promote_to(out, jnp.float32)
+            df = jnp.where(jnp.logical_or(fgt > 3, fgt < -3), 0, df / 6)
             df = df.astype(dtype)
             dx = dx.astype(dtype)
             return df, dx
