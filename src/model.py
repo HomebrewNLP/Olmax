@@ -128,20 +128,41 @@ def reduced_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     dtype = forget.dtype
-    forget = promote_to(forget, jnp.float32)
-    x = promote_to(x, jnp.float32)
-    forget = jax.nn.hard_sigmoid(forget)
     for i in range(int(math.log2(ctx.dims.sizes.sequence))):
         x += jnp.concatenate([jnp.zeros((x.shape[0], 2 ** i, x.shape[2])), x[:, :-2 ** i] * forget[:, 2 ** i:]], 1)
         forget *= jnp.concatenate([jnp.ones((x.shape[0], 2 ** i, x.shape[2])), forget[:, :-2 ** i]], 1)
     return x.astype(dtype)
 
 
+def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarray:
+    @jax.custom_gradient
+    def _fn(fgt: jnp.ndarray, inp: jnp.ndarray):
+        dtype = inp.dtype
+        out = qrnn(ctx, jax.nn.hard_sigmoid(promote_to(fgt, jnp.float32)), promote_to(inp, jnp.float32))
+        out = out.astype(dtype)
+
+        def _grad(dy: jnp.ndarray):
+            x = promote_to(inp, jnp.float32)
+            f = jax.nn.hard_sigmoid(promote_to(fgt, jnp.float32))
+            f = lax.rev(f, (1,))
+            f = jnp.concatenate([jnp.ones((x.shape[0], 1, x.shape[2])), f[:, :-1]], 1)
+            dy_rev = lax.rev(dy, (1,))
+            dx = lax.rev(qrnn(ctx, dy_rev, f), (1,))
+            df = lax.rev(qrnn(ctx, f, dy_rev), (1,)) * promote_to(out, jnp.float32)
+            df = df.astype(dtype)
+            dx = dx.astype(dtype)
+            return df, dx
+
+        return out, _grad
+
+    return _fn(forget, src)
+
+
 def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("qrnn")
     forget = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
     mid = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
-    out = qrnn(ctx, forget, mid)
+    out = qrnn_grad(ctx, forget, mid)
     out = scale_norm(ctx, out)
     return output_conv(ctx, out, ctx.dims.features_per_head)
 
