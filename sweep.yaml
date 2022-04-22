@@ -8,25 +8,34 @@ command:
   - run.sh
   - python3
   - ${args}
-parameters:
+parameters: # See https://wandb.ai/homebrewnlp/gpt/sweeps/xuwcs6i1 for initial sweep space
   optimizer.learning_rate:
     distribution: log_uniform_values
-    min: 0.001  # See https://wandb.ai/homebrewnlp/gpt/sweeps/1xiemhjd for initial sweep space
+    min: 0.001
     max: 0.1
   optimizer.adam_beta2:
     distribution: log_uniform_values
-    min: 0.00001
-    max: 1
+    min: 0.005
+    max: 0.02
   optimizer.adam_beta1:
     distribution: log_uniform_values
-    min: 0.001
-    max: 1
+    min: 0.05
+    max: 0.2
   optimizer.momentum_beta:
     distribution: log_uniform_values
-    min: 0.01
-    max: 1
+    min: 0.05
+    max: 0.2
 
-  dims.sizes.depthwise_conv_kernel:
-    distribution: q_log_uniform_values
-    min: 2
-    max: 128
+  # New parameters
+  optimizer.gradient_clip:
+    distribution: log_uniform_values
+    min: 0.001
+    max: 0.1
+  optimizer.weight_decay:
+    distribution: log_uniform_values
+    min: 0.001
+    max: 0.1
+  training.z_loss:
+    distribution: log_uniform_values
+    min: 0.0001
+    max: 0.1
