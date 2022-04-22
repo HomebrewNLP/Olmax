@@ -1,4 +1,5 @@
 import copy
+import math
 import sys
 import time
 import typing
@@ -148,10 +149,13 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
             if trial.should_prune():
                 print("Optuna says it should prune")
                 return wblog.loss_medians[-1]
-        thres = min((v for k, v in ctx.training.loss_thresholds.items() if idx * ctx.training.device_steps > k),
-                    default=10 ** 9)
-        if wblog.loss_medians[-1] > thres:
-            print(f"Worse than threshold | Current Median: {wblog.loss_medians[-1]:9.6f} - Threshold: {thres:4.1f}")
+        log_step = math.log2((idx + 1) * ctx.training.device_steps + 1)
+        el = ctx.training.early_stopping.expected_loss
+        expected_loss = el.offset + el.scale * math.exp(el.exponent * log_step)
+        patience = 1 + ctx.training.early_stopping.loss_patience ** log_step
+        threshold = patience * expected_loss
+        if wblog.loss_medians[-1] > threshold:
+            print(f"Worse than threshold | Current Median: {wblog.loss_medians[-1]:9.6f} - Threshold: {threshold:4.1f}")
             return wblog.loss_medians[-1]
         if ctx.training.trace.do_trace:
             if idx == ctx.training.trace.start_step:

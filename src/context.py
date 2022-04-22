@@ -69,14 +69,14 @@ class DataContext(DataClass):
 
 
 class DimSizes(DataClass):
-    batch: int = 2
-    full_conv_kernel: int = 7
-    depthwise_conv_kernel: int = 49
+    batch: int = 128
+    full_conv_kernel: int = 5
+    depthwise_conv_kernel: int = 27
     features_per_head: int = 256
     intermediate: int = 512  # should be features_per_head * 2
     moe_intermediate: int = 4096  # should be intermediate * heads
     heads: int = 8
-    sequence: int = 65536
+    sequence: int = 4096
     one: int = 1
     depth: int = 16
 
@@ -129,7 +129,7 @@ class WandB(DataClass):
 
 class Optimizer(DataClass):
     momentum_beta: float = 0.1
-    learning_rate: float = 0.01
+    learning_rate: float = 0.02
     gradient_clip: float = 0.001
     adam_beta1: float = 0.1
     adam_beta2: float = 0.01
@@ -146,6 +146,20 @@ class Model(DataClass):
     computation_dtype: str = "bfloat16"
 
 
+class ExpectedLoss(DataClass):
+    offset: float = 1.165868  # <- should be fixed. It technically goes down to 0.9 with other models.
+    scale: float = 39.08037
+    exponent: float = -0.3642513
+
+
+class EarlyStopping(DataClass):
+    minimum_relative_loss_change: float = 0.003
+    maximum_spike_size: float = 3
+    maximum_spike_duration: int = 24
+    expected_loss = ExpectedLoss()
+    loss_patience = 0.875  # target = expected_loss * loss_patience^log2(step)
+
+
 class Training(DataClass):
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
@@ -156,12 +170,7 @@ class Training(DataClass):
     steps: int = 2 ** 16
     print_interval: int = 1
     trace: TensorboardTrace = TensorboardTrace()
-    minimum_relative_loss_change: float = 0.003
-    maximum_spike_size: float = 3
-    maximum_spike_duration: int = 24
-    # Best run + ~20%: {128: 5, 256: 4, 512: 3.5, 1024: 3, 2048: 2.5, 3072: 2.1, 4096: 2, 8192: 1}
-    # add another 50%, so the hyperparameter optimizer gets more information and doesn't stop everything simultaneously
-    loss_thresholds: typing.Dict[int, int] = {128: 8, 256: 6, 512: 5, 1024: 4.5, 2048: 4, 3072: 3.5, 4096: 3, 8192: 2}
+    early_stopping: EarlyStopping = EarlyStopping()
 
 
 class Context(DataClass):

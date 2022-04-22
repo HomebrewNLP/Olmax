@@ -37,14 +37,14 @@ class WandbLog:
                       "Speed/Batches per Second": rate, "Speed/Tokens per Day": tokens_per_day,
                       "Optimizer/Learning Rate": current_lr.astype(float), "Optimizer/Beta1": ctx.optimizer.adam_beta1,
                       "Optimizer/Beta2": ctx.optimizer.adam_beta2}, step=step)
-
-        if self.loss_medians[0] < (self.loss_medians[-1] * (1 - ctx.training.minimum_relative_loss_change)):
+        es = ctx.training.early_stopping
+        if self.loss_medians[0] < (self.loss_medians[-1] * (1 - es.minimum_relative_loss_change)):
             print(f"Not Improving | Oldest Loss Median: {self.loss_medians[0]:9.6f} - "
                   f"Current Loss Median: {self.loss_medians[-1]:9.6f}")
             return True
-        if all(loss > (self.loss_medians[-1] * ctx.training.maximum_spike_size)
-               for loss in self.losses[-ctx.training.maximum_spike_duration // device_steps:]):
+        if all(loss > (self.loss_medians[-1] * es.maximum_spike_size)
+               for loss in self.losses[-es.maximum_spike_duration // device_steps:]):
             print(f"Spiking | Loss Median: {self.loss_medians[-1]:9.6f} - "
-                  f"Last Losses: {self.losses[-ctx.training.maximum_spike_duration // device_steps:]}")
+                  f"Last Losses: {self.losses[-es.maximum_spike_duration // device_steps:]}")
             return True
         return False
