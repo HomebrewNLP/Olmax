@@ -30,10 +30,11 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
-def scale_norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def scale_norm(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
-    weight = get_param(ctx, "scale", [ctx.dims.one], std=0, dtype=run_type)
+    if weight is None:
+        weight = get_param(ctx, "scale", [ctx.dims.one], std=0, dtype=run_type)
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
@@ -88,8 +89,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: s
 
 def output_conv(ctx: Context, inp: jnp.ndarray, in_features: typing.Optional[str] = None):
     ctx = ctx.add_to_prefix("output_conv")
-    return full_conv(ctx, inp, 1,
-                     ctx.dims.intermediate if in_features is None else in_features,
+    return full_conv(ctx, inp, 1, ctx.dims.intermediate if in_features is None else in_features,
                      ctx.dims.features_per_head, True)
 
 
@@ -272,19 +272,29 @@ def reduced_self_conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
-    inp_embd = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features_per_head], std=1e-5)
-    out = jnp.take(inp_embd, inp, 0)
-    return scale_norm(ctx, out)
+    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features_per_head], std=1e-5)
+    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.one], std=0,
+                                    dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
+
+    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
+        return scale_norm(ctx, jnp.take(wgt, src, 0), scale)
+
+    return jax.checkpoint(_fn)(inp, param, normalization_scale)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "weight", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
+    embd = get_param(ctx, "embd", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
                      lr_scale=1 / ctx.dims.sizes.heads)
-    inp = scale_norm(ctx, inp)
+    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.one], std=0,
+                                    dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
     if ctx.is_initializing:
         return inp
-    return matmul(inp, embd)
+
+    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
+        return matmul(scale_norm(ctx, src, scale), wgt)
+
+    return jax.checkpoint(_fn)(inp, embd, normalization_scale)
 
 
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
