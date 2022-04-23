@@ -58,39 +58,29 @@ def scale_norm(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarr
     return _fn(inp, weight)
 
 
-def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("rezero")
-    scale = get_param(ctx, "scale", [ctx.dims.one], std=0, lr_scale=ctx.model.rezero_lr_scale * scale)
-    return inp * scale
-
 
 def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float, in_features: str,
-         out_features: str, use_rezero: bool = False):
-    weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2,
-                       scale=1 if use_rezero else scale)
-    if use_rezero:
-        weight = rezero(ctx, weight, scale)
+         out_features: str):
+    weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale)
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (ctx.dims.sizes[out_features],))
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes[out_features] if depthwise else 1)
 
 
-def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str,
-              use_rezero: bool = False) -> jnp.ndarray:
+def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("full_conv")
-    return conv(ctx, inp, False, ctx.dims.full_conv_kernel, scale, in_features, out_features, use_rezero)
+    return conv(ctx, inp, False, ctx.dims.full_conv_kernel, scale, in_features, out_features)
 
 
-def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: str,
-                   use_rezero: bool = False) -> jnp.ndarray:
+def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: str) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("depthwise_conv")
-    return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, ctx.dims.one, out_features, use_rezero)
+    return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, ctx.dims.one, out_features)
 
 
 def output_conv(ctx: Context, inp: jnp.ndarray, in_features: typing.Optional[str] = None):
     ctx = ctx.add_to_prefix("output_conv")
     return full_conv(ctx, inp, 1, ctx.dims.intermediate if in_features is None else in_features,
-                     ctx.dims.features_per_head, True)
+                     ctx.dims.features_per_head)
 
 
 def depthwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
@@ -245,7 +235,6 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features_per_head, ctx.dims.moe_intermediate],
                         scale=1 / ctx.model.activation_std)
     out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features_per_head])
-    out_wgt = rezero(ctx, out_wgt)
 
     gates = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.heads)
     mid, indices = top1_gating(ctx, gates, inp)
