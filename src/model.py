@@ -88,7 +88,7 @@ def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: s
 
 def output_conv(ctx: Context, inp: jnp.ndarray, in_features: typing.Optional[str] = None):
     ctx = ctx.add_to_prefix("output_conv")
-    return full_conv(ctx, inp, ctx.dims.sizes.depth ** -0.5,
+    return full_conv(ctx, inp, 1,
                      ctx.dims.intermediate if in_features is None else in_features,
                      ctx.dims.features_per_head, True)
 
@@ -245,7 +245,7 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features_per_head, ctx.dims.moe_intermediate],
                         scale=1 / ctx.model.activation_std)
     out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features_per_head])
-    out_wgt = rezero(ctx, out_wgt, ctx.dims.sizes.depth ** -0.5)
+    out_wgt = rezero(ctx, out_wgt)
 
     gates = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.heads)
     mid, indices = top1_gating(ctx, gates, inp)
@@ -284,7 +284,7 @@ def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = scale_norm(ctx, inp)
     if ctx.is_initializing:
         return inp
-    return psum(ctx, matmul(inp, embd))
+    return matmul(inp, embd)
 
 
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
