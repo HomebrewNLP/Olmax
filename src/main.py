@@ -215,6 +215,7 @@ def main():
         ctx.dims.sizes.depth = trial.suggest_int("depth", 1, 16, log=True)
         ctx.dims.sizes.features_per_head = 128 * trial.suggest_int("features_per_head//128", 1, 3, log=True)
         ctx.dims.sizes.batch = 2 * trial.suggest_int("batch//2", 1, 8, log=True)
+        ctx.model.rezero_lr_scale = trial.suggest_float("rezero_lr_scale", 1e-3, 2, log=True)
         ctx.dims.sizes.intermediate = ctx.dims.sizes.features_per_head
         ctx.dims.sizes.intermediate *= trial.suggest_int("group_linear_factor", 1, 4, log=True)
         ctx.model.leaky_relu_slope = trial.suggest_float("leaky_relu_slope", 1e-3, 2, log=True)

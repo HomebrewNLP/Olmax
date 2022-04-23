@@ -97,7 +97,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             continue
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        if "norm" in param_name.lower() or grad.ndim < 2:
+        if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
             grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
         else:
             grad = sm3(inner_ctx, param_name, grad)
