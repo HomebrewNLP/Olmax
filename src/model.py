@@ -47,11 +47,12 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.n
         out = out.astype(original_dtype)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            d_wgt = (dy * out).sum().reshape((1,))
-            dy = jnp.where(out > 0, dy, dy * ctx.model.leaky_relu_slope)
+            out_fp32 = promote_to(out, run_type)
+            d_wgt = (dy * out_fp32).sum().reshape((1,))
+            dy = jnp.where(out_fp32 > 0, dy, dy * ctx.model.leaky_relu_slope)
             # By undoing the activation here, we avoid inversion above
             dy = dy * std * (1 + wgt)
-            dy -= (dy * out).mean(-1, keepdims=True) * out
+            dy -= (dy * out_fp32).mean(-1, keepdims=True) * out_fp32
             dy -= dy.mean(-1, keepdims=True)
             return dy.astype(original_dtype), d_wgt
 
