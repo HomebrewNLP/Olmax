@@ -7,7 +7,6 @@ import warnings
 
 import jax
 import jax._src.util as util
-import optuna
 import wandb
 import yaml
 from jax import numpy as jnp
@@ -97,14 +96,11 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
     return _fn
 
 
-def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optuna.Trial] = None):
+def run_one(wblog: typing.Optional[WandbLog] = None):
     wctx = WhileTrainContext()
     ctx = wctx.ctx
     ctx.is_initializing = True
-    storage = ctx.wandb.storage
-    ctx.wandb.storage = ""  # mask to avoid logging it publicly
     print(yaml.dump(ctx.config(), indent=4))
-    ctx.wandb.storage = storage
     total_steps = ctx.training.steps * ctx.training.device_steps
     data = timeit("Initializing dataset", text_dataset, ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
@@ -144,11 +140,6 @@ def run_one(wblog: typing.Optional[WandbLog] = None, trial: typing.Optional[optu
         if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
             if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
                 return wblog.loss_medians[-1]
-        if trial is not None:
-            trial.report(wblog.loss_medians[-1], idx * ctx.training.device_steps)
-            if trial.should_prune():
-                print("Optuna says it should prune")
-                return wblog.loss_medians[-1]
         log_step = math.log2((idx + 1) * ctx.training.device_steps + 1)
         el = ctx.training.early_stopping.expected_loss
         expected_loss = el.offset + el.scale * math.exp(el.exponent * log_step)
@@ -170,7 +161,6 @@ def dump_ctx(ctx: Context, run):
     with open("config.yaml", 'w') as f:
         f.write(yaml.dump(ctx.config(), indent=4))
     sys.argv.insert(1, "config.yaml")
-    ctx.wandb.storage = ""
     run.config.update(ctx.config(), allow_val_change=True)
 
 
@@ -185,49 +175,20 @@ def main():
     run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
     wblog = WandbLog(run)
 
-    if "placeholder" not in run.config:
-        cfg = {}
-        for param_name, param in run.config.items():
-            if '.' not in param_name:
-                continue
-            inner_cfg = cfg
-            split_name = param_name.split(".")
-            for s in split_name[:-1]:
-                if s not in inner_cfg:
-                    inner_cfg[s] = {}
-                inner_cfg = inner_cfg[s]
-            inner_cfg[split_name[-1]] = param
-        init_class(ctx, cfg)
-        dump_ctx(ctx, run)
-        return run_one(wblog)
-
-    def objective(trial: optuna.trial.Trial) -> typing.Optional[float]:
-        ctx.optimizer.exponential_decay = trial.suggest_float("exponential_decay", 1e-6, 1e-3, log=True)
-        ctx.optimizer.weight_decay = trial.suggest_float("weight_decay", 1e-5, 1, log=True)
-        ctx.optimizer.adam_beta1 = trial.suggest_float("adam_beta1", 1e-3, 1, log=True)
-        ctx.optimizer.adam_beta2 = trial.suggest_float("adam_beta2", 1e-4, 1, log=True)
-        ctx.optimizer.gradient_clip = trial.suggest_float("gradient_clip", 1e-5, 1, log=True)
-        ctx.optimizer.learning_rate = trial.suggest_float("learning_rate", 1e-5, 1, log=True)
-        ctx.optimizer.warmup_end = trial.suggest_int("warmup_end", 16, 4096, log=True)
-        ctx.optimizer.momentum_beta = trial.suggest_float("momentum_beta", 1e-4, 1, log=True)
-        ctx.dims.sizes.full_conv_kernel = trial.suggest_int("full_conv_kernel", 2, 16, log=True)
-        ctx.dims.sizes.depthwise_conv_kernel = trial.suggest_int("depthwise_conv_kernel", 4, 256, log=True)
-        ctx.dims.sizes.depth = trial.suggest_int("depth", 1, 16, log=True)
-        ctx.dims.sizes.features_per_head = 128 * trial.suggest_int("features_per_head//128", 1, 3, log=True)
-        ctx.dims.sizes.batch = 2 * trial.suggest_int("batch//2", 1, 8, log=True)
-        ctx.model.rezero_lr_scale = trial.suggest_float("rezero_lr_scale", 1e-3, 2, log=True)
-        ctx.dims.sizes.intermediate = ctx.dims.sizes.features_per_head
-        ctx.dims.sizes.intermediate *= trial.suggest_int("group_linear_factor", 1, 4, log=True)
-        ctx.model.leaky_relu_slope = trial.suggest_float("leaky_relu_slope", 1e-3, 2, log=True)
-        # ctx.model.glu_mode = trial.suggest_int("glu_mode", 0, 3)
-        ctx.training.z_loss = trial.suggest_float("z_loss", 1e-3, 2, log=True)
-        dump_ctx(ctx, run)
-        return run_one(wblog, trial)
-
-    study = optuna.load_study(ctx.wandb.entity, ctx.wandb.storage, optuna.samplers.TPESampler(n_startup_trials=128),
-                              optuna.pruners.PercentilePruner(ctx.wandb.percentile, n_startup_trials=128,
-                                                              n_warmup_steps=2048))
-    return study.optimize(objective, 1)
+    cfg = {}
+    for param_name, param in run.config.items():
+        if '.' not in param_name:
+            continue
+        inner_cfg = cfg
+        split_name = param_name.split(".")
+        for s in split_name[:-1]:
+            if s not in inner_cfg:
+                inner_cfg[s] = {}
+            inner_cfg = inner_cfg[s]
+        inner_cfg[split_name[-1]] = param
+    init_class(ctx, cfg)
+    dump_ctx(ctx, run)
+    return run_one(wblog)
 
 
 if __name__ == '__main__':

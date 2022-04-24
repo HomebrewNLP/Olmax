@@ -1,15 +1,10 @@
 import argparse
-import base64
 import os
 import pathlib
-import subprocess
-import time
 
-import optuna
 import yaml
 
 import wandb
-from script.launch_multiple_runs import synchronous_deletion, send_to_tpu
 from src.context import WandB
 
 CONFIGS = [("europe-west4-a", 3, 250, 1),  #
@@ -37,65 +32,25 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prefix", type=str, default="homebrew", help="Name prefix for TPUs")
     parser.add_argument("--us-service-account", type=str, help="EMail of the service account used for american TPUs")
-    parser.add_argument("--storage-tpu-name", type=str, help="Name of the non-preemptible TPU used for redis storage")
-    parser.add_argument("--storage-tpu-zone", type=str, help="Zone of the non-preemptible TPU used for redis storage")
     parser.add_argument("--eu-service-account", type=str, help="EMail of the service account used for european TPUs")
     parser.add_argument("--use-us", default=0, type=int, help="Whether to use TPUs from the USA")
     parser.add_argument("--dry", default=1, type=int, help="Whether to only show what it'd do rather than doing it.")
-    parser.add_argument("--percentile", default=25, type=float, help="Runs below this percentile are eliminated")
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     args = parser.parse_args()
     return (bool(args.use_us), bool(args.dry), args.cleanup, args.prefix, args.us_service_account,
-            args.eu_service_account, args.storage_tpu_name, args.storage_tpu_zone, args.percentile)
-
-
-def exec_tpu(host: str, zone: str, command: str):
-    while subprocess.call(["gcloud", "alpha", "compute", "tpus", "tpu-vm", "ssh", f"ubuntu@{host}",
-                           f"--zone", zone, "--command", command]):
-        pass
+            args.eu_service_account)
 
 
 def main():
-    (use_us, dry, cleanup, base_prefix, us_service_account, eu_service_account, storage_tpu_name,
-     storage_tpu_zone, percentile) = parse_args()
+    (use_us, dry, cleanup, base_prefix, us_service_account, eu_service_account) = parse_args()
 
     if not cleanup:
         with open("sweep.yaml", 'r') as f:
             config = yaml.safe_load(f.read())
         sweep = wandb.sweep(config, entity=WandB.entity, project=WandB.project)
-        synchronous_deletion(storage_tpu_name, storage_tpu_name, storage_tpu_zone)
-        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {storage_tpu_name} --zone {storage_tpu_zone} '
-                  f'--accelerator-type v2-8 --version v2-alpha; do echo; done')
-        password = base64.b32encode(os.urandom(16)).decode().lower().strip('=')
-        command = '&&'.join(["sudo apt update",
-                             "sudo apt upgrade -y",
-                             "sudo apt install -y postgresql postgresql-contrib",
-                             "sudo systemctl start postgresql",
-                             "echo 'host  all  all 0.0.0.0/0 md5' | sudo tee -a /etc/postgresql/12/main/pg_hba.conf",
-                             "sudo sed -i \"s/\\#listen_addresses = 'localhost'/listen_addresses = '*'/g\" "
-                             "/etc/postgresql/12/main/postgresql.conf",
-                             "sudo sed -i \"s/\\max_connections = 100/max_connections = 5000/g\" "
-                             "/etc/postgresql/12/main/postgresql.conf",
-                             "sudo sed -i \"s/\\shared_buffers = 128MB/shared_buffers = 128GB/g\" "
-                             "/etc/postgresql/12/main/postgresql.conf",
-                             f"sudo -u postgres psql -c \"ALTER USER postgres PASSWORD '{password}';\"",
-                             "sudo -u postgres psql -c \"alter system set "
-                             "idle_in_transaction_session_timeout='15min';\"",
-                             "sudo systemctl restart postgresql"])
-        send_to_tpu(storage_tpu_zone, storage_tpu_name, "setup.sh", command)
-        exec_tpu(storage_tpu_name, storage_tpu_zone, "bash setup.sh")
-        storage_description = yaml.safe_load(subprocess.check_output(["gcloud", "alpha", "compute", "tpus", "tpu-vm",
-                                                                      "describe", storage_tpu_name, "--zone",
-                                                                      storage_tpu_zone]))
-        time.sleep(5)  # Ensure postgres is up and running. Yes, it can be starting up even after accessing it.
-        external_ip = storage_description['networkEndpoints'][0]['accessConfig']['externalIp']
-
-        url = f"postgresql://postgres:{password}@{external_ip}:5432/postgres"
-        optuna.create_study(url, direction=optuna.study.StudyDirection.MINIMIZE, study_name=WandB.entity)
     else:
         sweep = ""
-        url = ""
     main_folder = pathlib.Path(os.path.abspath(__file__)).parent
     for zone, tpu_version, tpu_count, preemptible in CONFIGS:
         us_tpu = zone.startswith('us')
@@ -113,8 +68,7 @@ def main():
                f'--data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-char-pile/ '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
                f'--sweep {WandB.entity}/{WandB.project}/{sweep} --cleanup {cleanup} '
-               f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account} '
-               f"--storage '{url}'")
+               f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account}')
         print(cmd)
         if not dry:
             os.system(cmd)
