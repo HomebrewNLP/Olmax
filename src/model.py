@@ -42,20 +42,20 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.n
             src_fp32 = lax.psum(src_fp32, axis_name=ParallelAxes.model)
         mean = src_fp32.mean(-1, keepdims=True)
         std = lax.rsqrt(jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), 0))
+        out = (src_fp32 - mean) * std * (1 + wgt)
+        out = activate(ctx, out)
+        out = out.astype(original_dtype)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            src_fp32 = promote_to(src, run_type)
-            out = (src_fp32 - mean) * std
-            dy = jnp.where(out > 0, dy, dy * ctx.model.leaky_relu_slope)
             d_wgt = (dy * out).sum().reshape((1,))
+            dy = jnp.where(out > 0, dy, dy * ctx.model.leaky_relu_slope)
+            # By undoing the activation here, we avoid inversion above
             dy = dy * std * (1 + wgt)
             dy -= (dy * out).mean(-1, keepdims=True) * out
             dy -= dy.mean(-1, keepdims=True)
             return dy.astype(original_dtype), d_wgt
 
-        out = (src_fp32 - mean) * std * (1 + wgt)
-        out = activate(ctx, out)
-        return out.astype(original_dtype), _grad
+        return out, _grad
 
     return _fn(inp, weight)
 
@@ -94,10 +94,10 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("pointwise")
     inp = scale_norm_act(ctx, inp)
-    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std, ctx.dims.features,
+    inp = conv(ctx, inp, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std, ctx.dims.features,
                ctx.dims.pointwise_features)
     inp = activate(ctx, inp)
-    return conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std, ctx.dims.pointwise_features,
+    return conv(ctx, inp, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std, ctx.dims.pointwise_features,
                 ctx.dims.features)
 
 
