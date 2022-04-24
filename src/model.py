@@ -73,11 +73,6 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: str, scale: float, in_feat
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
 
 
-def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("full_conv")
-    return conv(ctx, inp, ctx.dims.full_conv_kernel, scale, in_features, out_features)
-
-
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
     inp = scale_norm_act(ctx, inp)
