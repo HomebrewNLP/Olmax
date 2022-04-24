@@ -70,11 +70,13 @@ class DataContext(DataClass):
 
 class DimSizes(DataClass):
     batch: int = 128
-    full_conv_kernel: int = 5
-    depthwise_conv_kernel: int = 27
-    features_per_head: int = 256
-    intermediate: int = 512  # should be features_per_head * 2
-    moe_intermediate: int = 4096  # should be intermediate * heads
+    outer_bottleneck_kernel: int = 25
+    inner_bottleneck_kernel: int = 49
+    inner_bottleneck_features: int = 128
+    pointwise_kernel: int = 5
+    features: int = 256
+    pointwise_features: int = 512
+    moe_intermediate: int = 4096
     heads: int = 8
     sequence: int = 4096
     one: int = 1
@@ -89,17 +91,17 @@ class DimSizes(DataClass):
 
 class Dims(DataClass):
     batch: str = "batch"
-    features_per_head: str = "features_per_head"
-    heads: str = "heads"
-    full_conv_kernel: str = "full_conv_kernel"
-    depthwise_conv_kernel: str = "depthwise_conv_kernel"
-    depth: str = "depth"
-    sequence: str = "sequence"
-    anonymous_sequence: str = "anonymous_sequence"
-    intermediate: str = "intermediate"
+    outer_bottleneck_kernel: str = "outer_bottleneck_kernel"
+    inner_bottleneck_kernel: str = "inner_bottleneck_kernel"
+    inner_bottleneck_features: str = "inner_bottleneck_features"
+    pointwise_kernel: str = "pointwise_kernel"
+    features: str = "features"
+    pointwise_features: str = "pointwise_features"
     moe_intermediate: str = "moe_intermediate"
+    heads: str = "heads"
     one: str = "one"
-    multiplier: str = "multiplier"
+    sequence: str = "sequence"
+    depth: str = "depth"
     vocab: str = "vocab"
 
     def __init__(self, data: DataContext):
@@ -186,7 +188,7 @@ class Context(DataClass):
         self.training = Training()
         self.wandb = WandB()
         self.dims = Dims(self.data)
-        self.dims.sizes.intermediate = self.dims.sizes.features_per_head * 2
+        self.dims.sizes.intermediate = self.dims.sizes.features * 2
 
         if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
             with open(sys.argv[1]) as f:
@@ -194,6 +196,7 @@ class Context(DataClass):
             init_class(self, yaml.safe_load(cfg))
 
         self.seed = 0
+        self.depth = 0
         self.global_prefix = ''
 
         self.name_cache: typing.Dict[str, int] = {}
@@ -222,7 +225,7 @@ class Context(DataClass):
     def config(self) -> dict:
         cfg = self.__dict__.copy()
         del cfg['name_cache'], cfg['parameters'], cfg['parameter_dims'], cfg['prng_key'], cfg['is_initializing']
-        del cfg['parameter_variance']
+        del cfg['parameter_variance'], cfg['depth']
         return serialize(cfg)
 
 

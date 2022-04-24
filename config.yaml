@@ -8,7 +8,7 @@ dims:
         sequence: 65536
         batch: 32
         depth: 4
-        features_per_head: 256
+        features: 256
 optimizer:
     exponential_decay: 1.0e-05
     gradient_clip: 0.001

@@ -20,17 +20,12 @@ def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
 
 
-def psum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    if ctx.is_initializing:
-        return inp
-    return lax.psum(inp, ParallelAxes.model)
-
-
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
-def scale_norm(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
+def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarray] = None, psum: bool = False
+                   ) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
@@ -40,12 +35,15 @@ def scale_norm(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarr
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
         src_fp32 = promote_to(src, run_type)
+        if psum:
+            src_fp32 = lax.psum(src_fp32, axis_name=ParallelAxes.model)
         mean = src_fp32.mean(-1, keepdims=True)
-        std = lax.rsqrt(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean))
+        std = lax.rsqrt(jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), 0))
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             src_fp32 = promote_to(src, run_type)
             out = (src_fp32 - mean) * std
+            dy = jnp.where(out > 0, dy, dy * ctx.model.leaky_relu_slope)
             d_wgt = (dy * out).sum().reshape((1,))
             dy = dy * std * (1 + wgt)
             dy -= (dy * out).mean(-1, keepdims=True) * out
@@ -53,6 +51,7 @@ def scale_norm(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarr
             return dy.astype(original_dtype), d_wgt
 
         out = (src_fp32 - mean) * std * (1 + wgt)
+        out = activate(ctx, out)
         return out.astype(original_dtype), _grad
 
     return _fn(inp, weight)
@@ -64,66 +63,39 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
     return inp * scale
 
 
-def conv(ctx: Context, inp: jnp.ndarray, depthwise: bool, conv_kernel: str, scale: float, in_features: str,
-         out_features: str, use_rezero: bool = False):
-    weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2,
-                       scale=1 if use_rezero else scale)
-    if use_rezero:
-        weight = rezero(ctx, weight, scale)
+def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: str, scale: float, in_features: str, out_features: str):
+    weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale)
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (ctx.dims.sizes[out_features],))
-    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], ctx.dims.sizes[out_features] if depthwise else 1)
+    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
 
 
-def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str,
-              use_rezero: bool = False) -> jnp.ndarray:
+def full_conv(ctx: Context, inp: jnp.ndarray, scale: float, in_features: str, out_features: str) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("full_conv")
-    return conv(ctx, inp, False, ctx.dims.full_conv_kernel, scale, in_features, out_features, use_rezero)
+    return conv(ctx, inp, ctx.dims.full_conv_kernel, scale, in_features, out_features)
 
 
-def depthwise_conv(ctx: Context, inp: jnp.ndarray, scale: float, out_features: str,
-                   use_rezero: bool = False) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("depthwise_conv")
-    return conv(ctx, inp, True, ctx.dims.depthwise_conv_kernel, scale, ctx.dims.one, out_features, use_rezero)
+def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("bottleneck")
+    inp = scale_norm_act(ctx, inp)
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.model.activation_std / ctx.dims.sizes.heads,
+               ctx.dims.features, ctx.dims.inner_bottleneck_features)
+    inp = scale_norm_act(ctx, inp, psum=True)
+    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std,
+               ctx.dims.inner_bottleneck_features, ctx.dims.inner_bottleneck_features)
+    inp = scale_norm_act(ctx, inp)
+    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.model.activation_std,
+                ctx.dims.inner_bottleneck_features, ctx.dims.features)
 
 
-def output_conv(ctx: Context, inp: jnp.ndarray, in_features: typing.Optional[str] = None):
-    ctx = ctx.add_to_prefix("output_conv")
-    return full_conv(ctx, inp, 1, ctx.dims.intermediate if in_features is None else in_features,
-                     ctx.dims.features_per_head, True)
-
-
-def depthwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("depthwise")
-    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std, ctx.dims.features_per_head, ctx.dims.intermediate)
-    mid = activate(ctx, mid)
-    mid = depthwise_conv(ctx, mid, 1 / ctx.model.activation_std, ctx.dims.intermediate)
-    mid = activate(ctx, mid)
-    return output_conv(ctx, mid)
-
-
-def activated_allsum(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray):
-        dtype = src.dtype
-        src = promote_to(src, jnp.float32)
-        out = activate(ctx, psum(ctx, src))
-        out = out.astype(dtype)
-
-        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
-            return jnp.where(out >= 0, dy, ctx.model.leaky_relu_slope * dy).astype(dtype)
-
-        return out, _grad
-
-    return _fn(inp)
-
-
-def reduced_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("reduced")
-    mid = full_conv(ctx, inp, 1 / ctx.model.activation_std / ctx.dims.sizes.heads, ctx.dims.features_per_head,
-                    ctx.dims.intermediate)
-    mid = activated_allsum(ctx, mid)
-    return output_conv(ctx, mid)
+def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("pointwise")
+    inp = scale_norm_act(ctx, inp)
+    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std, ctx.dims.features,
+               ctx.dims.pointwise_features)
+    inp = activate(ctx, inp)
+    return conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std, ctx.dims.features,
+                ctx.dims.pointwise_features)
 
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
@@ -160,12 +132,15 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
 
 
 def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    # 500ms at 256 features (forward pass, backward takes slightly longer)
+    # While conv 256->256 with kernel_size=5 takes ~11.3ms
     ctx = ctx.add_to_prefix("qrnn")
-    forget = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
-    mid = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
+    forget = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.inner_bottleneck_features)
+    mid = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.inner_bottleneck_features)
     out = qrnn_grad(ctx, forget, mid)
-    out = scale_norm(ctx, out)
-    return output_conv(ctx, out, ctx.dims.features_per_head)
+    out = scale_norm_act(ctx, out)
+    return conv(ctx, out, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std,
+                ctx.dims.inner_bottleneck_features, ctx.dims.features)
 
 
 def z_loss(ctx: Context, src: jnp.ndarray, use_previous_grad: bool = True) -> jnp.ndarray:
@@ -242,12 +217,12 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
 
 def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("moe")
-    inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features_per_head, ctx.dims.moe_intermediate],
+    inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features, ctx.dims.moe_intermediate],
                         scale=1 / ctx.model.activation_std)
-    out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features_per_head])
+    out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features])
     out_wgt = rezero(ctx, out_wgt)
 
-    gates = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.heads)
+    gates = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.features)
     mid, indices = top1_gating(ctx, gates, inp)
     mid = matmul(mid, inp_wgt)
     mid = activate(ctx, mid)
@@ -255,36 +230,21 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.zeros_like(inp).reshape(-1, inp.shape[-1]).at[indices].set(out).reshape(inp.shape)
 
 
-def reduced_self_conv_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    # Uses 4x padding
-    sequence = ctx.dims.sizes.sequence
-    features = ctx.dims.sizes.features_per_head * ctx.dims.sizes.batch
-    weight = full_conv(ctx, inp, 1, ctx.dims.features_per_head, ctx.dims.features_per_head)
-    inp = inp.transpose(1, 0, 2).reshape(1, sequence, features)
-    weight = weight.transpose(0, 2, 1).reshape(features, 1, sequence)
-    weight = jnp.flip(weight, 2)
-    mid = lax_conv(inp, weight, [(sequence - 1, 0)], features)
-    mid = mid.reshape(sequence, ctx.dims.sizes.batch, ctx.dims.sizes.features_per_head).transpose(1, 0, 2)
-    mid = scale_norm(ctx, mid)
-    mid = activated_allsum(ctx, mid)
-    return output_conv(ctx, mid, ctx.dims.features_per_head)
-
-
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
-    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features_per_head], std=1e-5)
+    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1e-5)
     normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.one], std=0,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
 
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-        return scale_norm(ctx, jnp.take(wgt, src, 0), scale)
+        return scale_norm_act(ctx, jnp.take(wgt, src, 0), scale)
 
     return jax.checkpoint(_fn)(inp, param, normalization_scale)
 
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "embd", [ctx.dims.features_per_head, ctx.dims.vocab], std=0,
+    embd = get_param(ctx, "embd", [ctx.dims.features, ctx.dims.vocab], std=0,
                      lr_scale=1 / ctx.dims.sizes.heads)
     normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.one], std=0,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
@@ -292,7 +252,7 @@ def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-        return matmul(scale_norm(ctx, src, scale), wgt)
+        return matmul(scale_norm_act(ctx, src, scale), wgt)
 
     return jax.checkpoint(_fn)(inp, embd, normalization_scale)
 
@@ -393,11 +353,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.sizes.depth):
-        src = reversible(ctx, reduced_block, src)
-        src = reversible(ctx, depthwise_block, src)
-        # src = reversible(ctx, reduced_self_conv_block, src)
+        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, pointwise_block, src)
+        # src = reversible(ctx, depthwise_block, src)  # <-- depthwise takes 50% longer than conv 256->512 (k=5)
         # src = reversible(ctx, moe, src)
-        src = reversible(ctx, qrnn_block, src)
+        # src = reversible(ctx, qrnn_block, src)  # <-- perhaps use it every N blocks? or less features in RNN?
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
