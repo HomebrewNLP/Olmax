@@ -353,9 +353,9 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.sizes.depth):
+        src = reversible(ctx, pointwise_block, src)
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, pointwise_block, src)
-        # src = reversible(ctx, depthwise_block, src)  # <-- depthwise takes 50% longer than conv 256->512 (k=5)
         # src = reversible(ctx, moe, src)
         # src = reversible(ctx, qrnn_block, src)  # <-- perhaps use it every N blocks? or less features in RNN?
     ctx.parameters = src[0]
