@@ -31,6 +31,9 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.n
     if weight is None:
         weight = get_param(ctx, "scale", [ctx.dims.one], std=0, dtype=run_type)
 
+    if ctx.is_initializing:
+        return inp
+
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
@@ -94,8 +97,8 @@ def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std, ctx.dims.features,
                ctx.dims.pointwise_features)
     inp = activate(ctx, inp)
-    return conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std, ctx.dims.features,
-                ctx.dims.pointwise_features)
+    return conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std, ctx.dims.pointwise_features,
+                ctx.dims.features)
 
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
