@@ -11,12 +11,12 @@ class WandbLog:
         self.run = run
         self.losses = []
         self.accuracies = []
-        self.idx = 0
+        self.idx = 2
         self.loss_medians = []
 
     def __call__(self, wctx: WhileContext, current_lr) -> bool:
-        self.idx += 1
         ctx = wctx.ctx
+        self.idx += 1
         device_steps = ctx.training.device_steps
         curr_loss = wctx.loss / device_steps
         step = self.idx * ctx.wandb.log_frequency * device_steps
@@ -32,13 +32,14 @@ class WandbLog:
 
         rate = step / (time.time() - self.start_time)
         tokens_per_day = 3600 * 24 * rate * ctx.dims.sizes.batch * ctx.dims.sizes.sequence
-
+        current_step = float(wctx.current_step)
         self.run.log({"Loss/Current": self.losses[-1], "Accuracy/Current": self.accuracies[-1],
                       "Speed/Batches per Second": rate, "Speed/Tokens per Day": tokens_per_day,
                       "Optimizer/Learning Rate": current_lr.astype(float), "Optimizer/Beta1": ctx.optimizer.adam_beta1,
                       "Optimizer/Beta2": ctx.optimizer.adam_beta2,
-                      'Errors/NaN Steps': step - wctx.current_step,
-                      'Errors/NaN Steps (Percent)': 1 - wctx.current_step / step}, step=step)
+                      'Errors/NaN Steps': step - current_step,
+                      'Errors/Current Steps': current_step,
+                      'Errors/NaN Steps (Percent)': 1 - current_step / step}, step=step)
         es = ctx.training.early_stopping
         if self.loss_medians[0] < (self.loss_medians[-1] * (1 - es.minimum_relative_loss_change)):
             print(f"Not Improving | Oldest Loss Median: {self.loss_medians[0]:9.6f} - "
