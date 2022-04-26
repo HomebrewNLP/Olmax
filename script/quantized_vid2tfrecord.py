@@ -18,6 +18,8 @@ import numpy as np
 import requests
 import tensorflow as tf
 import torch
+import torch_xla.core.xla_model as xm
+import torch_xla.distributed.xla_multiprocessing as xmp
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 import youtube_dl
@@ -201,23 +203,26 @@ def load_vqgan(config_path: str, ckpt_path: str):
 @functools.partial(try_except, default=[])
 def tokenize(model: GumbelVQ, frames: list, target_image_size: int, device: torch.device, batch_size: int):
     images = []
-    for frame in frames:
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = PIL.Image.fromarray(frame)
-        s = min(img.size)
-        r = target_image_size / s
-        s = (round(r * img.size[1]), round(r * img.size[0]))
-        img = TF.resize(img, s, interpolation=PIL.Image.LANCZOS)
-        img = TF.center_crop(img, output_size=2 * [target_image_size])
-        img = T.ToTensor()(img)
-        images.append(img)
-    output = []
-    for i in range(0, len(images), batch_size):
-        batch = torch.stack(images[i:i + batch_size])
-        batch = batch.to(device)
-        with torch.no_grad():
-            batch = model.encode(batch)
-        output.extend(batch.detach().cpu().flatten().tolist())
+    with torch.no_grad():
+        for frame in frames:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = PIL.Image.fromarray(frame)
+            s = min(img.size)
+            r = target_image_size / s
+            s = (round(r * img.size[1]), round(r * img.size[0]))
+            img = TF.resize(img, s, interpolation=PIL.Image.LANCZOS)
+            img = TF.center_crop(img, output_size=2 * [target_image_size])
+            img = T.ToTensor()(img)
+            images.append(img)
+        batches = []
+        for i in range(0, len(images), batch_size):
+            batch = torch.stack(images[i:i + batch_size])
+            batch = batch.to(device=device, non_blocking=True)
+            batch, _, _ = model.encode(batch)
+            batches.append(batch.detach())
+        output = []
+        for batch in batches:
+            output.extend(batch.to(device='cpu:0', non_blocking=True).flatten().tolist())
     return output
 
 
@@ -337,11 +342,9 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     return added
 
 
-def worker(config_path: str,
+def worker(model: GumbelVQ,
            chunk_size: int,
-           ckpt_path: str,
            work: list,
-           worker_id: int,
            save_dir: str,
            target_fps: int,
            lock: threading.Lock,
@@ -351,6 +354,8 @@ def worker(config_path: str,
            padding_token: int,
            target_image_size: int,
            batch_size: int):
+    torch.set_default_tensor_type('torch.FloatTensor')
+    worker_id = xm.get_ordinal()
     youtube_base = 'https://www.youtube.com/watch?v='
     buffer_save_dir = download_buffer_dir
 
@@ -360,10 +365,10 @@ def worker(config_path: str,
 
     youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600})
     youtube_getter.add_default_info_extractors()
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = xm.xla_device()
+    model = model.to(device=device, non_blocking=True)
 
     downloader = Downloader(webshare_io_key=webshare_io_key)
-    model = load_vqgan(config_path, ckpt_path)
 
     tfrecord_id = 0
     tokens = []
@@ -405,6 +410,8 @@ def main():
     resolution = conf.model.params.ddconfig.resolution
     video_ids = []
     durations = []
+    model = load_vqgan(config_path, model_path)
+    model = xmp.MpModelWrapper(model)
 
     for url_path in os.listdir(urls):
         with open(f'{urls}/{url_path}', 'r') as f:
@@ -440,32 +447,13 @@ def main():
 
     lock = multiprocessing.Lock()
 
-    worker_list = []
+    def _exec_fn(rank: int, local_lock: multiprocessing.Lock):
+        time.sleep(rank * startup_delay)
+        print(f'Started Worker {rank} at {datetime.datetime.now()}')
+        return worker(model, chunk_size, ids[rank], prefix, fps, local_lock, tmp_dir, webshare_api_key, bucket,
+                      padding_token, resolution, batch_size)
 
-    for i, work in enumerate(ids):
-        p = multiprocessing.Process(target=worker, args=(config_path,
-                                                         chunk_size,
-                                                         model_path,
-                                                         work,
-                                                         i,
-                                                         prefix,
-                                                         fps,
-                                                         lock,
-                                                         tmp_dir,
-                                                         webshare_api_key,
-                                                         bucket,
-                                                         padding_token,
-                                                         resolution,
-                                                         batch_size
-                                                         ))
-
-        p.start()
-        print(f'Started Worker {i} at {datetime.datetime.now()}')
-        worker_list.append(p)
-        time.sleep(startup_delay)
-
-    for w in worker_list:
-        w.join()
+    xmp.spawn(_exec_fn, nprocs=len(ids), start_method="fork", args=(lock,))
 
 
 if __name__ == '__main__':
