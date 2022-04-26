@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import random
 import subprocess
+import sys
 import threading
 import time
 import typing
@@ -25,6 +26,8 @@ import torchvision.transforms.functional as TF
 import youtube_dl
 from google.cloud import storage
 from omegaconf import OmegaConf
+
+sys.path.append("./taming-transformers")
 from taming.models.vqgan import GumbelVQ
 
 
@@ -174,12 +177,12 @@ def tokenize(model: GumbelVQ, frames: list, target_image_size: int, device: torc
         batches = []
         for i in range(0, len(images), batch_size):
             batch = torch.stack(images[i:i + batch_size])
-            batch = batch.to(device=device, non_blocking=True)
+            batch = batch.to(device)
             _, _, (_, _, batch) = model.encode(batch)
             batches.append(batch.detach().flatten())  # [frame, x, y] -> [frame * x * y]
         output = []
         for batch in batches:
-            output.extend(batch.to(device='cpu:0', non_blocking=True).tolist())
+            output.extend(batch.cpu().tolist())
     return output
 
 
@@ -322,7 +325,7 @@ def worker(model: GumbelVQ,
     youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600})
     youtube_getter.add_default_info_extractors()
     device = xm.xla_device()
-    model = model.to(device=device, non_blocking=True)
+    model = model.to(device)
 
     downloader = Downloader()
 
