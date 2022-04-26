@@ -26,10 +26,9 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     grad_fn = jax.value_and_grad(compute, 0, True)
     (loss, accuracy), grads = grad_fn(wctx.ctx.parameters,
                                       wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
-    update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
     wctx.top_loss += accuracy
-    wctx.current_step += 1
+    wctx.current_step += update(wctx.ctx, grads, wctx.current_step)
     return wctx.serialize()
 
 

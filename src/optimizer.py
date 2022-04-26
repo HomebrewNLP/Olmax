@@ -3,6 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from constants import ParallelAxes
 from .backend import zero_param, assign, prefixed_name
 from .context import Context
 
@@ -29,7 +30,7 @@ def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
     return base
 
 
-def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+def sm3(ctx: Context, param_name: str, grad: jnp.ndarray, no_nan: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("sm3", count=False)
     dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
     weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
@@ -43,15 +44,16 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 
     for i in range(grad.ndim):
         new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
+        new = new * no_nan + ctx.parameters[prefixed_name(ctx, f"dim{i}")] * (1 - no_nan)
         ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
 
     return grad * optimizer_rsqrt(weight_update)
 
 
-def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+def momentum(ctx: Context, param_name: str, grad: jnp.ndarray, no_nan: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"momentum", count=False)
     state = zero_param_like(ctx, "momentum_buffer", param_name)
-    state = grad + state * (1 - ctx.optimizer.momentum_beta)  # 1st for momentum
+    state = grad + state * (1 - no_nan * ctx.optimizer.momentum_beta)  # 1st for momentum
     assign(ctx, "momentum_buffer", state)
     return grad + state * (1 - ctx.optimizer.momentum_beta)  # 2nd for nesterov
 
@@ -65,10 +67,11 @@ def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarr
     return debias(new_state, current_step, beta)
 
 
-def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
+def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray,
+         no_nan: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("adam", count=False)
-    exp_avg = ema(ctx, param_name, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg")
-    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq")
+    exp_avg = ema(ctx, param_name, grad, current_step, 1 - no_nan * ctx.optimizer.adam_beta1, "avg")
+    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - no_nan * ctx.optimizer.adam_beta2, "avg_sq")
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
 
 
@@ -91,6 +94,11 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
 
+    has_nan = jnp.zeros(())
+    for g in grads.values():
+        has_nan = jnp.logical_or(has_nan, jnp.isnan(g))
+    no_nan = jnp.equal(jax.lax.psum(has_nan, ParallelAxes.model), 0)
+
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
         if "optimizer" in param_name:
@@ -98,10 +106,14 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
-            grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
+            grad = adam(inner_ctx, param_name, grad, current_step, no_nan)  # Do adam update for small parameters
         else:
-            grad = sm3(inner_ctx, param_name, grad)
-            grad = momentum(inner_ctx, param_name, grad)
+            grad = sm3(inner_ctx, param_name, grad, no_nan)
+            grad = momentum(inner_ctx, param_name, grad, no_nan)
+        grad = grad * no_nan
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad *= parameter_lr
-        ctx.parameters[param_name] = grad + (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+        decayed_parameter = (1 + no_nan * ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+        ctx.parameters[param_name] = grad + decayed_parameter
+
+    return no_nan
