@@ -80,13 +80,8 @@ def parse_args():
         default=10,
         help="Seconds to wait after launching one worker (to avoid crashes)"
     )
-    parser.add_argument(
-        "--webshare-api-key",
-        type=str,
-        help="API Key to https://www.webshare.io/"
-    )
     args = parser.parse_args()
-    return args.workers, args.bucket, args.prefix, args.tmp_dir, args.urls, args.min_duration, args.chunk_size, args.webshare_api_key, args.fps, args.startup_delay
+    return args.workers, args.bucket, args.prefix, args.tmp_dir, args.urls, args.min_duration, args.chunk_size, args.fps, args.startup_delay
 
 
 def division_zero(x, y):
@@ -94,65 +89,27 @@ def division_zero(x, y):
 
 
 class Downloader:
-    def __init__(self, max_try: int = 3, webshare_io_key: str = None):
+    def __init__(self, max_try: int = 3):
         self.max_try = max_try
-        self.webshare_io_key = webshare_io_key
-        self.proxies = []
 
-        self.update_proxy()
-
-    def download(self, url: str, filename: str, use_proxy: bool):
-
+    def download(self, url: str, filename: str):
         for _ in range(self.max_try):
             try:
-                if use_proxy:
-                    r = requests.get(url, stream=True, proxies=self.proxies)
-                else:
-                    r = requests.get(url, stream=True)
-
+                r = requests.get(url, stream=True)
                 with open(filename, 'wb') as f:
                     for chunk in r:
                         f.write(chunk)
-
-            except Exception as e:
-                print(f'Download error with proxy: {use_proxy} \n error:', e)
-
-                if use_proxy:
-                    self.update_proxy()
-
+            except:
+                pass
             else:
                 return True
 
-        print('Retry exceeded for URL:', url)
+        print(f'Retry exceeded for URL: {url}')
 
         if os.path.exists(filename):
             os.remove(filename)
 
         return False
-
-    def update_proxy(self):
-        proxies = []
-        _next = "/api/proxy/list/?page=1"
-        while True:
-            r = requests.get('https://proxy.webshare.io' + _next,
-                             headers={"Authorization": f"Token {self.webshare_io_key}"})
-            dump = r.json()
-
-            if dump is None or 'next' not in dump:
-                break
-
-            _next = dump['next']
-            proxies.extend([res for res in dump['results'] if res['valid']])
-
-        random.shuffle(proxies)
-
-        for p in proxies:
-            username = p['username']
-            password = p['password']
-            proxy_address = p['proxy_address']
-            ports = p['ports']['http']
-            self.proxies.append({"http": f"http://{username}:{password}@{proxy_address}:{ports}",
-                                 "https": f"http://{username}:{password}@{proxy_address}:{ports}"})
 
 
 def frame_encoder(frame):
@@ -166,8 +123,8 @@ def frame_encoder(frame):
 def split_equal(ids: list, duration: list, num: int, min_duration: int = 256):
     sort = sorted(zip(duration, ids))[::-1]
 
-    ids_split = [[] for i in range(num)]
-    duration_spit = [[] for i in range(num)]
+    ids_split = [[] for _ in range(num)]
+    duration_spit = [[] for _ in range(num)]
     duration_sum = [0] * num
 
     for d, i in sort:
@@ -282,7 +239,7 @@ def download_video(video_urls: typing.List[dict], downloader: Downloader, worker
             continue
 
         video_buffer_path = os.path.join(download_buffer_dir, yt_url) + '.' + ext
-        if not downloader.download(url, video_buffer_path, False):
+        if not downloader.download(url, video_buffer_path):
             continue
         # If no mp4 got downloaded use ffmpeg to converted it to mp4
         if ext != 'mp4':
@@ -349,7 +306,6 @@ def worker(model: GumbelVQ,
            target_fps: int,
            lock: threading.Lock,
            download_buffer_dir: str,
-           webshare_io_key: str,
            bucket_name: str,
            padding_token: int,
            target_image_size: int,
@@ -368,7 +324,7 @@ def worker(model: GumbelVQ,
     device = xm.xla_device()
     model = model.to(device=device, non_blocking=True)
 
-    downloader = Downloader(webshare_io_key=webshare_io_key)
+    downloader = Downloader()
 
     tfrecord_id = 0
     tokens = []
@@ -395,7 +351,7 @@ def worker(model: GumbelVQ,
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, min_duration, chunk_size, webshare_api_key, fps, startup_delay = parse_args()
+    workers, bucket, prefix, tmp_dir, urls, min_duration, chunk_size, fps, startup_delay = parse_args()
     config_path = 'vqgan.gumbelf8.config.yml'
     model_path = 'sber.gumbelf8.ckpt'
     batch_size = 48  # result from manual testing
@@ -450,8 +406,8 @@ def main():
     def _exec_fn(rank: int, local_lock: multiprocessing.Lock):
         time.sleep(rank * startup_delay)
         print(f'Started Worker {rank} at {datetime.datetime.now()}')
-        return worker(model, chunk_size, ids[rank], prefix, fps, local_lock, tmp_dir, webshare_api_key, bucket,
-                      padding_token, resolution, batch_size)
+        return worker(model, chunk_size, ids[rank], prefix, fps, local_lock, tmp_dir, bucket, padding_token, resolution,
+                      batch_size)
 
     xmp.spawn(_exec_fn, nprocs=len(ids), start_method="fork", args=(lock,))
 
