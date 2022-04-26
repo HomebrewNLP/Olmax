@@ -24,8 +24,8 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
-def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarray] = None, psum: bool = False
-                   ) -> jnp.ndarray:
+def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.ndarray] = None,
+                   psum: bool = False) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
@@ -72,7 +72,9 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
 
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: str, scale: float, in_features: str, out_features: str):
     ctx = ctx.add_to_prefix("conv")
-    weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale)
+    fan_in = ctx.dims.sizes[in_features] * ctx.dims.sizes[conv_kernel]
+    weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale / fan_in)
+
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (ctx.dims.sizes[out_features],))
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
@@ -142,8 +144,8 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     mid = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.inner_bottleneck_features)
     out = qrnn_grad(ctx, forget, mid)
     out = scale_norm_act(ctx, out)
-    return conv(ctx, out, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std,
-                ctx.dims.inner_bottleneck_features, ctx.dims.features)
+    return conv(ctx, out, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std, ctx.dims.inner_bottleneck_features,
+                ctx.dims.features)
 
 
 def z_loss(ctx: Context, src: jnp.ndarray, use_previous_grad: bool = True) -> jnp.ndarray:
@@ -248,7 +250,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
     embd = get_param(ctx, "embd", [ctx.dims.features, ctx.dims.vocab], std=0,
-                     lr_scale=1 / ctx.dims.sizes.heads)
+                     lr_scale=1 / ctx.dims.sizes.heads / ctx.dims.features)
     normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.one], std=0,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
     if ctx.is_initializing:
