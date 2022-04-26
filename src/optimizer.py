@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from constants import ParallelAxes
+from .constants import ParallelAxes
 from .backend import zero_param, assign, prefixed_name
 from .context import Context
 
