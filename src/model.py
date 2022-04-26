@@ -41,8 +41,9 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.n
         if psum:
             src_fp32 = lax.psum(src_fp32, axis_name=ParallelAxes.model)
         mean = src_fp32.mean(-1, keepdims=True)
-        std = lax.rsqrt(jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), 0))
-        out = (src_fp32 - mean) * std * (1 + wgt)
+        var = jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), ctx.model.norm_eps)
+        scale = lax.rsqrt(var) * (1 + wgt)
+        out = (src_fp32 - mean) * scale
         out = activate(ctx, out)
         out = out.astype(original_dtype)
 
@@ -53,7 +54,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.n
             out_fp32 = jnp.where(mask, out, out / ctx.model.leaky_relu_slope)
             dy = jnp.where(mask, dy, dy * ctx.model.leaky_relu_slope)
             d_wgt = (dy * out_fp32).sum().reshape((1,))
-            dy = dy * std * (1 + wgt)
+            dy = dy * scale
             dy -= (dy * out_fp32).mean(-1, keepdims=True) * out_fp32
             dy -= dy.mean(-1, keepdims=True)
             return dy.astype(original_dtype), d_wgt
