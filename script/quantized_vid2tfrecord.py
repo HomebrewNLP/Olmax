@@ -364,7 +364,7 @@ def worker(model: GumbelVQ,
         print(f"{datetime.datetime.now().isoformat()} | TFRecord: {tfrecord_id} - Tokens: {len(tokens)} - "
               f"Frames: {total_frames}")
         frames = frame_queue.get(timeout=600)
-        total_frames += len(frames)
+        total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
         tfrecord_id += write_tfrecords(tokens, chunk_size, download_buffer_dir, save_dir, tfrecord_id,
                                        padding_token, cloud_storage_bucket)
