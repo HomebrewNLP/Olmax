@@ -11,8 +11,6 @@ import threading
 import time
 import typing
 
-import PIL
-import PIL.Image
 import cv2
 import gdown
 import numpy as np
@@ -21,8 +19,6 @@ import tensorflow as tf
 import torch
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.xla_multiprocessing as xmp
-import torchvision.transforms as T
-import torchvision.transforms.functional as TF
 import youtube_dl
 from google.cloud import storage
 from omegaconf import OmegaConf
@@ -218,12 +214,16 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
 
 
 def test_video(video_buffer_path: str):
+    video_cap = None
     try:
-        with cv2.VideoCapture(video_buffer_path) as video_cap:
-            success, frame = video_cap.read()
-        return success
+        video_cap = cv2.VideoCapture(video_buffer_path)
+        success, frame = video_cap.read()
+        video_cap.release()
     except:
-        return False
+        success = False
+    if video_cap is not None:
+        video_cap.release()
+    return success
 
 
 @try_except
@@ -270,13 +270,14 @@ def get_video_frames(path: str, target_image_size: int, target_fps: int):
     frames = []
     frame_idx = 0
     success = True
-    with cv2.VideoCapture(path) as video_cap:
-        fps_split = division_zero(round(video_cap.get(cv2.CAP_PROP_FPS)), target_fps)
-        while success:
-            success, frame = video_cap.read()
-            if frame_idx % fps_split == 0:
-                frames.append(cv2.resize(frame, (target_image_size, target_image_size)))
-            frame_idx += 1
+    video_cap = cv2.VideoCapture(path)
+    fps_split = division_zero(round(video_cap.get(cv2.CAP_PROP_FPS)), target_fps)
+    while success:
+        success, frame = video_cap.read()
+        if frame_idx % fps_split == 0:
+            frames.append(cv2.resize(frame, (target_image_size, target_image_size)))
+        frame_idx += 1
+    video_cap.release()
     return frames
 
 
@@ -347,7 +348,7 @@ def worker(model: GumbelVQ,
             if not frames:
                 continue
             os.remove(path)
-            tokens.extend(tokenize(model, frames, target_image_size, device, batch_size))
+            tokens.extend(tokenize(model, frames, device, batch_size))
             tfrecord_id += write_tfrecords(tokens, chunk_size, buffer_save_dir, save_dir, worker_id, tfrecord_id,
                                            padding_token, cloud_storage_bucket)
 
