@@ -36,6 +36,18 @@ def parse_args():
         help=f"Number of workers. Default is the number of CPU cores (={multiprocessing.cpu_count()})"
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default='cuda:0',
+        help="Whether to use GPU, CPU or TPU. Default is GPU."
+    )
+    parser.add_argument(
+        "--service-account-json",
+        type=str,
+        default='',
+        help="Path to service account json file. default=use service acccount of machine"
+    )
+    parser.add_argument(
         "--bucket",
         type=str,
         help="Name of the GCS bucket"
@@ -44,6 +56,12 @@ def parse_args():
         "--prefix",
         type=str,
         help="Prefix in the bucket"
+    )
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=48,
+        help="Number of images processed per 'computation step'"
     )
     parser.add_argument(
         "--tmp-dir",
@@ -80,7 +98,7 @@ def parse_args():
         help="Seconds to wait after launching one worker (to avoid crashes)"
     )
     args = parser.parse_args()
-    return args.workers, args.bucket, args.prefix, args.tmp_dir, args.urls, args.min_duration, args.chunk_size, args.fps, args.startup_delay
+    return args.workers, args.bucket, args.prefix, args.tmp_dir, args.urls, args.min_duration, args.chunk_size, args.fps, args.startup_delay, args.batch, args.service_account_json, args.device
 
 
 def division_zero(x, y):
@@ -300,19 +318,22 @@ def worker(model: GumbelVQ,
            bucket_name: str,
            padding_token: int,
            target_image_size: int,
-           batch_size: int):
+           batch_size: int,
+           service_account_json: str,
+           device: torch.device):
     torch.set_default_tensor_type('torch.FloatTensor')
     worker_id = xm.get_ordinal()
     youtube_base = 'https://www.youtube.com/watch?v='
     buffer_save_dir = download_buffer_dir
-
-    cloud_storage_bucket = storage.Client().get_bucket(bucket_name)
+    if service_account_json:
+        cloud_storage_bucket = storage.Client.from_service_account_json(service_account_json).get_bucket(bucket_name)
+    else:
+        cloud_storage_bucket = storage.Client().get_bucket(bucket_name)
 
     random.shuffle(work)
 
     youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600})
     youtube_getter.add_default_info_extractors()
-    device = xm.xla_device()
     model = model.to(device)
 
     downloader = Downloader()
@@ -343,10 +364,9 @@ def worker(model: GumbelVQ,
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, min_duration, chunk_size, fps, startup_delay = parse_args()
+    workers, bucket, prefix, tmp_dir, urls, min_duration, chunk_size, fps, startup_delay, batch_size, service_account_json, device = parse_args()
     config_path = 'vqgan.gumbelf8.config.yml'
     model_path = 'sber.gumbelf8.ckpt'
-    batch_size = 48  # result from manual testing
     if not os.path.exists(config_path):
         gdown.download(f'https://drive.google.com/uc?id=1WP6Li2Po8xYcQPGMpmaxIlI1yPB5lF5m', model_path, quiet=True)
     if not os.path.exists(config_path):
@@ -359,7 +379,8 @@ def main():
     video_ids = []
     durations = []
     model = load_vqgan(config_path, model_path)
-    model = xmp.MpModelWrapper(model)
+    if device == 'tpu':
+        model = xmp.MpModelWrapper(model)
 
     for url_path in os.listdir(urls):
         with open(f'{urls}/{url_path}', 'r') as f:
@@ -399,9 +420,12 @@ def main():
         time.sleep(rank * startup_delay)
         print(f'Started Worker {rank} at {datetime.datetime.now()}')
         return worker(model, chunk_size, ids[rank], prefix, fps, local_lock, tmp_dir, bucket, padding_token, resolution,
-                      batch_size)
+                      batch_size, service_account_json, torch.device(device) if device != 'tpu' else xm.xla_device())
 
-    xmp.spawn(_exec_fn, nprocs=len(ids), start_method="fork", args=(lock,))
+    if device == 'tpu':
+        xmp.spawn(_exec_fn, nprocs=len(ids), start_method="fork", args=(lock,))
+    else:
+        _exec_fn(0, lock)
 
 
 if __name__ == '__main__':
