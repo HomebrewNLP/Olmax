@@ -9,7 +9,6 @@ import random
 import subprocess
 import sys
 import threading
-import time
 import typing
 
 import cv2
@@ -18,8 +17,6 @@ import numpy as np
 import requests
 import tensorflow as tf
 import torch
-import torch_xla.core.xla_model as xm
-import torch_xla.distributed.xla_multiprocessing as xmp
 import youtube_dl
 from google.cloud import storage
 from omegaconf import OmegaConf
@@ -40,7 +37,7 @@ def parse_args():
         "--device",
         type=str,
         default='cuda:0',
-        help="Whether to use GPU, CPU or TPU. Default is GPU."
+        help="Whether to use GPU or CPU. Default is GPU."
     )
     parser.add_argument(
         "--service-account-json",
@@ -182,7 +179,7 @@ def load_vqgan(config_path: str, ckpt_path: str):
 
 
 @functools.partial(try_except, default=[])
-def tokenize(model: GumbelVQ, frames: torch.Tensor, device: torch.device, batch_size: int):
+def tokenize(model: GumbelVQ, frames: torch.Tensor, device: torch.device):
     with torch.no_grad():
         batches = [model.encode(f.to(device))[2][2].detach() for f in frames]
         return torch.cat(batches, dim=0).flatten().cpu().tolist()
@@ -288,9 +285,9 @@ def get_video_frames(path: str, target_image_size: int, target_fps: int):
 
 
 @functools.partial(try_except, default=0)
-def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: str, save_dir: str, worker_id: int,
-                    tfrecord_id: int, padding_token: int, cloud_storage_bucket):
-    path = f"{buffer_save_dir}/{worker_id}.tfrecord"
+def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: str, save_dir: str, tfrecord_id: int,
+                    padding_token: int, cloud_storage_bucket):
+    path = f"{buffer_save_dir}/{save_dir.replace('/', '_')}_{tfrecord_id}.tfrecord"
     count = len(tokens)
     residual = count % chunk_size
     count -= residual
@@ -299,7 +296,7 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     for i in range(0, count, chunk_size):
         with tf.io.TFRecordWriter(path) as tf_writer:
             tf_writer.write(frame_encoder(tokens[i:i + chunk_size]))
-        blob = cloud_storage_bucket.blob(f'{save_dir}/{worker_id:02d}_{tfrecord_id + added:07d}.tfrecord')
+        blob = cloud_storage_bucket.blob(f'{save_dir}{tfrecord_id + added:07d}.tfrecord')
         blob.upload_from_filename(path)
         os.remove(path)
         added += 1
@@ -343,24 +340,19 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 
 def worker(model: GumbelVQ,
            chunk_size: int,
-           work: list,
            save_dir: str,
            download_buffer_dir: str,
            bucket_name: str,
            padding_token: int,
-           batch_size: int,
            service_account_json: str,
            device: torch.device,
            frame_queue: queue.Queue):
     torch.set_default_tensor_type('torch.FloatTensor')
-    worker_id = xm.get_ordinal()
-    buffer_save_dir = download_buffer_dir
+
     if service_account_json:
         cloud_storage_bucket = storage.Client.from_service_account_json(service_account_json).get_bucket(bucket_name)
     else:
         cloud_storage_bucket = storage.Client().get_bucket(bucket_name)
-
-    random.shuffle(work)
 
     model = model.to(device)
 
@@ -368,12 +360,12 @@ def worker(model: GumbelVQ,
     total_frames = 0
     tokens = []
     while not frame_queue.empty():
-        print(f"Worker: {worker_id} - TFRecord: {tfrecord_id} - Tokens: {len(tokens)} - Frames: {total_frames} - "
-              f"{datetime.datetime.now().isoformat()}")
+        print(f"{datetime.datetime.now().isoformat()} | TFRecord: {tfrecord_id} - Tokens: {len(tokens)} - "
+              f"Frames: {total_frames}")
         frames = frame_queue.get(timeout=600)
         total_frames += len(frames)
-        tokens.extend(tokenize(model, frames, device, batch_size))
-        tfrecord_id += write_tfrecords(tokens, chunk_size, buffer_save_dir, save_dir, worker_id, tfrecord_id,
+        tokens.extend(tokenize(model, frames, device))
+        tfrecord_id += write_tfrecords(tokens, chunk_size, download_buffer_dir, save_dir, tfrecord_id,
                                        padding_token, cloud_storage_bucket)
 
 
@@ -393,8 +385,6 @@ def main():
     video_ids = []
     durations = []
     model = load_vqgan(config_path, model_path)
-    if device == 'tpu':
-        model = xmp.MpModelWrapper(model)
 
     for url_path in os.listdir(urls):
         with open(f'{urls}/{url_path}', 'r') as f:
@@ -436,16 +426,8 @@ def main():
     for p in procs:
         p.start()
 
-    def _exec_fn(rank: int):
-        time.sleep(rank * startup_delay)
-        print(f'Started Worker {rank} at {datetime.datetime.now()}')
-        return worker(model, chunk_size, ids[rank], prefix, tmp_dir, bucket, padding_token, batch_size,
-                      service_account_json, xm.xla_device() if device == 'tpu' else torch.device(device), frame_queue)
-
-    if device == 'tpu':
-        xmp.spawn(_exec_fn, start_method="fork")
-    else:
-        _exec_fn(0)
+    return worker(model, chunk_size, prefix, tmp_dir, bucket, padding_token, batch_size,
+                  service_account_json, torch.device(device), frame_queue)
 
 
 if __name__ == '__main__':
