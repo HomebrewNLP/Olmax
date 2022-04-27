@@ -36,9 +36,7 @@ class WandbLog:
         self.run.log({"Loss/Current": self.losses[-1], "Accuracy/Current": self.accuracies[-1],
                       "Speed/Batches per Second": rate, "Speed/Tokens per Day": tokens_per_day,
                       "Optimizer/Learning Rate": current_lr.astype(float), "Optimizer/Beta1": ctx.optimizer.adam_beta1,
-                      "Optimizer/Beta2": ctx.optimizer.adam_beta2,
-                      'Errors/NaN Steps': step - wctx.current_step,
-                      'Errors/NaN Steps (Percent)': 1 - wctx.current_step / step}, step=step)
+                      "Optimizer/Beta2": ctx.optimizer.adam_beta2}, step=step)
         es = ctx.training.early_stopping
         if self.loss_medians[0] < (self.loss_medians[-1] * (1 - es.minimum_relative_loss_change)):
             print(f"Not Improving | Oldest Loss Median: {self.loss_medians[0]:9.6f} - "
