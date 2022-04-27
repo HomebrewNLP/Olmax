@@ -343,7 +343,7 @@ def worker(model: GumbelVQ,
     for chunk_idx, wor in enumerate(work):
         for wor_idx, _wor in enumerate(wor):
             print(f"Worker: {worker_id} Chunk: {chunk_idx} - Video: {wor_idx} - TFRecord: {tfrecord_id} - "
-                  f"Tokens: {len(tokens)}")
+                  f"Tokens: {len(tokens)} - {datetime.datetime.now().isoformat()}")
             video_urls = get_video_urls(youtube_getter, youtube_base, _wor, lock, target_image_size)
             if not video_urls:
                 continue
