@@ -96,7 +96,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
 
     has_nan = jnp.zeros(())
     for g in grads.values():
-        has_nan = jnp.logical_or(has_nan, jnp.any(jnp.isnan(g)))
+        has_nan = jnp.logical_or(has_nan, jnp.isnan(g))
     no_nan = jnp.equal(jax.lax.psum(has_nan, ParallelAxes.model), 0)
 
     for param_name, grad in grads.items():
