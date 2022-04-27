@@ -163,14 +163,10 @@ def tokenize(model: GumbelVQ, frames: list, device: torch.device, batch_size: in
         images = np.stack(images).astype(np.float32).transpose((0, 3, 1, 2)) / 255
         batches = []
         for i in range(0, images.shape[0] // batch_size * batch_size, batch_size):
-            batch = torch.from_numpy(np.ascontiguousarray(images[i:i + batch_size]))
-            batch = batch.to(device)
+            batch = torch.from_numpy(np.ascontiguousarray(images[i:i + batch_size])).to(device)
             _, _, (_, _, batch) = model.encode(batch)
             batches.append(batch.detach().flatten())  # [frame, x, y] -> [frame * x * y]
-        output = []
-        for batch in batches:
-            output.extend(batch.cpu().tolist())
-    return output
+        return torch.cat(batches, dim=0).cpu().tolist()
 
 
 @try_except
