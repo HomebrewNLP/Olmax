@@ -426,8 +426,8 @@ def main():
     for p in procs:
         p.start()
 
-    return worker(model, chunk_size, prefix, tmp_dir, bucket, padding_token, batch_size,
-                  service_account_json, torch.device(device), frame_queue)
+    return worker(model, chunk_size, prefix, tmp_dir, bucket, padding_token, service_account_json, torch.device(device),
+                  frame_queue)
 
 
 if __name__ == '__main__':
