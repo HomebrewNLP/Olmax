@@ -9,6 +9,7 @@ import random
 import subprocess
 import sys
 import threading
+import time
 import typing
 
 import cv2
@@ -359,7 +360,7 @@ def worker(model: GumbelVQ,
     tfrecord_id = 0
     total_frames = 0
     tokens = []
-    while not frame_queue.empty():
+    while True:
         print(f"{datetime.datetime.now().isoformat()} | TFRecord: {tfrecord_id} - Tokens: {len(tokens)} - "
               f"Frames: {total_frames}")
         frames = frame_queue.get(timeout=600)
@@ -367,6 +368,10 @@ def worker(model: GumbelVQ,
         tokens.extend(tokenize(model, frames, device))
         tfrecord_id += write_tfrecords(tokens, chunk_size, download_buffer_dir, save_dir, tfrecord_id,
                                        padding_token, cloud_storage_bucket)
+        if frame_queue.empty():
+            time.sleep(600)
+            if frame_queue.empty():
+                break
 
 
 def main():
