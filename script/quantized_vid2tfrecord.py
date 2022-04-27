@@ -189,7 +189,6 @@ def tokenize(model: GumbelVQ, frames: torch.Tensor, device: torch.device):
 @try_except
 def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiprocessing.Lock,
                    target_image_size: int) -> typing.List[dict]:
-    print(youtube_base + url)
     # We have to lock this part because it can lead to errors if multiple thread try to
     # scrap video Information at the same time.
     with lock:
@@ -310,7 +309,8 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
 def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
                  target_fps: int, batch_size: int, out_queue: queue.Queue):
     youtube_base = 'https://www.youtube.com/watch?v='
-    youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600})
+    youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600,
+                                           "quiet": True, "verbose": False, "no_warnings": True})
     youtube_getter.add_default_info_extractors()
     downloader = Downloader()
     random.Random(worker_id).shuffle(work)
@@ -336,7 +336,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
             frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
             frames = torch.from_numpy(frames)
 
-            out_queue.put(frames)
+            out_queue.put((youtube_base + _wor, frames))
 
 
 def worker(model: GumbelVQ,
@@ -360,10 +360,11 @@ def worker(model: GumbelVQ,
     tfrecord_id = 0
     total_frames = 0
     tokens = []
+    url = ""
     while True:
         print(f"{datetime.datetime.now().isoformat()} | TFRecord: {tfrecord_id} - Tokens: {len(tokens)} - "
-              f"Frames: {total_frames}")
-        frames = frame_queue.get(timeout=600)
+              f"Frames: {total_frames} - Previous URL: {url}")
+        url, frames = frame_queue.get(timeout=600)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
         tfrecord_id += write_tfrecords(tokens, chunk_size, download_buffer_dir, save_dir, tfrecord_id,
