@@ -4,6 +4,7 @@ import functools
 import json
 import multiprocessing
 import os
+import queue
 import random
 import subprocess
 import sys
@@ -30,7 +31,7 @@ from taming.models.vqgan import GumbelVQ
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--workers",
+        "--cpu-worker",
         type=int,
         default=multiprocessing.cpu_count(),
         help=f"Number of workers. Default is the number of CPU cores (={multiprocessing.cpu_count()})"
@@ -97,8 +98,14 @@ def parse_args():
         default=10,
         help="Seconds to wait after launching one worker (to avoid crashes)"
     )
+    parser.add_argument(
+        "--prefetch",
+        type=int,
+        default=8,
+        help="Number of videos to prefetch (default=8)"
+    )
     args = parser.parse_args()
-    return args.workers, args.bucket, args.prefix, args.tmp_dir, args.urls, args.min_duration, args.chunk_size, args.fps, args.startup_delay, args.batch, args.service_account_json, args.device
+    return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.min_duration, args.chunk_size, args.fps, args.startup_delay, args.batch, args.service_account_json, args.device, args.prefetch
 
 
 def division_zero(x, y):
@@ -308,42 +315,16 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     return added
 
 
-def worker(model: GumbelVQ,
-           chunk_size: int,
-           work: list,
-           save_dir: str,
-           target_fps: int,
-           lock: threading.Lock,
-           download_buffer_dir: str,
-           bucket_name: str,
-           padding_token: int,
-           target_image_size: int,
-           batch_size: int,
-           service_account_json: str,
-           device: torch.device):
-    torch.set_default_tensor_type('torch.FloatTensor')
-    worker_id = xm.get_ordinal()
+def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
+                 target_fps: int, out_queue: queue.Queue):
     youtube_base = 'https://www.youtube.com/watch?v='
-    buffer_save_dir = download_buffer_dir
-    if service_account_json:
-        cloud_storage_bucket = storage.Client.from_service_account_json(service_account_json).get_bucket(bucket_name)
-    else:
-        cloud_storage_bucket = storage.Client().get_bucket(bucket_name)
-
-    random.shuffle(work)
-
     youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600})
     youtube_getter.add_default_info_extractors()
-    model = model.to(device)
-
     downloader = Downloader()
+    random.Random(worker_id).shuffle(work)
 
-    tfrecord_id = 0
-    tokens = []
     for chunk_idx, wor in enumerate(work):
         for wor_idx, _wor in enumerate(wor):
-            print(f"Worker: {worker_id} Chunk: {chunk_idx} - Video: {wor_idx} - TFRecord: {tfrecord_id} - "
-                  f"Tokens: {len(tokens)} - {datetime.datetime.now().isoformat()}")
             video_urls = get_video_urls(youtube_getter, youtube_base, _wor, lock, target_image_size)
             if not video_urls:
                 continue
@@ -356,15 +337,47 @@ def worker(model: GumbelVQ,
             if not frames:
                 continue
             os.remove(path)
-            tokens.extend(tokenize(model, frames, device, batch_size))
-            tfrecord_id += write_tfrecords(tokens, chunk_size, buffer_save_dir, save_dir, worker_id, tfrecord_id,
-                                           padding_token, cloud_storage_bucket)
+            out_queue.put(frames)
 
-    print(f'DONE worker: {worker_id}')
+
+def worker(model: GumbelVQ,
+           chunk_size: int,
+           work: list,
+           save_dir: str,
+           download_buffer_dir: str,
+           bucket_name: str,
+           padding_token: int,
+           batch_size: int,
+           service_account_json: str,
+           device: torch.device,
+           frame_queue: queue.Queue):
+    torch.set_default_tensor_type('torch.FloatTensor')
+    worker_id = xm.get_ordinal()
+    buffer_save_dir = download_buffer_dir
+    if service_account_json:
+        cloud_storage_bucket = storage.Client.from_service_account_json(service_account_json).get_bucket(bucket_name)
+    else:
+        cloud_storage_bucket = storage.Client().get_bucket(bucket_name)
+
+    random.shuffle(work)
+
+    model = model.to(device)
+
+    tfrecord_id = 0
+    total_frames = 0
+    tokens = []
+    while not frame_queue.empty():
+        print(f"Worker: {worker_id} - TFRecord: {tfrecord_id} - Tokens: {len(tokens)} - Frames: {total_frames} - "
+              f"{datetime.datetime.now().isoformat()}")
+        frames = frame_queue.get(timeout=600)
+        total_frames += len(frames)
+        tokens.extend(tokenize(model, frames, device, batch_size))
+        tfrecord_id += write_tfrecords(tokens, chunk_size, buffer_save_dir, save_dir, worker_id, tfrecord_id,
+                                       padding_token, cloud_storage_bucket)
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, min_duration, chunk_size, fps, startup_delay, batch_size, service_account_json, device = parse_args()
+    workers, bucket, prefix, tmp_dir, urls, min_duration, chunk_size, fps, startup_delay, batch_size, service_account_json, device, prefetch = parse_args()
     config_path = 'vqgan.gumbelf8.config.yml'
     model_path = 'sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
@@ -415,17 +428,23 @@ def main():
           f'Total Duration: {split_video_duration}\n')
 
     lock = multiprocessing.Lock()
+    frame_queue = multiprocessing.Queue(prefetch)
 
-    def _exec_fn(rank: int, local_lock: multiprocessing.Lock):
+    procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, tmp_dir, fps, frame_queue), daemon=True,
+                                     target=frame_worker) for worker_id, work in enumerate(ids)]
+    for p in procs:
+        p.start()
+
+    def _exec_fn(rank: int):
         time.sleep(rank * startup_delay)
         print(f'Started Worker {rank} at {datetime.datetime.now()}')
-        return worker(model, chunk_size, ids[rank], prefix, fps, local_lock, tmp_dir, bucket, padding_token, resolution,
-                      batch_size, service_account_json, torch.device(device) if device != 'tpu' else xm.xla_device())
+        return worker(model, chunk_size, ids[rank], prefix, tmp_dir, bucket, padding_token, batch_size,
+                      service_account_json, xm.xla_device() if device == 'tpu' else torch.device(device), frame_queue)
 
     if device == 'tpu':
-        xmp.spawn(_exec_fn, nprocs=len(ids), start_method="fork", args=(lock,))
+        xmp.spawn(_exec_fn, start_method="fork")
     else:
-        _exec_fn(0, lock)
+        _exec_fn(0)
 
 
 if __name__ == '__main__':
