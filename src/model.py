@@ -50,7 +50,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, weight: typing.Optional[jnp.n
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             out_fp32 = promote_to(out, run_type)
             dy = promote_to(dy, run_type)
-            mask = out_fp32 > 0
+            mask = out_fp32 >= 0
             out_fp32 = jnp.where(mask, out, out / ctx.model.leaky_relu_slope)
             dy = jnp.where(mask, dy, dy * ctx.model.leaky_relu_slope)
             d_wgt = (dy * out_fp32).sum().reshape((1,))
@@ -83,24 +83,22 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: str, scale: float, in_feat
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
     inp = scale_norm_act(ctx, inp)
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.model.activation_std / ctx.dims.sizes.heads,
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.dims.sizes.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, psum=True)
-    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1 / ctx.model.activation_std,
+    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1,
                ctx.dims.inner_bottleneck_features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp)
-    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.model.activation_std,
+    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1,
                 ctx.dims.inner_bottleneck_features, ctx.dims.features)
 
 
 def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("pointwise")
     inp = scale_norm_act(ctx, inp)
-    inp = conv(ctx, inp, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std, ctx.dims.features,
-               ctx.dims.pointwise_features)
+    inp = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.pointwise_features)
     inp = activate(ctx, inp)
-    return conv(ctx, inp, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std, ctx.dims.pointwise_features,
-                ctx.dims.features)
+    return conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.pointwise_features, ctx.dims.features)
 
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
@@ -144,8 +142,7 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     mid = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.inner_bottleneck_features)
     out = qrnn_grad(ctx, forget, mid)
     out = scale_norm_act(ctx, out)
-    return conv(ctx, out, ctx.dims.pointwise_kernel, 1 / ctx.model.activation_std, ctx.dims.inner_bottleneck_features,
-                ctx.dims.features)
+    return conv(ctx, out, ctx.dims.pointwise_kernel, 1, ctx.dims.inner_bottleneck_features, ctx.dims.features)
 
 
 def z_loss(ctx: Context, src: jnp.ndarray, use_previous_grad: bool = True) -> jnp.ndarray:
