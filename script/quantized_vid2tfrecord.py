@@ -157,22 +157,13 @@ def load_vqgan(config_path: str, ckpt_path: str):
 
 
 @functools.partial(try_except, default=[])
-def tokenize(model: GumbelVQ, frames: list, target_image_size: int, device: torch.device, batch_size: int):
-    images = []
+def tokenize(model: GumbelVQ, frames: list, device: torch.device, batch_size: int):
     with torch.no_grad():
-        for frame in frames:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = PIL.Image.fromarray(frame)
-            s = min(img.size)
-            r = target_image_size / s
-            s = (round(r * img.size[1]), round(r * img.size[0]))
-            img = TF.resize(img, s, interpolation=PIL.Image.LANCZOS)
-            img = TF.center_crop(img, output_size=2 * [target_image_size])
-            img = T.ToTensor()(img)
-            images.append(img)
+        images = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
+        images = np.stack(images).astype(np.float32).transpose((0, 3, 1, 2)) / 255
         batches = []
-        for i in range(0, len(images), batch_size):
-            batch = torch.stack(images[i:i + batch_size])
+        for i in range(0, images.shape[0] // batch_size * batch_size, batch_size):
+            batch = torch.from_numpy(np.ascontiguousarray(images[i:i + batch_size]))
             batch = batch.to(device)
             _, _, (_, _, batch) = model.encode(batch)
             batches.append(batch.detach().flatten())  # [frame, x, y] -> [frame * x * y]
