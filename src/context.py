@@ -149,7 +149,7 @@ class Model(DataClass):
 
 
 class ExpectedLoss(DataClass):
-    offset: float = 1.165868  # <- should be fixed. It technically goes down to 0.9 with other models.
+    offset: float = 4.165868  # <- should be fixed. It technically goes down to 0.9 with other models.
     scale: float = 39.08037
     exponent: float = -0.3642513
 
