@@ -182,16 +182,10 @@ def load_vqgan(config_path: str, ckpt_path: str):
 
 
 @functools.partial(try_except, default=[])
-def tokenize(model: GumbelVQ, frames: list, device: torch.device, batch_size: int):
+def tokenize(model: GumbelVQ, frames: torch.Tensor, device: torch.device, batch_size: int):
     with torch.no_grad():
-        images = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
-        images = np.stack(images).astype(np.float32).transpose((0, 3, 1, 2)) / 255
-        batches = []
-        for i in range(0, images.shape[0] // batch_size * batch_size, batch_size):
-            batch = torch.from_numpy(np.ascontiguousarray(images[i:i + batch_size])).to(device)
-            _, _, (_, _, batch) = model.encode(batch)
-            batches.append(batch.detach().flatten())  # [frame, x, y] -> [frame * x * y]
-        return torch.cat(batches, dim=0).cpu().tolist()
+        batches = [model.encode(f.to(device))[2][2].detach() for f in frames]
+        return torch.cat(batches, dim=0).flatten().cpu().tolist()
 
 
 @try_except
@@ -316,7 +310,7 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
 
 
 def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
-                 target_fps: int, out_queue: queue.Queue):
+                 target_fps: int, batch_size: int, out_queue: queue.Queue):
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600})
     youtube_getter.add_default_info_extractors()
@@ -337,6 +331,13 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
             if not frames:
                 continue
             os.remove(path)
+
+            frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
+            frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
+            frames = frames[:frames.shape[0] // batch_size * batch_size]
+            frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
+            frames = torch.from_numpy(frames)
+
             out_queue.put(frames)
 
 
@@ -430,8 +431,8 @@ def main():
     lock = multiprocessing.Lock()
     frame_queue = multiprocessing.Queue(prefetch)
 
-    procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, tmp_dir, fps, frame_queue), daemon=True,
-                                     target=frame_worker) for worker_id, work in enumerate(ids)]
+    procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, tmp_dir, fps, batch_size, frame_queue),
+                                     daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
     for p in procs:
         p.start()
 
