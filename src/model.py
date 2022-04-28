@@ -25,7 +25,7 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
 
 
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: str, weight: typing.Optional[jnp.ndarray] = None,
-                   psum: bool = False) -> jnp.ndarray:
+                   psum: bool = False, act: bool = True) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
@@ -44,15 +44,17 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: str, weight: typ
         var = jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), ctx.model.norm_eps)
         scale = lax.rsqrt(var) * (1 + wgt.reshape((1,) * (src.ndim - 1) + (-1,)))
         out = (src_fp32 - mean) * scale
-        out = activate(ctx, out)
+        if act:
+            out = activate(ctx, out)
         out = out.astype(original_dtype)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             out_fp32 = promote_to(out, run_type)
             dy = promote_to(dy, run_type)
-            mask = out_fp32 >= 0
-            out_fp32 = jnp.where(mask, out, out / ctx.model.leaky_relu_slope)
-            dy = jnp.where(mask, dy, dy * ctx.model.leaky_relu_slope)
+            if act:
+                mask = out_fp32 >= 0
+                out_fp32 = jnp.where(mask, out_fp32, out_fp32 / ctx.model.leaky_relu_slope)
+                dy = jnp.where(mask, dy, dy * ctx.model.leaky_relu_slope)
             d_wgt = (dy * out_fp32).sum(list(range(src.ndim - 1))).reshape((-1,))
             dy = dy * scale
             dy -= (dy * out_fp32).mean(-1, keepdims=True) * out_fp32
@@ -83,7 +85,7 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: str, scale: float, in_feat
 
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
-    inp = scale_norm_act(ctx, inp, ctx.dims.features)
+    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
     inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.dims.sizes.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
@@ -96,7 +98,7 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("pointwise")
-    inp = scale_norm_act(ctx, inp, ctx.dims.features)
+    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.pointwise_features)
     inp = activate(ctx, inp)
     return conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.pointwise_features, ctx.dims.features)
@@ -240,7 +242,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
 
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-        return scale_norm_act(ctx, jnp.take(wgt, src, 0), ctx.dims.features, scale)
+        return scale_norm_act(ctx, jnp.take(wgt, src, 0), ctx.dims.features, scale, act=False)
 
     return jax.checkpoint(_fn)(inp, param, normalization_scale)
 
@@ -255,7 +257,7 @@ def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-        return matmul(scale_norm_act(ctx, src, ctx.dims.features, scale), wgt)
+        return matmul(scale_norm_act(ctx, src, ctx.dims.features, scale, act=False), wgt)
 
     return jax.checkpoint(_fn)(inp, embd, normalization_scale)
 
