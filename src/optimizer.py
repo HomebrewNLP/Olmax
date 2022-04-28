@@ -11,9 +11,8 @@ def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
 
 
-
-def zero_param_like(ctx: Context, new_name: str, original_name: str) -> jnp.ndarray:
-    return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name, []))
+def zero_param_like(ctx: Context, new_name: str, original_name: str, dtype: jnp.dtype) -> jnp.ndarray:
+    return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name, []), dtype).astype(jnp.float32)
 
 
 def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
@@ -25,11 +24,11 @@ def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
 def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("sm3", count=False)
     dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
-    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0))
+    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0), ctx.model.storage_dtype)
     buffer = [weight_update]
 
     for i, d in enumerate(dims[1:], 1):
-        buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i)))
+        buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i), ctx.model.storage_dtype))
         weight_update = jnp.minimum(weight_update, buffer[-1])
 
     weight_update = weight_update + jnp.square(grad)
@@ -41,18 +40,10 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     return grad * optimizer_rsqrt(weight_update)
 
 
-def momentum(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix(f"momentum", count=False)
-    state = zero_param_like(ctx, "momentum_buffer", param_name)
-    state = grad + state * (1 - ctx.optimizer.momentum_beta)  # 1st for momentum
-    assign(ctx, "momentum_buffer", state)
-    return grad + state * (1 - ctx.optimizer.momentum_beta)  # 2nd for nesterov
-
-
 def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
-        prefix: str) -> jnp.ndarray:
+        prefix: str, quantize: bool) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
-    state = zero_param_like(ctx, "momentum_buffer", param_name)
+    state = zero_param_like(ctx, "momentum_buffer", param_name, jnp.bfloat16 if quantize else ctx.model.storage_dtype)
     new_state = state * beta + inp * (1 - beta)
     assign(ctx, "momentum_buffer", new_state)
     return new_state * (1 - beta ** (current_step + 1))  # debias
@@ -60,8 +51,8 @@ def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarr
 
 def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("adam", count=False)
-    exp_avg = ema(ctx, param_name, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg")
-    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq")
+    exp_avg = ema(ctx, param_name, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg", False)
+    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq", False)
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
 
 
@@ -95,7 +86,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
         else:
             grad = sm3(inner_ctx, param_name, grad)
-            grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum")
+            grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]

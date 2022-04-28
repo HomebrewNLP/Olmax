@@ -113,8 +113,8 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
         computation_dtype = ctx.model.computation_dtype
         storage_dtype = ctx.model.storage_dtype
     else:
-        computation_dtype = jnp.promote_types(ctx.model.computation_dtype, dtype)
-        storage_dtype = jnp.promote_types(ctx.model.storage_dtype, dtype)
+        computation_dtype = dtype
+        storage_dtype = dtype
 
     shape = dims_to_shape(ctx, str_shape)
     if prefix_name not in ctx.parameters:
@@ -135,8 +135,8 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
     return param.astype(computation_dtype)
 
 
-def zero_param(ctx: Context, name: str, shape: typing.List[str]) -> jnp.ndarray:
-    return get_param(ctx, name, shape, 0, 0)
+def zero_param(ctx: Context, name: str, shape: typing.List[str], dtype:typing.Optional[jnp.dtype]) -> jnp.ndarray:
+    return get_param(ctx, name, shape, 0, 0, dtype=dtype)
 
 
 def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
