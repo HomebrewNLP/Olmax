@@ -123,9 +123,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
             param, var = stacked_orthogonal_init(ctx, str_shape, column_axes, split_dims)
             param *= scale * post_variance_scale
         else:
-            if scale != 1:
-                print(f"Warning: get_param creates normal distribution with scale=1 even though it should be {scale}")
-            param = normal(ctx, shape)
+            param = normal(ctx, shape) * scale
             if std is not None:
                 param *= std
             if mean is not None:
