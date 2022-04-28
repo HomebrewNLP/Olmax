@@ -11,13 +11,6 @@ def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
 
 
-def weighted_add(x1, x2, alpha):
-    return x1 * alpha + x2 * (1 - alpha)
-
-
-def debias(x: jnp.ndarray, current_step: jnp.ndarray, beta: float) -> jnp.ndarray:
-    return x * (1 - beta ** current_step)
-
 
 def zero_param_like(ctx: Context, new_name: str, original_name: str) -> jnp.ndarray:
     return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name, []))
@@ -60,9 +53,9 @@ def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarr
         prefix: str) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
     state = zero_param_like(ctx, "momentum_buffer", param_name)
-    new_state = weighted_add(state, inp, beta)
+    new_state = state * beta + inp * (1 - beta)
     assign(ctx, "momentum_buffer", new_state)
-    return debias(new_state, current_step, beta)
+    return new_state * (1 - beta ** (current_step + 1))  # debias
 
 
 def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
@@ -102,7 +95,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
         else:
             grad = sm3(inner_ctx, param_name, grad)
-            grad = momentum(inner_ctx, param_name, grad)
+            grad = ema(inner_ctx, param_name, grad, current_step, ctx.optimizer.momentum_beta, "momentum")
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]
