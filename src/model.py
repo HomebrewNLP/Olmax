@@ -249,8 +249,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
-    embd = get_param(ctx, "embd", [ctx.dims.features, ctx.dims.vocab], std=0,
-                     lr_scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
+    embd = get_param(ctx, "embd", [ctx.dims.features, ctx.dims.vocab], std=1,
+                     scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
     normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
     if ctx.is_initializing:
