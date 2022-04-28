@@ -362,8 +362,8 @@ def worker(model: GumbelVQ,
     tokens = []
     url = ""
     while True:
-        print(f"{datetime.datetime.now().isoformat()} | TFRecord: {tfrecord_id} - Tokens: {len(tokens)} - "
-              f"Frames: {total_frames} - Previous URL: {url}")
+        print(f"{datetime.datetime.now().isoformat()} | TFRecord: {tfrecord_id:,d} - Tokens: {len(tokens):,d} - "
+              f"Frames: {total_frames:,d} - Previous URL: {url}")
         url, frames = frame_queue.get(timeout=600)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
