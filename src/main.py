@@ -133,8 +133,8 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
                   f'LearningRate: {float(get_current_lr(ctx, wctx.current_step)):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {millions_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
-        if jnp.isnan(wctx.loss) or wctx.top_loss == 0:
-            print("Loss is NaN or Accuracy is 0")
+        if jnp.isnan(wctx.loss):
+            print("Loss is NaN")
             return wblog.loss_medians[-1]
         if ctx.wandb.use_wandb and idx % ctx.wandb.log_frequency == 0:
             if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
