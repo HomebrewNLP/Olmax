@@ -95,6 +95,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
         if "optimizer" in param_name:
             continue
+        parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
         if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
@@ -102,6 +103,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         else:
             grad = sm3(inner_ctx, param_name, grad)
             grad = momentum(inner_ctx, param_name, grad)
-        parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
+            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
-        ctx.parameters[param_name] = grad + (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+        ctx.parameters[param_name] = grad + ctx.parameters[param_name]
