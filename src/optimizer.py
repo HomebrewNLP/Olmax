@@ -87,6 +87,5 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         else:
             grad = sm3(inner_ctx, param_name, grad)
             grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
-            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
-        ctx.parameters[param_name] = grad + ctx.parameters[param_name]
+        ctx.parameters[param_name] = grad + (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
