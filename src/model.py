@@ -29,7 +29,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: str, weight: typ
     ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        weight = get_param(ctx, "scale", [feature_dim], std=0, dtype=run_type)
+        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
 
     if ctx.is_initializing:
         return inp
@@ -44,7 +44,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: str, weight: typ
         var = jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), ctx.model.norm_eps)
         std = lax.rsqrt(var)
         norm_out = (src_fp32 - mean) * std
-        out = norm_out * (1 + wgt).reshape((1,) * (src.ndim - 1) + (-1,))
+        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
         if act:
             out = activate(ctx, out)
         out = out.astype(original_dtype)
@@ -57,7 +57,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: str, weight: typ
                 mask = out >= 0
                 dy = dy * jnp.where(mask, 1, ctx.model.leaky_relu_slope)
             d_wgt = (dy * norm_out_fp32).sum(list(range(src.ndim - 1))).reshape((-1,))
-            dy = dy * std * (1 + wgt).reshape((1,) * (src.ndim - 1) + (-1,))
+            dy = dy * std * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy -= (dy * norm_out_fp32).mean(-1, keepdims=True) * norm_out_fp32
             dy -= dy.mean(-1, keepdims=True)
             return dy.astype(original_dtype), d_wgt
@@ -239,7 +239,7 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
     param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1e-5)
-    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0,
+    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0, mean=1,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
 
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
@@ -252,7 +252,7 @@ def output_embed_shard(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("output_embed")
     embd = get_param(ctx, "embd", [ctx.dims.features, ctx.dims.vocab], std=1,
                      scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
-    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0,
+    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0, mean=1,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
     if ctx.is_initializing:
         return inp
