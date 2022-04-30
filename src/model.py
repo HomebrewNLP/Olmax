@@ -42,24 +42,23 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: str, weight: typ
             src_fp32 = lax.psum(src_fp32, axis_name=ParallelAxes.model)
         mean = src_fp32.mean(-1, keepdims=True)
         var = jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), ctx.model.norm_eps)
-        wgt = (1 + wgt).reshape((1,) * (src.ndim - 1) + (-1,))
-        scale = lax.rsqrt(var) * wgt
-        out = (src_fp32 - mean) * scale
+        std = lax.rsqrt(var)
+        norm_out = (src_fp32 - mean) * std
+        out = norm_out * (1 + wgt).reshape((1,) * (src.ndim - 1) + (-1,))
         if act:
             out = activate(ctx, out)
         out = out.astype(original_dtype)
+        norm_out = norm_out.astype(original_dtype)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            out_fp32 = promote_to(out, run_type)
+            norm_out_fp32 = promote_to(norm_out, run_type)
             dy = promote_to(dy, run_type)
             if act:
-                mask = out_fp32 >= 0
-                out_fp32 = out_fp32 * jnp.where(mask, 1, 1 / ctx.model.leaky_relu_slope)
+                mask = out >= 0
                 dy = dy * jnp.where(mask, 1, ctx.model.leaky_relu_slope)
-            out_fp32 = out_fp32 / wgt
-            d_wgt = (dy * out_fp32).sum(list(range(src.ndim - 1))).reshape((-1,))
-            dy = dy * scale
-            dy -= (dy * out_fp32).mean(-1, keepdims=True) * out_fp32
+            d_wgt = (dy * norm_out_fp32).sum(list(range(src.ndim - 1))).reshape((-1,))
+            dy = dy * std * (1 + wgt).reshape((1,) * (src.ndim - 1) + (-1,))
+            dy -= (dy * norm_out_fp32).mean(-1, keepdims=True) * norm_out_fp32
             dy -= dy.mean(-1, keepdims=True)
             return dy.astype(original_dtype), d_wgt
 
