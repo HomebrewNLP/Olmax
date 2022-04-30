@@ -90,9 +90,9 @@ def delete_one_tpu(prefix: str, host: str, zone: str):
 def synchronous_deletion(prefix: str, host: str, zone: str):
     if prefix not in host:
         return
-    if host in tpu_names(zone):
-        delete_one_tpu(prefix, host, zone)
     while host in tpu_names(zone, deleting=True):
+        if host in tpu_names(zone):
+            delete_one_tpu(prefix, host, zone)
         time.sleep(CACHE_TIME)
 
 
