@@ -130,11 +130,11 @@ class WandB(DataClass):
 
 class Optimizer(DataClass):
     momentum_beta: float = 0.1
-    learning_rate: float = 0.02
+    learning_rate: float = 10
     gradient_clip: float = 0.001
     adam_beta1: float = 0.1
     adam_beta2: float = 0.01
-    weight_decay: float = 0.01
+    weight_decay: float = 0.001
     warmup_end: int = 1024
     exponential_decay: float = 1e-4
 
