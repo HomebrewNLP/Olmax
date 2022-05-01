@@ -363,7 +363,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, pointwise_block, src)
         # src = reversible(ctx, moe, src)
-        # src = reversible(ctx, qrnn_block, src)  # <-- perhaps use it every N blocks? or less features in RNN?
+        if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2):
+            src = reversible(ctx, qrnn_block, src)  # <-- perhaps use it every N blocks? or less features in RNN?
     ctx.parameters = src[0]
     return output_embed_shard(ctx, revnet_out(src[1:]))
 
