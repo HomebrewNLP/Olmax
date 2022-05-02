@@ -312,6 +312,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
+        original_shape = inp.shape
         inp = inp.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1, ctx.dims.sizes.features)
         inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
@@ -346,7 +347,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.sizes.features, -1).transpose(1, 0)
         d_wgt = d_wgt / tgt.size
         d_wgt = d_wgt.transpose(1, 0)
-        dx = dx.reshape(inp.shape)
+        dx = dx.reshape(original_shape)
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]) -> typing.Tuple[jnp.ndarray, None, jnp.ndarray]:
             # dy == 1 since this is the last function before the output
