@@ -324,12 +324,12 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         for i in range(0, inp.shape[0]):
             inp_slice = inp[i]
             tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
-            inp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
-            tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * inp.shape[0], inp.shape[0])
-            lse = jax.nn.logsumexp(promote_to(inp, jnp.float32), 1, keepdims=True)
+            tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
+            tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
+            lse = jax.nn.logsumexp(promote_to(tmp, jnp.float32), 1, keepdims=True)
 
-            loss = loss + (lse - jnp.take_along_axis(inp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).mean()
-            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(inp), 1) == tgt_slice).mean()
+            loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).mean()
+            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).mean()
 
             dx = lax.exp(tmp - lse)
             zloss = dx * lse * ctx.training.z_loss
