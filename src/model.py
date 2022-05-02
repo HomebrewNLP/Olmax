@@ -327,7 +327,7 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
 
             tmp = promote_to(inp, jnp.float32)
             oh = one_hot(inner_tgt, ctx.dims.sizes.vocab)
-            dx = lax.exp(tmp - lse) * (1 - oh)
+            dx = jnp.where(oh, 0, lax.exp(tmp - lse))  # * (1 - oh) wouldn't mask NaN, 0 needed for z_loss
 
             zloss = dx * lse * ctx.training.z_loss
             dx = dx - oh + zloss
