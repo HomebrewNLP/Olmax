@@ -344,7 +344,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
         dx = jnp.stack(d_x, axis=1) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.sizes.features, -1).transpose(1, 0)
-        d_wgt = sum(d_wgt) / tgt.size
+        d_wgt = d_wgt / tgt.size
         d_wgt = d_wgt.transpose(1, 0)
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]) -> typing.Tuple[jnp.ndarray, None, jnp.ndarray]:
