@@ -312,8 +312,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
-        inp = inp.reshape(ctx.dims.sizes.batch * ctx.dims.sizes.sequence, ctx.dims.sizes.vocab)
-        step = inp.shape[0] // (ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features)
+        inp = inp.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1, ctx.dims.sizes.features)
+        inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
         loss = jnp.zeros((), dtype=jnp.float32)
@@ -321,19 +321,19 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         dx = []
         d_wgt = jnp.zeros_like(wgt)
 
-        for i in range(0, inp.shape[0], step):
-            inp_slice = inp[i:i + step]
+        for i in range(0, inp.shape[0]):
+            inp_slice = inp[i]
             tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
             inp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
-            inner_tgt = lax.dynamic_slice_in_dim(inner_tgt.reshape(-1), index * inp.shape[0], inp.shape[0])
+            tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * inp.shape[0], inp.shape[0])
             lse = jax.nn.logsumexp(promote_to(inp, jnp.float32), 1, keepdims=True)
 
-            loss = loss + (lse - jnp.take_along_axis(inp, inner_tgt.reshape(*inner_tgt.shape, 1), -1)).mean()
-            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(inp), 1) == inner_tgt).mean()
+            loss = loss + (lse - jnp.take_along_axis(inp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).mean()
+            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(inp), 1) == tgt_slice).mean()
 
             dx = lax.exp(tmp - lse)
             zloss = dx * lse * ctx.training.z_loss
-            dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), inner_tgt.reshape(-1, 1)].add(-1)
+            dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1)
             dx = dx + zloss
             d_tmp = jnp.transpose(dx, (1, 0))
             dx.append(matmul(wgt, d_tmp))  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
