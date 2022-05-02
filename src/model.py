@@ -330,8 +330,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
             tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
             lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
 
-            loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).mean()
-            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).mean()
+            loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).sum()
+            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).sum()
 
             dx = lax.exp(tmp - lse)
             zloss = dx * lse * ctx.training.z_loss
@@ -353,8 +353,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
             # dy == 1 since this is the last function before the output
             return dx, None, d_wgt
 
-        loss = lax.psum(loss / ctx.dims.sizes.heads, ParallelAxes.model)
-        accuracy = lax.psum(accuracy / ctx.dims.sizes.heads, ParallelAxes.model)
+        loss = lax.psum(loss / tgt.size, ParallelAxes.model)
+        accuracy = lax.psum(accuracy / tgt.size, ParallelAxes.model)
         return (loss, accuracy), _grad
 
     return _fn(src, tgt, param)
