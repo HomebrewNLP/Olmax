@@ -324,9 +324,10 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         for i in range(0, inp.shape[0]):
             inp_slice = inp[i]
             tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
+            tmp = promote_to(tmp, jnp.float32)
             tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
             tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
-            lse = jax.nn.logsumexp(promote_to(tmp, jnp.float32), 1, keepdims=True)
+            lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
 
             loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).mean()
             accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).mean()
@@ -336,6 +337,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
             dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1)
             dx = dx + zloss
             d_tmp = jnp.transpose(dx, (1, 0))
+            d_tmp = d_tmp.astype(inp_slice.dtype)
             d_x.append(matmul(wgt, d_tmp))  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
             d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
 
