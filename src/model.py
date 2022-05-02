@@ -317,21 +317,18 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
         inner_tgt = lax.dynamic_slice_in_dim(inner_tgt.reshape(-1), index * inp.shape[0], inp.shape[0])
-        lse = jax.nn.logsumexp(promote_to(inp, jnp.float32) - 1e9 * one_hot(inner_tgt, ctx.dims.sizes.vocab), 1,
-                               keepdims=True)
+        lse = jax.nn.logsumexp(promote_to(inp, jnp.float32), 1, keepdims=True)
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]):
             dy, _ = dy
             dy = promote_to(dy, jnp.float32)
             dy = dy / inner_tgt.size
-
             tmp = promote_to(inp, jnp.float32)
-            oh = one_hot(inner_tgt, ctx.dims.sizes.vocab)
-            dx = lax.exp(tmp - lse) * (1 - oh)
+            dx = lax.exp(tmp - lse)
 
-            zloss = dx * lse * ctx.training.z_loss
-            dx = dx - oh + zloss
-            dx = dx * dy
+            zloss = dx * lse * (ctx.training.z_loss * dy)
+            dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), inner_tgt.reshape(-1, 1)].add(-1) * dy
+            dx = dx + zloss
             d_src = lax.all_gather(dx, ParallelAxes.model).reshape(src.shape)
             return d_src.astype(dtype), None
 
