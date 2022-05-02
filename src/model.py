@@ -318,7 +318,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         index = index.astype(jnp.int32)
         loss = jnp.zeros((), dtype=jnp.float32)
         accuracy = jnp.zeros((), dtype=jnp.float32)
-        dx = []
+        d_x = []
         d_wgt = jnp.zeros_like(wgt)
 
         for i in range(0, inp.shape[0]):
@@ -336,10 +336,10 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
             dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1)
             dx = dx + zloss
             d_tmp = jnp.transpose(dx, (1, 0))
-            dx.append(matmul(wgt, d_tmp))  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
+            d_x.append(matmul(wgt, d_tmp))  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
             d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
 
-        dx = jnp.stack(dx, axis=1) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
+        dx = jnp.stack(d_x, axis=1) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.sizes.features, -1).transpose(1, 0)
         d_wgt = sum(d_wgt) / tgt.size
         d_wgt = lax.psum(d_wgt, ParallelAxes.model).transpose(1, 0)
