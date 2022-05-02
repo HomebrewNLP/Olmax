@@ -312,7 +312,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
-        inp = inp.reshape(devices, ctx.dims.sizes.batch * ctx.dims.sizes.sequence // devices, ctx.dims.sizes.vocab)
+        inp = inp.reshape(ctx.dims.sizes.batch * ctx.dims.sizes.sequence, ctx.dims.sizes.vocab)
         step = inp.shape[0] // (ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
@@ -323,7 +323,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
         for i in range(0, inp.shape[0], step):
             inp_slice = inp[i:i + step]
-            tmp = matmul(inp_slice, wgt)
+            tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
             inp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
             inner_tgt = lax.dynamic_slice_in_dim(inner_tgt.reshape(-1), index * inp.shape[0], inp.shape[0])
             lse = jax.nn.logsumexp(promote_to(inp, jnp.float32), 1, keepdims=True)
