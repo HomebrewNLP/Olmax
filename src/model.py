@@ -302,63 +302,44 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     return _fn(*src)
 
 
-def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndarray], tgt: jnp.ndarray) -> typing.Tuple[
-    jnp.ndarray, jnp.ndarray]:
+def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
-    src, param = src_wgt
     devices = ctx.dims.sizes.heads
+    dtype = src.dtype
 
     @jax.custom_gradient
-    def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
-        original_shape = inp.shape
-        inp = inp.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1, ctx.dims.sizes.features)
-        inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1)
+    def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray):
+        inp = inp.reshape(devices, ctx.dims.sizes.batch * ctx.dims.sizes.sequence // devices, ctx.dims.sizes.vocab)
+        inp = lax.psum_scatter(inp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
-        loss = jnp.zeros((), dtype=jnp.float32)
-        accuracy = jnp.zeros((), dtype=jnp.float32)
-        d_x = []
-        d_wgt = jnp.zeros_like(wgt)
-        wgt = wgt.transpose(1, 0)
+        inner_tgt = lax.dynamic_slice_in_dim(inner_tgt.reshape(-1), index * inp.shape[0], inp.shape[0])
+        lse = jax.nn.logsumexp(promote_to(inp, jnp.float32), 1, keepdims=True)
 
-        for i in range(0, inp.shape[0]):
-            inp_slice = inp[i]
-            tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
-            tmp = promote_to(tmp, jnp.float32)
-            tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
-            tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
-            lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
-
-            loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).sum()
-            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).sum()
-
+        def _grad(dy: typing.Tuple[jnp.ndarray, None]):
+            dy, _ = dy
+            dy = promote_to(dy, jnp.float32)
+            dy = dy / inner_tgt.size
+            tmp = promote_to(inp, jnp.float32)
             dx = lax.exp(tmp - lse)
-            zloss = dx * lse * ctx.training.z_loss
-            dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1)
+
+            zloss = dx * lse * (ctx.training.z_loss * dy)
+            dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), inner_tgt.reshape(-1, 1)].add(-1) * dy
             dx = dx + zloss
-            d_tmp = jnp.transpose(dx, (1, 0))
-            d_tmp = d_tmp.astype(inp_slice.dtype)
-            d_x.append(matmul(wgt, d_tmp))  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
-            d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.sizes.vocab, -1)
-            d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
+            d_src = lax.all_gather(dx, ParallelAxes.model).reshape(src.shape)
+            return d_src.astype(dtype), None
 
-        dx = jnp.stack(d_x, axis=1) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
-        dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.sizes.features, -1).transpose(1, 0)
-        d_wgt = d_wgt / tgt.size
-        d_wgt = d_wgt.transpose(1, 0).reshape(param.shape)
-        dx = dx.reshape(original_shape)
-
-        def _grad(dy: typing.Tuple[jnp.ndarray, None]) -> typing.Tuple[jnp.ndarray, None, jnp.ndarray]:
-            # dy == 1 since this is the last function before the output
-            return dx, None, d_wgt
-
-        loss = lax.psum(loss / tgt.size, ParallelAxes.model)
-        accuracy = lax.psum(accuracy / tgt.size, ParallelAxes.model)
+        loss = lse - jnp.take_along_axis(inp, inner_tgt.reshape(*inner_tgt.shape, 1), -1)
+        accuracy = jnp.argmax(lax.stop_gradient(inp), 1) == inner_tgt
+        loss = promote_to(loss, jnp.float32)
+        accuracy = promote_to(accuracy, jnp.float32)
+        loss = lax.psum(loss.mean() / ctx.dims.sizes.heads, ParallelAxes.model)
+        accuracy = lax.psum(accuracy.mean() / ctx.dims.sizes.heads, ParallelAxes.model)
         return (loss, accuracy), _grad
 
-    return _fn(src, tgt, param)
+    return _fn(src, tgt)
 
 
 def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
@@ -384,10 +365,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
             src = reversible(ctx, qrnn_block, src)  # <-- perhaps use it every N blocks? or less features in RNN?
     ctx.parameters = src[0]
-    out = revnet_out(src[1:])
-    if not ctx.is_initializing:
-        return out, wgt
-    return output_embed_shard(ctx, out, wgt)
+    return output_embed_shard(ctx, revnet_out(src[1:]), wgt)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
