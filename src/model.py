@@ -297,6 +297,30 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     src, param = src_wgt
     devices = ctx.dims.sizes.heads
 
+    def _xent_slice(inp: typing.Tuple[
+        jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]):
+        inp, i, wgt, inner_tgt, index, d_wgt, loss, accuracy = inp
+        inp_slice = inp[i]
+        tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
+        tmp = promote_to(tmp, jnp.float32)
+        tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
+        tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
+        lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
+
+        loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).sum()
+        accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).sum()
+
+        dx = lax.exp(tmp - lse)
+        zloss = dx * lse * ctx.training.z_loss
+        dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1)
+        dx = dx + zloss
+        d_tmp = jnp.transpose(dx, (1, 0))
+        d_tmp = d_tmp.astype(inp_slice.dtype)
+        d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
+        d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.sizes.vocab, -1)
+        d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
+        return (inp, i + 1, wgt, inner_tgt, index, d_wgt, loss, accuracy), d_x
+
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
         original_shape = inp.shape
@@ -304,38 +328,17 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
-        loss = jnp.zeros((), dtype=jnp.float32)
-        accuracy = jnp.zeros((), dtype=jnp.float32)
-        d_x = []
-        d_wgt = jnp.zeros_like(wgt)
         wgt = wgt.transpose(1, 0)
-
-        for i in range(0, inp.shape[0]):
-            inp_slice = inp[i]
-            tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
-            tmp = promote_to(tmp, jnp.float32)
-            tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
-            tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
-            lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
-
-            loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).sum()
-            accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).sum()
-
-            dx = lax.exp(tmp - lse)
-            zloss = dx * lse * ctx.training.z_loss
-            dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1)
-            dx = dx + zloss
-            d_tmp = jnp.transpose(dx, (1, 0))
-            d_tmp = d_tmp.astype(inp_slice.dtype)
-            d_x.append(matmul(wgt, d_tmp))  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
-            d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.sizes.vocab, -1)
-            d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
-
-        dx = jnp.stack(d_x, axis=1) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
+        (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (inp, jnp.zeros((), dtype=jnp.int32), wgt,
+                                                                            inner_tgt, index, jnp.zeros_like(wgt),
+                                                                            jnp.zeros((), dtype=jnp.float32),
+                                                                            jnp.zeros((), dtype=jnp.float32)), None,
+                                                              inp.shape[0])
+        dx = dx.tranpose(1, 0) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.sizes.features, -1).transpose(1, 0)
+        dx = dx.reshape(original_shape)
         d_wgt = d_wgt / tgt.size
         d_wgt = d_wgt.reshape(param.shape)
-        dx = dx.reshape(original_shape)
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]) -> typing.Tuple[jnp.ndarray, None, jnp.ndarray]:
             # dy == 1 since this is the last function before the output
