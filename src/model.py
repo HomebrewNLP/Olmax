@@ -249,10 +249,6 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp
     return jax.checkpoint(_fn)(inp, param, normalization_scale), param
 
 
-
-
-
-
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
                src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
@@ -373,10 +369,10 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = reversible(ctx, pointwise_block, src)
         # src = reversible(ctx, moe, src)
         if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-            src = reversible(ctx, qrnn_block, src)  # <-- perhaps use it every N blocks? or less features in RNN?
+            src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
-    out = scale_norm_act(ctx, src, ctx.dims.features, act=False)
+    out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     if ctx.is_initializing:
         return out
     return out, wgt
