@@ -298,7 +298,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     devices = ctx.dims.sizes.heads
 
     def _xent_slice(inp: typing.Tuple[
-        jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]):
+        jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+                    carry):
         inp, i, wgt, inner_tgt, index, d_wgt, loss, accuracy = inp
         inp_slice = inp[i]
         tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
@@ -328,13 +329,13 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
-        wgt = wgt.transpose(1, 0)
-        (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (inp, jnp.zeros((), dtype=jnp.int32), wgt,
+        (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (inp, jnp.zeros((), dtype=jnp.int32),
+                                                                            wgt.transpose(1, 0),
                                                                             inner_tgt, index, jnp.zeros_like(wgt),
                                                                             jnp.zeros((), dtype=jnp.float32),
                                                                             jnp.zeros((), dtype=jnp.float32)), None,
                                                               inp.shape[0])
-        dx = dx.tranpose(1, 0) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
+        dx = dx.transpose(1, 0, 2) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.sizes.features, -1).transpose(1, 0)
         dx = dx.reshape(original_shape)
         d_wgt = d_wgt / tgt.size
