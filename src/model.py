@@ -249,17 +249,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp
     return jax.checkpoint(_fn)(inp, param, normalization_scale), param
 
 
-def output_embed_shard(ctx: Context, inp: jnp.ndarray, embd: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("output_embed")
-    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0, mean=1,
-                                    dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
-    if ctx.is_initializing:
-        return inp
 
-    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-        return matmul(scale_norm_act(ctx, src, ctx.dims.features, scale, act=False), wgt)
 
-    return jax.checkpoint(_fn)(inp, embd, normalization_scale)
 
 
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
@@ -385,9 +376,10 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
             src = reversible(ctx, qrnn_block, src)  # <-- perhaps use it every N blocks? or less features in RNN?
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
-    if not ctx.is_initializing:
-        return out, wgt
-    return output_embed_shard(ctx, out, wgt)
+    out = scale_norm_act(ctx, src, ctx.dims.features, act=False)
+    if ctx.is_initializing:
+        return out
+    return out, wgt
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
