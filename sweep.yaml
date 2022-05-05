@@ -6,7 +6,6 @@ metric:
 command:
   - bash
   - run.sh
-  - python3
   - ${args}
 parameters: # See https://wandb.ai/homebrewnlp/gpt/sweeps/xuwcs6i1 for initial sweep space
   optimizer.learning_rate:
