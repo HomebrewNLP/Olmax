@@ -29,6 +29,7 @@ parameters: # See https://wandb.ai/homebrewnlp/gpt/sweeps/xuwcs6i1 for initial s
     distribution: log_uniform_values
     min: 32
     max: 256
+    q: 8
 
   # New parameters
   optimizer.gradient_clip:
