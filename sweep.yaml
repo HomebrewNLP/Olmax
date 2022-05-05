@@ -12,30 +12,34 @@ parameters: # See https://wandb.ai/homebrewnlp/gpt/sweeps/xuwcs6i1 for initial s
   optimizer.learning_rate:
     distribution: log_uniform_values
     min: 0.001
-    max: 0.1
+    max: 10
   optimizer.adam_beta2:
     distribution: log_uniform_values
-    min: 0.005
-    max: 0.02
+    min: 0.001
+    max: 0.1
   optimizer.adam_beta1:
     distribution: log_uniform_values
-    min: 0.05
-    max: 0.2
+    min: 0.01
+    max: 1
   optimizer.momentum_beta:
     distribution: log_uniform_values
-    min: 0.05
-    max: 0.2
+    min: 0.01
+    max: 1
+  dims.sizes.batch:
+    distribution: log_uniform_values
+    min: 32
+    max: 256
 
   # New parameters
   optimizer.gradient_clip:
     distribution: log_uniform_values
-    min: 0.001
-    max: 0.1
+    min: 0.0001
+    max: 1
   optimizer.weight_decay:
     distribution: log_uniform_values
-    min: 0.001
-    max: 0.1
+    min: 0.0001
+    max: 1
   training.z_loss:
     distribution: log_uniform_values
-    min: 0.0001
-    max: 0.1
+    min: 0.00001
+    max: 1

@@ -58,7 +58,7 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 
 
 class DataContext(DataClass):
-    path: str = "gs://homebrewnlp-eu/the-char-pile/*"
+    path: str = "gs://homebrewnlp-eu/the-token-pile/*"
     shuffle_buffer: int = 0
     parallel_workers: int = 8
     interleaved_datasets: int = 8
@@ -150,7 +150,7 @@ class Model(DataClass):
 
 
 class ExpectedLoss(DataClass):
-    offset: float = 4.165868  # <- should be fixed. It technically goes down to 0.9 with other models.
+    offset: float = 6.165868  # <- should be fixed. It technically goes down to 0.9 with other models.
     scale: float = 39.08037
     exponent: float = -0.3642513
 
