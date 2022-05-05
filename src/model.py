@@ -293,8 +293,8 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
+    src, param = src
     devices = ctx.dims.sizes.heads
-    dtype = src.dtype
 
     def _xent_slice(inp: typing.Tuple[
         jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
@@ -322,7 +322,8 @@ def cross_entropy_loss(ctx: Context, src: jnp.ndarray, tgt: jnp.ndarray) -> typi
         return (inp, i + 1, wgt, inner_tgt, index, d_wgt, loss, accuracy), d_x
 
     @jax.custom_gradient
-    def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray):
+    def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
+        original_shape = inp.shape
         inp = inp.reshape(devices, ctx.dims.sizes.batch * ctx.dims.sizes.sequence // devices, ctx.dims.sizes.vocab)
         inp = lax.psum_scatter(inp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
         index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices

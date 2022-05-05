@@ -25,7 +25,7 @@ parameters: # See https://wandb.ai/homebrewnlp/gpt/sweeps/xuwcs6i1 for initial s
     min: 0.01
     max: 1
   dims.sizes.batch:
-    distribution: log_uniform_values
+    distribution: q_log_uniform_values
     min: 32
     max: 256
     q: 8
