@@ -5,25 +5,24 @@ import jax
 import numpy as np
 from jax import lax, numpy as jnp, random
 
+from src.backend import matmul
 from src.constants import ParallelAxes
 from src.context import Context, WhilePredictContext
 from src.main import get_parameters
 from src.model import body_ctx, one_hot
-from src.backend import matmul
 from src.utils.checkpoint import read_ckpt
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhilePredictContext(while_ctx_dict)
-    return jnp.not_equal(lax.pmean(jnp.less(wctx.current_step, wctx.stop_pos), ParallelAxes.model), 0)
+    return jnp.less(wctx.current_step, wctx.stop_pos)
 
 
 def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhilePredictContext(while_ctx_dict)
 
-    one_hot_mask = one_hot(wctx.current_step, wctx.ctx.dims.sizes.sequence).reshape(1, -1)
     out, wgt = body_ctx(wctx.ctx, wctx.data)
-    out = (out * one_hot_mask.reshape(1, -1, 1)).sum(1, keepdims=True)
+    out = (out * one_hot(wctx.current_step - 1, wctx.ctx.dims.sizes.sequence).reshape(1, -1, 1)).sum(1, keepdims=True)
     out_token = matmul(out, wgt.transpose(1, 0)).reshape(out.shape[0], 1, -1)
 
     key = random.PRNGKey((wctx.ctx.seed + wctx.current_step).astype(jnp.int32))
@@ -32,23 +31,17 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     temp = jnp.negative(temp)
     temp = jnp.log(temp)
     temp = temp * wctx.sampling_temperature
-
-    sort = jnp.argsort(out_token)
-    sort = one_hot(sort, out_token.shape[-1])
-    sort = jnp.einsum("abcd,c->abd", sort, jnp.arange(out_token.shape[-1]))
-
-    top_k_mask = jnp.less(sort, wctx.top_k)
-
     out_token = out_token + temp
-    out_token = out_token * top_k_mask
+
+    # sort = jnp.argsort(out_token)
+    # sort = one_hot(sort, out_token.shape[-1])
+    # sort = jnp.einsum("abcd,c->abd", sort, jnp.arange(out_token.shape[-1]))
+    # top_k_mask = jnp.greater_equal(sort, wctx.top_k)
+    # out_token = out_token + top_k_mask * 1e-9
+
     out_token = jnp.argmax(out_token, -1)
-    out_token = jnp.right_shift(out_token, jnp.ones((1,), dtype=jnp.int32))
-
-    one_hot_mask = one_hot_mask * jnp.greater_equal(wctx.current_step, wctx.start_pos)
-    wctx.data = wctx.data * (1 - one_hot_mask) + out_token * one_hot_mask
-
+    wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sizes.sequence).reshape(1, -1), out_token, wctx.data)
     wctx.current_step += 1
-
     return wctx.serialize()
 
 
@@ -91,11 +84,11 @@ class Inference:
 
     def complete(self, text: str, sampling_temperature: float = 0.5, top_k: int = 32, length: int = 128):
         tokens = jnp.asarray(np.frombuffer(text.encode(), np.uint8)).astype(jnp.int32).reshape(1, -1)
-        tokens = jnp.pad(tokens, ((0, 0), (0, self.ctx.dims.sizes.sequence - tokens.shape[-1])))
+        tokens = jnp.pad(tokens, ((0, 0), (0, self.ctx.dims.sizes.sequence - len(text))))
         base = jnp.zeros(())
-        start = base + tokens.shape[0]
+        start = base + len(text)
         out = self.complete_tokens(tokens, base + sampling_temperature, base + top_k, start, start + length)[0]
-        return np.asarray(out).tobytes().decode()[len(text):]
+        return np.asarray(out).astype(np.uint8).tobytes().decode(errors='ignore')[len(text):len(text) + length]
 
 
 def main():
