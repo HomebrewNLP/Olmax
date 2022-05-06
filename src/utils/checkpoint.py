@@ -97,7 +97,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
     unsharded = []
-    for old, *all_shards in zip(old_flattened, *shards):
+    for all_shards in zip(*shards):
         x = np.stack(all_shards)
         if x.dtype == np.dtype('V2'):
             x.dtype = jnp.bfloat16
