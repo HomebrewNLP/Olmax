@@ -82,7 +82,6 @@ def deep_replace(d, value):
 
 
 def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
-    old_flattened, structure = jax.tree_flatten(ctx.parameters)
     ignore = re.compile(ignore)
 
     with open(f"{ctx.training.checkpoint_path}/structure.json", "r") as f:
