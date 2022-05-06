@@ -152,7 +152,8 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
                 jax.profiler.start_trace(ctx.training.trace.output_path)
             if idx == ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
-        if ctx.training.do_checkpoint and (idx + 1) % ctx.training.checkpoint_interval == 0:
+        if ctx.training.do_checkpoint \
+                and (idx + 1) % (ctx.training.checkpoint_interval // ctx.training.device_steps) == 0:
             write_ckpt(ctx)
 
 
