@@ -45,9 +45,10 @@ def write_ckpt(ctx: Context):
 
     structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
     structure = structure.replace('PyTreeDef', '')[1:-1]  # clean up "types"
-    structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')  # to valid JSON
+    structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')
+    structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
 
-    with open(f"{ctx.training.checkpoint_path}/structure.pkl", "w") as f:
+    with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
         f.write(structure)
 
     for shard in range(ctx.dims.sizes.heads):
@@ -84,7 +85,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     old_flattened, structure = jax.tree_flatten(ctx.parameters)
     ignore = re.compile(ignore)
 
-    with open(f"{ctx.training.checkpoint_path}/structure.pkl", "w") as f:
+    with open(f"{ctx.training.checkpoint_path}/structure.json", "r") as f:
         new_structure = f.read()
     new_structure = json.loads(new_structure)
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
