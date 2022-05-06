@@ -23,8 +23,8 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     one_hot_mask = one_hot(wctx.current_step, wctx.ctx.dims.sizes.sequence).reshape(1, -1)
     out, wgt = body_ctx(wctx.ctx, wctx.data)
-    out = (out * one_hot_mask).sum(1, keepdims=True)
-    out_token = matmul(out, wgt.transpose(1, 0))
+    out = (out * one_hot_mask.reshape(1, -1, 1)).sum(1, keepdims=True)
+    out_token = matmul(out, wgt.transpose(1, 0)).reshape(out.shape[0], 1, -1)
 
     key = random.PRNGKey((wctx.ctx.seed + wctx.current_step).astype(jnp.int32))
     temp = random.uniform(key, out_token.shape, maxval=1, minval=1e-7, dtype=jnp.float32)
