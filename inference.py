@@ -4,7 +4,11 @@ import typing
 import click
 import jax
 import numpy as np
+import uvicorn
+from fastapi import FastAPI, HTTPException
 from jax import lax, numpy as jnp, random
+from pydantic import BaseModel
+from transformers import GPT2TokenizerFast
 
 from src.backend import matmul
 from src.constants import ParallelAxes
@@ -82,17 +86,104 @@ class Inference:
 
         self.complete_tokens(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.zeros(()), np.ones(()))
 
-    def complete_tokens(self, prompt: np.array, temperature: np.array, top_k: np.array, top_p: np.array,
-                        start_pos: np.array, stop_pos: np.array) -> np.array:
+    def complete_jax(self, prompt: np.array, temperature: np.array, top_k: np.array, top_p: np.array,
+                     start_pos: np.array, stop_pos: np.array) -> np.array:
         return self.step(self.parameters, prompt, temperature, top_k, top_p, start_pos, stop_pos)
+
+    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, length: int
+                        ) -> jnp.ndarray:
+        tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sizes.sequence - prompt.shape[-1])))
+        base = jnp.zeros(())
+        start = base + prompt.shape[1]
+        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, start, start + length)
 
     def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, length: int = 128):
         tokens = jnp.asarray(np.frombuffer(text.encode(), np.uint8)).astype(jnp.int32).reshape(1, -1)
-        tokens = jnp.pad(tokens, ((0, 0), (0, self.ctx.dims.sizes.sequence - len(text))))
-        base = jnp.zeros(())
-        start = base + len(text)
-        out = self.complete_tokens(tokens, base + temperature, base + top_k, base + top_p, start, start + length)[0]
+        out = self.complete_tokens(tokens, temperature, top_k, top_p, length)[0]
         return np.asarray(out).astype(np.uint8).tobytes().decode(errors='ignore')[len(text):len(text) + length]
+
+
+class Tokens(BaseModel):
+    tokens: typing.List[int]
+
+
+class TokenCompletion(BaseModel):
+    token_completion: typing.List[int]
+
+
+class Completion(BaseModel):
+    completion: str
+
+
+class SanitizedTokens(BaseModel):
+    tokens: typing.List[int]
+
+
+class CompletionInput(BaseModel):
+    prompt: str = ""
+    length: int = 16
+    temperature: float = 1.
+    top_k: int = 64
+    top_p: int = 0.9
+    error: bool = True
+
+
+class RestAPI:
+    def __init__(self):
+        self._ctx = Context()
+        self._interface = Inference(self._ctx)
+        if self._ctx.dims.sizes.vocab == 256:
+            self._encode = lambda x: list(x.encode())
+            self._decode = lambda x: np.asarray(x).astype(np.uint8).tobytes().decode(errors='ignore')
+        else:
+            tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+            self._encode = tokenizer.encode
+            self._decode = tokenizer.decode
+
+    async def check_tokens(self, tokens: typing.List[int], error: bool = True) -> SanitizedTokens:
+        if tokens and max(tokens) > self._ctx.dims.sizes.vocab:
+            if error:
+                raise HTTPException(status_code=400, detail=f"Invalid tokens sent. Tokens go up to "
+                                                            f"{self._ctx.dims.sizes.vocab} but received {max(tokens)}.")
+            tokens = [t for t in tokens if t < self._ctx.dims.sizes.vocab]
+        if len(tokens) > self._ctx.dims.sizes.sequence:
+            if error:
+                raise HTTPException(status_code=400, detail=f"Context too big. The model supports up to "
+                                                            f"{self._ctx.dims.sizes.sequence} tokens but received "
+                                                            f"{len(tokens)}.")
+            tokens = tokens[:self._ctx.dims.sizes.sequence]
+        return SanitizedTokens(tokens=tokens)
+
+    async def encode(self, prompt: str) -> Tokens:
+        return Tokens(tokens=self._encode(prompt))
+
+    async def decode(self, prompt: typing.List[int]) -> Completion:
+        return Completion(completion=self._decode(prompt))
+
+    async def token_completion(self, params: CompletionInput) -> TokenCompletion:
+        tokens = (await self.encode(params.prompt)).tokens
+        tokens = (await self.check_tokens(tokens, params.error)).tokens
+        out = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
+                                              params.top_p, params.length)
+        out = out.tolist()[len(tokens):len(tokens) + params.length]
+        return TokenCompletion(token_completion=out)
+
+    async def completion(self, params: CompletionInput) -> Completion:
+        return await self.decode((await self.token_completion(params)).token_completion)
+
+
+@click.command()
+def api():
+    rest_api = RestAPI()
+    fast_api = FastAPI()
+
+    for key in dir(rest_api):
+        if key.startswith('_') or key.endswith('_'):
+            continue
+        fn = getattr(rest_api, key)
+        fast_api.post('/' + key, response_model=typing.get_type_hints(fn)["return"])(fn)
+
+    uvicorn.run(fast_api, host='0.0.0.0', port=62220, log_level='info', workers=1)
 
 
 @click.command()
