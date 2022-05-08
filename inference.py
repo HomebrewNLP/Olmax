@@ -172,7 +172,12 @@ class RestAPI:
         return await self.decode((await self.token_completion(params)).token_completion)
 
 
-@click.command()
+@click.group()
+def main():
+    pass
+
+
+@main.command()
 def api():
     rest_api = RestAPI()
     fast_api = FastAPI()
@@ -186,7 +191,7 @@ def api():
     uvicorn.run(fast_api, host='0.0.0.0', port=62220, log_level='info', workers=1)
 
 
-@click.command()
+@main.command()
 @click.option('--temperature', default=0.5, type=float,
               help="Sampling temperature. Higher -> wider distribution / more random")
 @click.option('--top-k', default=32, type=int, help="Across how many of the top tokens should be sampled")
@@ -200,7 +205,7 @@ def interactive(temperature: float, top_k: int, top_p: float, length: int):
         print(out, "-" * os.get_terminal_size().columns, sep='\n')
 
 
-@click.command()
+@main.command()
 @click.option('--prompt', help="Text to feed into the language model.")
 @click.option('--temperature', default=0.5, type=float,
               help="Sampling temperature. Higher -> wider distribution / more random")
@@ -211,3 +216,7 @@ def once(prompt: str, temperature: float, top_k: int, top_p: float, length: int)
     model = Inference(Context())
     out = model.complete(prompt, temperature, top_k, top_p, length)
     print(out, "-" * os.get_terminal_size().columns, sep='\n')
+
+
+if __name__ == '__main__':
+    main()
