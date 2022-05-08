@@ -241,7 +241,7 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = ctx.add_to_prefix("input_embed")
 
-    if ctx.training.pretrained_embedding_path is None:
+    if ctx.training.pretrained_embedding_path is None and ctx.is_initializing:
         param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1,
                           scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
     else:
