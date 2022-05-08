@@ -164,6 +164,7 @@ class EarlyStopping(DataClass):
 
 
 class Training(DataClass):
+    pretrained_embedding_path: typing.Optional[str] = "gs://homebrewnlp-eu/input.npy"
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False

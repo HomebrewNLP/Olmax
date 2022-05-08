@@ -3,10 +3,12 @@ import math
 import typing
 
 import jax
+import numpy as np
 from jax import lax, numpy as jnp
 from jax.experimental.compilation_cache import compilation_cache
+from smart_open import open as sm_open
 
-from src.backend import get_param, matmul, conv as lax_conv
+from src.backend import get_param, matmul, conv as lax_conv, prefixed_name
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -238,8 +240,17 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def input_embed(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = ctx.add_to_prefix("input_embed")
-    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1,
-                      scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
+
+    if ctx.training.pretrained_embedding_path is None:
+        param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1,
+                          scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
+    else:
+        with sm_open(ctx.training.pretrained_embedding_path, 'wb') as f:
+            param = np.load(f)
+        name = prefixed_name(ctx, "inp_embd")
+        ctx.parameter_dims[name] = [ctx.dims.vocab, ctx.dims.features]
+        ctx.parameters[name] = param = jnp.asarray(param)
+
     normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0, mean=1,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
 
