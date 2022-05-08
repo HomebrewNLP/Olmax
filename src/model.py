@@ -245,7 +245,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp
         param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1,
                           scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
     else:
-        with sm_open(ctx.training.pretrained_embedding_path, 'wb') as f:
+        with sm_open(ctx.training.pretrained_embedding_path, 'rb') as f:
             param = np.load(f)
         name = prefixed_name(ctx, "inp_embd")
         ctx.parameter_dims[name] = [ctx.dims.vocab, ctx.dims.features]
