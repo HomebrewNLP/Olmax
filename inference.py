@@ -58,13 +58,14 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
 def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray,
                             temperature: jnp.ndarray, top_k: jnp.ndarray, top_p: jnp.ndarray,
-                            start_pos: jnp.ndarray, stop_pos: jnp.ndarray) -> jnp.ndarray:
+                            seed: jnp.ndarray, start_pos: jnp.ndarray, stop_pos: jnp.ndarray) -> jnp.ndarray:
     wctx = WhilePredictContext()
     wctx.ctx.parameters = parameters
     wctx.data = data
     wctx.temperature = temperature
     wctx.top_k = top_k
     wctx.top_p = top_p
+    wctx.ctx.seed = seed
     wctx.start_pos = start_pos
     wctx.stop_pos = stop_pos
     wctx.current_step = jnp.min(start_pos)
@@ -85,25 +86,26 @@ class Inference:
         ctx.is_initializing = False
         partition = {k: 0 for k in ctx.parameters.keys()}
         self.step = jax.pmap(jitless_prediction_step, axis_name=ParallelAxes.model,
-                             in_axes=(partition, None, None, None, None, None, None), out_axes=None)
+                             in_axes=(partition, None, None, None, None, None, None, None), out_axes=None)
         self.ctx = ctx
 
-        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.zeros(()), np.ones(()))
+        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.zeros(()), np.ones(()))
 
-    def complete_jax(self, prompt: np.array, temperature: np.array, top_k: np.array, top_p: np.array,
+    def complete_jax(self, prompt: np.array, temperature: np.array, top_k: np.array, top_p: np.array, seed: np.array,
                      start_pos: np.array, stop_pos: np.array) -> np.array:
-        return self.step(self.parameters, prompt, temperature, top_k, top_p, start_pos, stop_pos)
+        return self.step(self.parameters, prompt, temperature, top_k, top_p, seed, start_pos, stop_pos)
 
-    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, length: int
+    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, seed: int, length: int
                         ) -> jnp.ndarray:
         tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sizes.sequence - prompt.shape[1])))
         base = jnp.zeros(())
         start = base + prompt.shape[1]
-        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, start, start + length)
+        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, base + seed, start, start + length)
 
-    def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, length: int = 128):
+    def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, seed: int = 0,
+                 length: int = 128):
         tokens = jnp.asarray(np.frombuffer(text.encode(), np.uint8)).astype(jnp.int32).reshape(1, -1)
-        out = self.complete_tokens(tokens, temperature, top_k, top_p, length)[0]
+        out = self.complete_tokens(tokens, temperature, top_k, top_p, seed, length)[0]
         return np.asarray(out).astype(np.uint8).tobytes().decode(errors='ignore')[len(text):len(text) + length]
 
 
@@ -129,6 +131,7 @@ class CompletionInput(BaseModel):
     temperature: float = 1.
     top_k: int = 64
     top_p: int = 0.9
+    seed: int = 0
     error: bool = True
 
 
@@ -168,7 +171,7 @@ class RestAPI:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
         out = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
-                                              params.top_p, params.length)
+                                              params.top_p, params.seed, params.length)
         out = out[0, len(tokens):len(tokens) + params.length].tolist()
         return TokenCompletion(token_completion=out)
 
@@ -201,11 +204,12 @@ def api():
 @click.option('--top-k', default=32, type=int, help="Across how many of the top tokens should be sampled")
 @click.option('--top-p', default=1, type=float, help="How much probability mass to sample from")
 @click.option('--length', default=128, type=int, help="Number of tokens to generate")
-def interactive(temperature: float, top_k: int, top_p: float, length: int):
+@click.option('--seed', default=0, type=int, help="Seed value for the random number generator")
+def interactive(temperature: float, top_k: int, top_p: float, seed: int, length: int):
     model = Inference(Context())
     while True:
         prompt = input(">>> ")
-        out = model.complete(prompt, temperature, top_k, top_p, length)
+        out = model.complete(prompt, temperature, top_k, top_p, seed, length)
         print(out, "-" * os.get_terminal_size().columns, sep='\n')
 
 
@@ -216,9 +220,10 @@ def interactive(temperature: float, top_k: int, top_p: float, length: int):
 @click.option('--top-k', default=32, type=int, help="Across how many of the top tokens should be sampled")
 @click.option('--top-p', default=1, type=float, help="How much probability mass to sample from")
 @click.option('--length', default=128, type=int, help="Number of tokens to generate")
-def once(prompt: str, temperature: float, top_k: int, top_p: float, length: int):
+@click.option('--seed', default=0, type=int, help="Seed value for the random number generator")
+def once(prompt: str, temperature: float, top_k: int, top_p: float, seed:int, length: int):
     model = Inference(Context())
-    out = model.complete(prompt, temperature, top_k, top_p, length)
+    out = model.complete(prompt, temperature, top_k, top_p, seed, length)
     print(out, "-" * os.get_terminal_size().columns, sep='\n')
 
 
