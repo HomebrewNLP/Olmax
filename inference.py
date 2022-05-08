@@ -44,10 +44,9 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     top_k_mask = jnp.less(ranks, wctx.top_k)
 
     cumulative_probabilities = jnp.cumsum(jax.nn.softmax(sorted_out), -1)
-    overflow = jnp.argmax(jnp.greater(cumulative_probabilities, wctx.top_p), -1, keepdims=True)  # overflow index
-    top_p_mask = jnp.arange(wctx.ctx.dims.sizes.vocab).reshape(1, 1, -1) > overflow  # to shift by 1
-    top_p_mask = jnp.take_along_axis(top_p_mask, ranks, axis=2)
-
+    overflow = jnp.greater(cumulative_probabilities, wctx.top_p)
+    overflow = jnp.concatenate([jnp.zeros_like(cumulative_probabilities[:, :, :1]), overflow], -1)
+    top_p_mask = jnp.take_along_axis(overflow, ranks, axis=2)
     out_token = out_token + temp
     out_token = out_token + (top_k_mask + top_p_mask) * -1e9
 
