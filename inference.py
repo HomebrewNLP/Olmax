@@ -84,7 +84,7 @@ class Inference:
                              in_axes=(partition, None, None, None, None, None, None), out_axes=None)
         self.ctx = ctx
 
-        self.complete_tokens(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.zeros(()), np.ones(()))
+        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.zeros(()), np.ones(()))
 
     def complete_jax(self, prompt: np.array, temperature: np.array, top_k: np.array, top_p: np.array,
                      start_pos: np.array, stop_pos: np.array) -> np.array:
