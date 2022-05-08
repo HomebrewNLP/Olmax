@@ -41,11 +41,11 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out, -1)
-    top_k_mask = jnp.less(ranks, wctx.top_k)
+    top_k_mask = jnp.less(ranks, wctx.ctx.dims.sizes.vocab - wctx.top_k)  # we want to mask the bottom vocab - k
 
-    cumulative_probabilities = jnp.cumsum(jax.nn.softmax(sorted_out), -1)
+    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(sorted_out), (1,)), -1), (1,))
     overflow = jnp.greater(cumulative_probabilities, wctx.top_p)
-    overflow = jnp.concatenate([jnp.zeros_like(cumulative_probabilities[:, :, :1]), overflow], -1)
+    overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
     top_p_mask = jnp.take_along_axis(overflow, ranks, axis=2)
     out_token = out_token + temp
     out_token = out_token + (top_k_mask + top_p_mask) * -1e9
