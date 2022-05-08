@@ -40,6 +40,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out)
     top_p_mask = jnp.less(jnp.cumsum(jax.nn.softmax(sorted_out)), wctx.top_p)
+    top_p_mask = jnp.take_along_axis(top_p_mask, ranks, axis=2)
     top_k_mask = jnp.greater_equal(ranks, wctx.top_k)
 
     out_token = out_token + temp
@@ -165,7 +166,7 @@ class RestAPI:
         tokens = (await self.check_tokens(tokens, params.error)).tokens
         out = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
                                               params.top_p, params.length)
-        out = out.tolist()[len(tokens):len(tokens) + params.length]
+        out = out[0, len(tokens):len(tokens) + params.length].tolist()
         return TokenCompletion(token_completion=out)
 
     async def completion(self, params: CompletionInput) -> Completion:
