@@ -41,9 +41,9 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out)
-    top_p_mask = jnp.less(jnp.cumsum(jax.nn.softmax(sorted_out), -1), wctx.top_p)
+    top_p_mask = jnp.greater(jnp.cumsum(jax.nn.softmax(sorted_out), -1), wctx.top_p)
     top_p_mask = jnp.take_along_axis(top_p_mask, ranks, axis=2)
-    top_k_mask = jnp.greater_equal(ranks, wctx.top_k)
+    top_k_mask = jnp.less(ranks, wctx.top_k)
 
     out_token = out_token + temp
     out_token = out_token + (top_k_mask + top_p_mask) * -1e9
@@ -94,7 +94,7 @@ class Inference:
 
     def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, length: int
                         ) -> jnp.ndarray:
-        tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sizes.sequence - prompt.shape[-1])))
+        tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sizes.sequence - prompt.shape[1])))
         base = jnp.zeros(())
         start = base + prompt.shape[1]
         return self.complete_jax(tokens, temperature, base + top_k, base + top_p, start, start + length)
