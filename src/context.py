@@ -1,5 +1,5 @@
 import copy
-import sys
+import os
 import typing
 
 import yaml
@@ -192,8 +192,8 @@ class Context(DataClass):
         self.dims = Dims(self.data)
         self.dims.sizes.intermediate = self.dims.sizes.features * 2
 
-        if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
-            with open(sys.argv[1]) as f:
+        if 'CONFIG' in os.environ:
+            with open(os.environ['CONFIG']) as f:
                 cfg = f.read()
             init_class(self, yaml.safe_load(cfg))
 

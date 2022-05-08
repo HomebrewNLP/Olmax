@@ -1,6 +1,6 @@
 import copy
 import math
-import sys
+import os
 import time
 import typing
 import warnings
@@ -159,7 +159,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
 def dump_ctx(ctx: Context, run):
     with open("config.yaml", 'w') as f:
         f.write(yaml.dump(ctx.config(), indent=4))
-    sys.argv.insert(1, "config.yaml")
+    os.environ['CONFIG'] = 'config.yaml'
     run.config.update(ctx.config(), allow_val_change=True)
 
 
