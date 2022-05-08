@@ -1,5 +1,5 @@
 import copy
-import sys
+import os
 import typing
 
 import yaml
@@ -192,8 +192,8 @@ class Context(DataClass):
         self.dims = Dims(self.data)
         self.dims.sizes.intermediate = self.dims.sizes.features * 2
 
-        if len(sys.argv) > 1 and sys.argv[1].endswith('.yaml'):
-            with open(sys.argv[1]) as f:
+        if 'CONFIG' in os.environ:
+            with open(os.environ['CONFIG']) as f:
                 cfg = f.read()
             init_class(self, yaml.safe_load(cfg))
 
@@ -281,20 +281,26 @@ class WhilePredictContext(WhileContext):
 
         self.start_pos = jnp.zeros([batch_dim_size])
         self.stop_pos = jnp.array([sequence_dim_size] * batch_dim_size)[0]
-        self.sampling_temperature = jnp.zeros([batch_dim_size])
+        self.temperature = jnp.zeros([batch_dim_size])
         self.top_k = jnp.array([vocab_dim_size] * batch_dim_size)
+        self.top_p = jnp.array([1] * batch_dim_size)
+        self.seed = jnp.array([0] * batch_dim_size)
 
         if self.config is not None:
             self.start_pos = config['start_pos']
             self.stop_pos = config['stop_pos']
-            self.sampling_temperature = config['sampling_temperature']
+            self.temperature = config['temperature']
             self.top_k = config['top_k']
+            self.top_p = config['top_p']
+            self.ctx.seed = config['seed']
 
     def serialize(self):
         serialized = self._serialize()
         serialized['start_pos'] = self.start_pos
         serialized['stop_pos'] = self.stop_pos
-        serialized['sampling_temperature'] = self.sampling_temperature
+        serialized['temperature'] = self.temperature
         serialized['top_k'] = self.top_k
+        serialized['top_p'] = self.top_p
+        serialized['seed'] = self.ctx.seed
 
         return serialized

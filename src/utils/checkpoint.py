@@ -4,7 +4,9 @@ Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca93705
 
 import functools
 import io
+import json
 import multiprocessing
+import re
 import time
 
 import jax
@@ -41,6 +43,14 @@ def write(x, ckpt_dir):
 def write_ckpt(ctx: Context):
     flattened, structure = jax.tree_flatten(ctx.parameters)
 
+    structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
+    structure = structure.replace('PyTreeDef', '')[1:-1]  # clean up "types"
+    structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')
+    structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
+
+    with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
+        f.write(structure)
+
     for shard in range(ctx.dims.sizes.heads):
         cpu_flattened = index_weights(flattened, shard)
 
@@ -65,8 +75,20 @@ def read_shard(ckpt_dir):
     return out
 
 
-def read_ckpt(ctx: Context):
-    old_flattened, structure = jax.tree_flatten(ctx.parameters)
+def deep_replace(d, value):
+    if isinstance(d, dict):
+        return {k: deep_replace(v, value) for k, v in d.items()}
+    return value
+
+
+def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
+    ignore = re.compile(ignore)
+
+    with open(f"{ctx.training.checkpoint_path}/structure.json", "r") as f:
+        new_structure = f.read()
+    new_structure = json.loads(new_structure)
+    new_structure = deep_replace(new_structure, jnp.zeros((1,)))
+    _, new_structure = jax.tree_util.tree_flatten(new_structure)
 
     with multiprocessing.pool.ThreadPool(ctx.dims.sizes.heads) as p:
         start = time.time()
@@ -74,11 +96,14 @@ def read_ckpt(ctx: Context):
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
     unsharded = []
-    for old, *all_shards in zip(old_flattened, *shards):
+    for all_shards in zip(*shards):
         x = np.stack(all_shards)
         if x.dtype == np.dtype('V2'):
             x.dtype = jnp.bfloat16
         unsharded.append(x)
-        assert x.shape == old.shape, f"Incompatible checkpoints {x.shape} vs {old.shape}"
-
-    ctx.parameters = jax.tree_unflatten(structure, unsharded)
+    params = jax.tree_unflatten(new_structure, unsharded)
+    for key, param in params.items():
+        if key in ctx.parameters:
+            ctx.parameters[key] = param
+        elif not ignore.match(key):
+            print(f"Unknown parameter {key}")
