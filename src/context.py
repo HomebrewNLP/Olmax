@@ -284,6 +284,7 @@ class WhilePredictContext(WhileContext):
         self.temperature = jnp.zeros([batch_dim_size])
         self.top_k = jnp.array([vocab_dim_size] * batch_dim_size)
         self.top_p = jnp.array([1] * batch_dim_size)
+        self.seed = jnp.array([0] * batch_dim_size)
 
         if self.config is not None:
             self.start_pos = config['start_pos']
@@ -291,6 +292,7 @@ class WhilePredictContext(WhileContext):
             self.temperature = config['temperature']
             self.top_k = config['top_k']
             self.top_p = config['top_p']
+            self.ctx.seed = config['seed']
 
     def serialize(self):
         serialized = self._serialize()
@@ -299,5 +301,6 @@ class WhilePredictContext(WhileContext):
         serialized['temperature'] = self.temperature
         serialized['top_k'] = self.top_k
         serialized['top_p'] = self.top_p
+        serialized['seed'] = self.ctx.seed
 
         return serialized
