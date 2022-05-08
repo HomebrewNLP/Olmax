@@ -14,7 +14,7 @@ from src.backend import matmul
 from src.constants import ParallelAxes
 from src.context import Context, WhilePredictContext
 from src.main import get_parameters
-from src.model import body_ctx, one_hot
+from src.model import body_ctx, one_hot, promote_to
 from src.utils.checkpoint import read_ckpt
 
 
@@ -28,7 +28,9 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     out, wgt = body_ctx(wctx.ctx, wctx.data)
     out = (out * one_hot(wctx.current_step - 1, wctx.ctx.dims.sizes.sequence).reshape(1, -1, 1)).sum(1, keepdims=True)
-    out_token = lax.psum(matmul(out, wgt.transpose(1, 0)).reshape(out.shape[0], 1, -1), ParallelAxes.model)
+    out = matmul(out, wgt.transpose(1, 0)).reshape(out.shape[0], 1, -1)
+    out = promote_to(out, jnp.float32)
+    out_token = lax.psum(out, ParallelAxes.model)
 
     key = random.PRNGKey((wctx.ctx.seed + wctx.current_step).astype(jnp.int32))
     temp = random.uniform(key, out_token.shape, maxval=1, minval=1e-7, dtype=jnp.float32)
@@ -39,13 +41,12 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out)
-    top_p_mask = jnp.less(jnp.cumsum(jax.nn.softmax(sorted_out)), wctx.top_p)
+    top_p_mask = jnp.less(jnp.cumsum(jax.nn.softmax(sorted_out), -1), wctx.top_p)
     top_p_mask = jnp.take_along_axis(top_p_mask, ranks, axis=2)
     top_k_mask = jnp.greater_equal(ranks, wctx.top_k)
 
     out_token = out_token + temp
-    out_token = out_token + top_k_mask * -1e9
-    out_token = out_token + top_p_mask * -1e9
+    out_token = out_token + (top_k_mask + top_p_mask) * -1e9
 
     out_token = jnp.argmax(out_token, -1)
     wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sizes.sequence).reshape(1, -1), out_token, wctx.data)
