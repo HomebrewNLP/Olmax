@@ -333,8 +333,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (inp, jnp.zeros((), dtype=jnp.int32),
                                                                             wgt,
                                                                             inner_tgt, index,
-                                                                            jnp.zeros_like(wgt.shape[::-1],
-                                                                                           dtype=jnp.float32),
+                                                                            jnp.zeros(wgt.shape[::-1],
+                                                                                      dtype=jnp.float32),
                                                                             jnp.zeros((), dtype=jnp.float32),
                                                                             jnp.zeros((), dtype=jnp.float32)), None,
                                                               inp.shape[0])
