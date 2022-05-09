@@ -174,7 +174,7 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, str, str, bool, bool, 
     parser.add_argument("--zone", type=str, default="europe-west4-a", help="GCP Zone TPUs get created in")
     parser.add_argument("--data-path", type=str, default="gs://ggpt4/the-char-pile/",
                         help="Where the data is stored. Should be changed to a bucket in the correct region")
-    parser.add_argument("--pretrained-path", type=str, default="gs://ggpt4/the-char-pile/embeddings.npy",
+    parser.add_argument("--pretrained-path", type=str, default="",
                         help="Where the pretrained embeddings are stored. Should be changed to a bucket in the correct "
                              "region")
     parser.add_argument("--sweep", type=str, help="ID of the Weights and Biases sweep that'll be resumed")

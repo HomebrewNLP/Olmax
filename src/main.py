@@ -109,7 +109,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
     buffer_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items()) - parameter_count
 
-    if wctx.ctx.training.pretrained_embedding_path is not None:
+    if wctx.ctx.training.pretrained_embedding_path:
         with sm_open(wctx.ctx.training.pretrained_embedding_path, 'rb') as f:
             param = np.load(f)
         key = [k for k in wctx.ctx.parameters.keys() if '/input_embed:0/inp_embd' in k][0]
