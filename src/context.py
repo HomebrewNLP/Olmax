@@ -164,6 +164,7 @@ class EarlyStopping(DataClass):
 
 
 class Training(DataClass):
+    pretrained_embedding_path: typing.Optional[str] = None
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False
@@ -176,12 +177,17 @@ class Training(DataClass):
     early_stopping: EarlyStopping = EarlyStopping()
 
 
+class Evaluation(DataClass):
+    eos: int = 4
+
+
 class Context(DataClass):
     data: DataContext = DataContext()
     optimizer: Optimizer = Optimizer()
     model: Model = Model()
     training: Training = Training()
     wandb: WandB = WandB()
+    eval: Evaluation = Evaluation()
 
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.data = DataContext()

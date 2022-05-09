@@ -66,6 +66,7 @@ def main():
                f'screen -dmS "{prefix}" python3 {main_folder}/script/launch_multiple_runs.py --tpus {tpu_count} '
                f'--zone {zone} --tpu-version {tpu_version} '
                f'--data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-token-pile/ '
+               # f'--pretrained-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/input.npy '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
                f'--sweep {WandB.entity}/{WandB.project}/{sweep} --cleanup {cleanup} '
                f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account}')

@@ -20,7 +20,14 @@ from src.utils.checkpoint import read_ckpt
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhilePredictContext(while_ctx_dict)
-    return jnp.less(wctx.current_step, wctx.stop_pos)
+    is_eos = wctx.data == wctx.ctx.eval.eos
+    behind_start = wctx.start_pos.reshape(-1, 1) > jnp.arange(wctx.ctx.dims.sizes.sequence).reshape(1, -1)
+    is_eos = jnp.logical_and(is_eos, behind_start)
+    is_eos = jnp.cumsum(is_eos, axis=1)
+    eos_at_seq = (is_eos > 0).sum(0) == wctx.ctx.dims.sizes.batch
+    eos = jnp.take_along_axis(eos_at_seq.reshape(-1), wctx.current_step.reshape(-1), axis=0)
+    stop = jnp.less(wctx.current_step, wctx.stop_pos)
+    return jnp.logical_or(eos, stop).reshape(())
 
 
 def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -170,9 +177,14 @@ class RestAPI:
     async def token_completion(self, params: CompletionInput) -> TokenCompletion:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
-        out = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
+        tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
                                               params.top_p, params.seed, params.length)
-        out = out[0, len(tokens):len(tokens) + params.length].tolist()
+        tok = tok[0, len(tokens):len(tokens) + params.length].tolist()
+        out = []
+        for t in tok:
+            if t == self._ctx.eval.eos:
+                break
+            out.append(t)
         return TokenCompletion(token_completion=out)
 
     async def completion(self, params: CompletionInput) -> Completion:
@@ -221,7 +233,7 @@ def interactive(temperature: float, top_k: int, top_p: float, seed: int, length:
 @click.option('--top-p', default=1, type=float, help="How much probability mass to sample from")
 @click.option('--length', default=128, type=int, help="Number of tokens to generate")
 @click.option('--seed', default=0, type=int, help="Seed value for the random number generator")
-def once(prompt: str, temperature: float, top_k: int, top_p: float, seed:int, length: int):
+def once(prompt: str, temperature: float, top_k: int, top_p: float, seed: int, length: int):
     model = Inference(Context())
     out = model.complete(prompt, temperature, top_k, top_p, seed, length)
     print(out, "-" * os.get_terminal_size().columns, sep='\n')
