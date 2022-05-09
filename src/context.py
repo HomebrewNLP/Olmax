@@ -177,12 +177,17 @@ class Training(DataClass):
     early_stopping: EarlyStopping = EarlyStopping()
 
 
+class Evaluation(DataClass):
+    eos: int = 4
+
+
 class Context(DataClass):
     data: DataContext = DataContext()
     optimizer: Optimizer = Optimizer()
     model: Model = Model()
     training: Training = Training()
     wandb: WandB = WandB()
+    eval: Evaluation = Evaluation()
 
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.data = DataContext()
