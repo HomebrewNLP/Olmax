@@ -118,8 +118,7 @@ def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, servic
 
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
-                 data_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
-                 pretrained_path: str,
+                 data_path: str, pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
                  creation_semaphore: multiprocessing.Semaphore):
     host = f"{prefix}-{tpu_id}"
     time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER * timeout_multiplier)
