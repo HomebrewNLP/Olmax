@@ -177,9 +177,14 @@ class RestAPI:
     async def token_completion(self, params: CompletionInput) -> TokenCompletion:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
-        out = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
+        tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
                                               params.top_p, params.seed, params.length)
-        out = out[0, len(tokens):len(tokens) + params.length].tolist()
+        tok = tok[0, len(tokens):len(tokens) + params.length].tolist()
+        out = []
+        for t in tok:
+            if t == self._ctx.eval.eos:
+                break
+            out.append(t)
         return TokenCompletion(token_completion=out)
 
     async def completion(self, params: CompletionInput) -> Completion:
