@@ -57,6 +57,23 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
 
 
+def _shampoo_optimizer(ctx: Context):
+    return distributed_shampoo(ctx.optimizer.block_size, ctx.optimizer.adam_beta1, ctx.optimizer.adam_beta2,
+                               ctx.optimizer.epsilon, ctx.optimizer.start_preconditioning_step,
+                               ctx.optimizer.preconditioning_compute_steps, ctx.optimizer.statistics_compute_steps,
+                               skip_preconditioning_dim_size_gt=ctx.optimizer.skip_preconditioning_dim_size_gt)
+
+
+def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+    _, compute_stats, compute_preconditioners, transform_grad = _shampoo_optimizer(ctx)
+    new_stat = compute_stats(grad, ctx.parameters['/shampoo/' + param_name], ctx.parameters[param_name],
+                             ctx.parameters['/shampoo/count'])
+    new_stat = compute_preconditioners([new_stat], [ctx.parameters[param_name]], ctx.parameters['/shampoo/count'])[0]
+    grad, new_stat = transform_grad(grad, new_stat, ctx.parameters[param_name], ctx.parameters['/shampoo/count'])
+    ctx.parameters['/shampoo/' + param_name] = new_stat
+    return grad
+
+
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
     wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
@@ -75,18 +92,11 @@ def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
-    (init, compute_stats, compute_preconditioners, transform_grad
-     ) = distributed_shampoo(ctx.optimizer.block_size, ctx.optimizer.adam_beta1, ctx.optimizer.adam_beta2,
-                             ctx.optimizer.epsilon, ctx.optimizer.start_preconditioning_step,
-                             ctx.optimizer.preconditioning_compute_steps, ctx.optimizer.statistics_compute_steps,
-                             skip_preconditioning_dim_size_gt=ctx.optimizer.skip_preconditioning_dim_size_gt)
     if ctx.is_initializing:
-        state = init(grads)
+        state = _shampoo_optimizer(ctx)[0](grads)
         ctx.parameters['/shampoo/count'] = state.count
         for k, v in state.stats.items():
             ctx.parameters['/shampoo/' + k] = v
-
-    count = ctx.parameters['/shampoo/count']
 
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
@@ -99,10 +109,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
             grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
         else:
-            new_stat = compute_stats(grad, ctx.parameters['/shampoo/' + param_name], ctx.parameters[param_name], count)
-            new_stat = compute_preconditioners([new_stat], [ctx.parameters[param_name]], count)[0]
-            grad, new_stat = transform_grad(grad, new_stat, ctx.parameters[param_name], count)
-            ctx.parameters['/shampoo/' + param_name] = new_stat
+            grad = shampoo(inner_ctx, param_name, grad)  # Do shampoo update for large parameters
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]
