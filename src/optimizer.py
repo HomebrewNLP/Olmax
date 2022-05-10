@@ -75,16 +75,22 @@ def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
-    count = ctx.parameters['shampoo/count']
-    (_, compute_stats, compute_preconditioners, transform_grad
+    (init, compute_stats, compute_preconditioners, transform_grad
      ) = distributed_shampoo(ctx.optimizer.block_size, ctx.optimizer.adam_beta1, ctx.optimizer.adam_beta2,
                              ctx.optimizer.epsilon, ctx.optimizer.start_preconditioning_step,
                              ctx.optimizer.preconditioning_compute_steps, ctx.optimizer.statistics_compute_steps,
                              skip_preconditioning_dim_size_gt=ctx.optimizer.skip_preconditioning_dim_size_gt)
+    if ctx.is_initializing:
+        state = init(grads)
+        ctx.parameters['/shampoo/count'] = state.count
+        for k, v in state.stats.items():
+            ctx.parameters['/shampoo/' + k] = v
+
+    count = ctx.parameters['/shampoo/count']
 
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
-        if "optimizer" in param_name:
+        if "optimizer" in param_name or "shampoo" in param_name:
             continue
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(ctx.model.storage_dtype)
