@@ -915,7 +915,6 @@ def distributed_shampoo(
         """
         num_devices = 1
         num_statistics = len(statistics)
-        quantized_dtype = jnp.float32
         # Complexity here is around: shapes needing be statically shaped,
         # our custom quantization type requires a different type of packing.
 
@@ -929,7 +928,7 @@ def distributed_shampoo(
 
         to_pad = -num_statistics % num_devices
         padded_eye = jnp.eye(max_size, dtype=jnp.float32)
-        quantized_eye = QuantizedValue.from_float_value(padded_eye, quantized_dtype, True)
+        quantized_eye = QuantizedValue.from_float_value(padded_eye, jnp.float32, True)
         packed_quantized_statistics.extend([quantized_eye.quantized for _ in range(to_pad)])
         packed_quantized_diagonals.extend([quantized_eye.diagonal for _ in range(to_pad)])
         packed_quantized_bucket_sizes.extend([quantized_eye.bucket_size for _ in range(to_pad)])
@@ -1067,14 +1066,8 @@ def distributed_shampoo(
                 prev_preconditioners.extend(state.preconditioners)
                 original_shapes.extend(original_shapes_for_state)
 
-        quantized_dtype = jnp.float32
-
-        if quantized_dtype == jnp.float32:
-            return _pmap_compute_preconditioners(states, step, statistics, num_statistics_per_state, original_shapes,
-                                                 exponents, max_size, prev_preconditioners)
-        else:
-            return _pmap_quantized_compute_preconditioners(states, step, statistics, num_statistics_per_state,
-                                                           original_shapes, exponents, max_size, prev_preconditioners)
+        return _pmap_compute_preconditioners(states, step, statistics, num_statistics_per_state, original_shapes,
+                                             exponents, max_size, prev_preconditioners)
 
     def _transform_grad(grad, state, param, step):
         """Transform per-parameter gradients."""
@@ -1112,32 +1105,4 @@ def distributed_shampoo(
 
         return update, param_stats
 
-    def update_fn(grads, state, params):
-        """Transform the input gradient and update all statistics.
-
-        Args:
-          grads: the gradient tensors for the parameters.
-          state: a named tuple containing the state of the optimizer
-          params: the parameters that should be updated.
-
-        Returns:
-          A tuple containing the new parameters and the new optimizer state.
-        """
-        params_flat, treedef = jax.tree_flatten(params)
-        stats_flat = treedef.flatten_up_to(state.stats)
-        grads_flat = treedef.flatten_up_to(grads)
-
-        new_stats_flat = jax.tree_multimap(lambda g, s, p: _compute_stats(g, s, p, state.count), grads_flat, stats_flat,
-                                           params_flat)
-        new_stats_flat = _compute_preconditioners(new_stats_flat, params_flat, state.count)
-        outputs = jax.tree_multimap(lambda g, s, p: _transform_grad(g, s, p, state.count), grads_flat, new_stats_flat,
-                                    params_flat)
-        updates_flat, new_stats_flat = list(zip(*outputs)) if outputs else ((), ())
-
-        updates = jax.tree_unflatten(treedef, updates_flat)
-        new_stats = jax.tree_unflatten(treedef, new_stats_flat)
-
-        new_state = ShampooState(count=state.count + 1, stats=new_stats)
-        return updates, new_state
-
-    return init_fn, update_fn
+    return init_fn, _compute_stats, _compute_preconditioners, _transform_grad
