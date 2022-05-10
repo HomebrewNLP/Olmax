@@ -3,6 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from shampoo import distributed_shampoo, ShampooState
 from .backend import zero_param, assign, prefixed_name
 from .context import Context
 
@@ -73,20 +74,21 @@ def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
     ctx = ctx.add_to_prefix("optimizer")
-    lr = -get_current_lr(ctx, current_step)
 
-    for param_name, grad in grads.items():
-        inner_ctx = ctx.add_to_prefix(param_name, count=False)
+    lr = -get_current_lr(ctx, current_step)
+    count = ctx.parameters['shampoo/count']
+    stats = {k[len('shampoo/stats/'):]: p for k, p in ctx.parameters.items() if k.startswith('shampoo/stats/')}
+    state = ShampooState(count=count, stats=stats)
+    init, update_fn = distributed_shampoo(1, 1024)
+    grads = {k: adaptive_gradient_clipping(ctx, k, v.astype(ctx.model.storage_dtype)) for k, v in grads.items()}
+    updates, state = update_fn(grads, state, {k: p for k, p in ctx.parameters.items() if not k.startswith('shampoo/')})
+    for k, s in state.stats.items():
+        ctx.parameters['shampoo/stats/' + k] = s
+    ctx.parameters['shampoo/count'] = state.count
+
+    for param_name, grad in updates.items():
         if "optimizer" in param_name:
             continue
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
-        grad = grad.astype(ctx.model.storage_dtype)
-        grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
-        if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
-            grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
-        else:
-            grad = sm3(inner_ctx, param_name, grad)
-            grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
-            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]
