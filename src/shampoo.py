@@ -65,29 +65,21 @@ def materialize_matrix(symmetric_matrix):
     num_blocks = len(block_rows)
 
     # Slice the lower-triangular and diagonal blocks into blocks.
-    blocks = [[
-        block_row[Ellipsis, i * block_size:(i + 1) * block_size] for i in range(k + 1)
-    ] for k, block_row in enumerate(block_rows)]
+    blocks = [[block_row[Ellipsis, i * block_size:(i + 1) * block_size] for i in range(k + 1)]
+              for k, block_row in enumerate(block_rows)]
 
     # Generate the (off-diagonal) upper-triangular blocks.
     off_diags = [[] for _ in range(num_blocks - 1)]
     for k, block_row in enumerate(block_rows[1:]):
         for i in range(k + 1):
-            off_diags[i].append(
-                jnp.swapaxes(
-                    a=block_row[Ellipsis, i * block_size:(i + 1) * block_size],
-                    axis1=-1,
-                    axis2=-2))
+            off_diags[i].append(jnp.swapaxes(a=block_row[Ellipsis, i * block_size:(i + 1) * block_size], axis1=-1,
+                                             axis2=-2))
 
-    return jnp.block([row + row_t for row, row_t in zip(blocks[:-1], off_diags)] +
-                     [blocks[-1]])
+    return jnp.block([row + row_t for row, row_t in zip(blocks[:-1], off_diags)] + [blocks[-1]])
 
 
 @functools.partial(jax.jit, static_argnames=("num_blocks"))
-def materialize_matrix_from_concat(
-        block_rows_concat,
-        num_blocks=None,
-):
+def materialize_matrix_from_concat(block_rows_concat, num_blocks=None):
     """Returns a materialized symmetric matrix from concatenated slices.
     Args:
       block_rows_concat: The matrix represented as the concatenated
@@ -100,11 +92,9 @@ def materialize_matrix_from_concat(
 
     block_size = block_rows_concat.shape[-2]
 
-    block_rows = [
-        block_rows_concat[Ellipsis, (k * (k + 1)) // 2 *
-                                    block_size:(((k + 1) * (k + 2)) // 2 + 1) * block_size]
-        for k in range(num_blocks)
-    ]
+    block_rows = [block_rows_concat[Ellipsis, (k * (k + 1)) // 2 * block_size:
+                                              (((k + 1) * (k + 2)) // 2 + 1) * block_size]
+                  for k in range(num_blocks)]
 
     return materialize_matrix(SlicedSymmetricMatrix(block_rows=block_rows))
 
@@ -118,12 +108,10 @@ def num_blocks_from_total_blocks(total_blocks):
     Args:
       total_blocks: The total blocks used to represent the matrix.
     """
-    num_blocks = np.round(
-        (np.sqrt(8 * total_blocks + 1) - 1) / 2).astype(np.int32)
+    num_blocks = np.round((np.sqrt(8 * total_blocks + 1) - 1) / 2).astype(np.int32)
     if (num_blocks * (num_blocks + 1)) / 2 != total_blocks:
-        raise ValueError(
-            f"total_blocks={total_blocks} does not correspond to "
-            "a symmetric matrix. It must have the form total_blocks = x*(x+1)/2.")
+        raise ValueError(f"total_blocks={total_blocks} does not correspond to "
+                         f"a symmetric matrix. It must have the form total_blocks = x*(x+1)/2.")
     return num_blocks
 
 
@@ -182,11 +170,7 @@ class ShampooState(NamedTuple):
     stats: Any
 
 
-def power_iteration(
-        matrix,
-        num_iters=100,
-        error_tolerance=1e-6,
-):
+def power_iteration(matrix, num_iters=100, error_tolerance=1e-6, ):
     r"""Power iteration algorithm.
 
     The power iteration algorithm takes a symmetric PSD matrix `A`, and produces
@@ -230,10 +214,7 @@ def power_iteration(
     return v_out, s_out
 
 
-def mat_power(
-        mat_m,
-        p,
-):
+def mat_power(mat_m, p):
     """A simple matrix power method. M^p where p can be TracedValue."""
     power = jnp.eye(mat_m.shape[0], dtype=_MAT_INV_PTH_ROOT_DTYPE)
 
@@ -253,13 +234,7 @@ def mat_power(
     return result
 
 
-def matrix_inverse_pth_root(
-        matrix,
-        p,
-        num_iters=100,
-        ridge_epsilon=1e-6,
-        error_tolerance=1e-6,
-):
+def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_tolerance=1e-6, ):
     """Computes `matrix^(-1/p)`, where `p` is a positive integer.
 
     This function uses the Coupled newton iterations algorithm for
@@ -405,9 +380,7 @@ def efficient_cond(predicate, compute_fn, init_state, *args, **kwargs):
     def _iter_condition(state):
         return state[0]
 
-    results = jax.lax.while_loop(_iter_condition, _iter_body,
-                                 tuple([predicate] + init_state))
-    return tuple(results[1:])
+    return tuple(jax.lax.while_loop(_iter_condition, _iter_body, tuple([predicate] + init_state))[1:])
 
 
 class BlockPartitioner:
@@ -461,8 +434,7 @@ class BlockPartitioner:
             partial_merged_tensors = []
             ind = 0
             while ind < len(partitions):
-                partial_merged_tensors.append(
-                    jnp.concatenate(partitions[ind:ind + n], axis=i))
+                partial_merged_tensors.append(jnp.concatenate(partitions[ind:ind + n], axis=i))
                 ind += n
             partitions = partial_merged_tensors
         assert len(partitions) == 1
@@ -538,247 +510,148 @@ class Preconditioner:
         return jnp.reshape(merged_grad, self._original_shape)
 
 
-def distributed_shampoo(ctx: Context):
-    """Distributed Shampoo optimizer.
-
-    Distributed Shampoo is a second-order preconditioned method (concretely, a
-    variant of full-matrix Adagrad), that provides significant convergence and
-    wall-clock time improvements compared to conventional first-order methods,
-    and that has been shown to scale to large state-of-the-art deep learning
-    models.
-
-    References:
-      Scalable Second Order Optimization for Deep Learning,
-      Rohan Anil, Vineet Gupta, Tomer Koren, Kevin Regan, Yoram Singer
-
-      Preprint: https://arxiv.org/abs/2002.09018
-
-    Args:
-      block_size: Block size for large layers (if > 0). Preconditioning compute
-        operation is cubic in the dimension of the tensor. Block size allows us to
-        chunk the layers into sub-layers of maximal dimension dictated by this
-        value. Use 128 as default (increase if you have compute budget).
-      beta1: momentum parameter.
-      beta2: second moment averaging parameter.
-      matrix_epsilon: epsilon to add to statistics before computing inverse pth
-        root. If you are running in f32 precision for inverse pth root
-        (recommended today) this can go upto 1e-6. If you have latest hardware
-        with native f64 precision, set this upto 1e-12.
-      start_preconditioning_step: When to start Shampoo update before which
-        diagonal update is used. This is because we dont have enough information
-        to do stable inverse.
-      preconditioning_compute_steps: How often to compute preconditioner.
-        Performance tuning params for controlling memory and compute requirements.
-        Ideally set this and statistics_compute_steps params to 1.
-      statistics_compute_steps: How often to compute statistics.
-      inverse_failure_threshold: numerics are hard and inverses fail sometimes; we
-        determine that using this threshold.
-      skip_preconditioning_dim_size_gt: Skip if preconditioning dim size is
-        greater than this value.
-
-    Returns:
-      a GradientTransformation.
-    """
+def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=ctx.optimizer.epsilon,
                                  precision=lax.Precision.HIGHEST)
-
-    def init_fn(params):
-        """Initialise the optimiser's state."""
-
-        def _init(param):
-            preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-            statistics = []
-            preconditioners = []
-            if not _skip_preconditioning(param):
-                shapes = preconditioner.shapes_for_preconditioners()
-                statistics = [ctx.optimizer.epsilon * jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
-                preconditioners = [jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
-
-            diagonal_statistics = []
-
-            momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
-            diagonal_momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
-
-            return ParameterStats(diagonal_statistics, statistics, preconditioners, diagonal_momentum,
-                                  momentum, init_training_metrics(len(statistics)))
-
-        return ShampooState(count=jnp.zeros([], jnp.int32), stats=jax.tree_map(_init, params))
+    param = ctx.parameters[param_name]
 
     def _skip_preconditioning(param):
         return len(param.shape) < 1 or any([s > ctx.optimizer.skip_preconditioning_dim_size_gt for s in param.shape])
 
-    def _compute_stats(grad, state, param, step):
-        """Compute per-parameter statistics."""
+    if ctx.is_initializing:
         preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-        if not _skip_preconditioning(param):
-            def compute_updated_statistics():
-                new_stats = preconditioner.statistics_from_grad(grad)
-                new_stats_accumulators = []
-                for stat, stat_accumulator in zip(new_stats, state.statistics):
-                    new_stats_accumulators.append(
-                        ctx.optimizer.adam_beta2 * stat_accumulator + (1.0 - ctx.optimizer.adam_beta2) * stat)
-                return new_stats_accumulators
-
-            perform_step = step % ctx.optimizer.statistics_compute_steps == 0
-            init_state = state.statistics
-            new_statistics = list(efficient_cond(perform_step, compute_updated_statistics, init_state))
-            return ParameterStats(state.diagonal_statistics, new_statistics, state.preconditioners,
-                                  state.diagonal_momentum,
-                                  state.momentum, state.training_metrics)
-
-    def _matrix_inverse_pth_root_vmap(xs, ps):
-        return jax.vmap(pth_root)(xs, ps)
-
-    def _pmap_compute_preconditioners(states, step, statistics,
-                                      num_statistics_per_state, original_shapes,
-                                      exponents, max_size, prev_preconditioners):
-        """Computes preconditioners for given statistics in states in PMAP mode.
-
-        Args:
-          states: A list of optimizer states.
-          step: Current step number
-          statistics: A list of statistics for all variables (for every dim)
-          num_statistics_per_state: Number of statistis per state to reconstruct
-            output states.
-          original_shapes: A list of shapes of the statistics.
-          exponents: Exponent power to use for inverse-pth roots.
-          max_size: Maximum dim of the statistics to pad.
-          prev_preconditioners: Previously available preconditioner.
-
-        Returns:
-          New optimizer states after computing the preconditioner.
-        """
-        if not statistics:
-            return states
-
-        num_statistics = len(statistics)
-        # Pad statistics and exponents to next multiple of num_devices.
-        packed_statistics = [pad_square_matrix(stat, max_size) for stat in statistics]
-
-        def _internal_inverse_pth_root_all():
-            return _matrix_inverse_pth_root_vmap(jnp.stack(packed_statistics), jnp.stack(exponents))
-
-        preconditioners_init = packed_statistics
-        errors_init = ([INVERSE_FAILURE_THRESHOLD] * len(packed_statistics))
-        init_state = [preconditioners_init, errors_init]
-        perform_step = step % ctx.optimizer.preconditioning_compute_steps == 0
-        preconditioners_flat, errors_flat = efficient_cond(perform_step, _internal_inverse_pth_root_all, init_state)
-
-        def _skip(error):
-            return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
-
-        def _select_preconditioner(error, new_p, old_p):
-            return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
-
-        new_preconditioners_flat = []
-        new_errors_flat = []
-        for p, shape, prev_p, error in zip(preconditioners_flat, original_shapes, prev_preconditioners, errors_flat):
-            new_preconditioners_flat.append(_select_preconditioner(error, p[:shape[0], :shape[1]], prev_p))
-            new_errors_flat.append(error)
-
-        assert len(states) == len(num_statistics_per_state)
-        assert len(new_preconditioners_flat) == num_statistics
-        assert len(new_errors_flat) == num_statistics
-
-        # Add back empty preconditioners so we that we can set the optimizer state.
-        preconditioners_for_states = []
-        idx = 0
-        errors_for_states = []
-        for num_statistics, state in zip(num_statistics_per_state, states):
-            if num_statistics == 0:
-                preconditioners_for_states.append([])
-                errors_for_states.append(jnp.array(0, jnp.float32))
-            else:
-                preconditioners_for_state = new_preconditioners_flat[idx:idx + num_statistics]
-                assert len(state.statistics) == len(preconditioners_for_state)
-                preconditioners_for_states.append(preconditioners_for_state)
-
-                errors_for_state = jnp.stack(new_errors_flat[idx:idx + num_statistics])
-                assert len(state.statistics) == len(errors_for_state)
-                errors_for_states.append(errors_for_state)
-
-                idx += num_statistics
-        new_states = []
-        for state, new_preconditioners, new_errors in zip(states, preconditioners_for_states, errors_for_states):
-            if state.statistics:
-                new_errors = jnp.where(jnp.logical_and(new_errors > 0.0, new_errors != INVERSE_FAILURE_THRESHOLD),
-                                       new_errors, state.training_metrics.inverse_pth_root_errors)
-            new_training_metrics = TrainingMetrics(new_errors)
-            new_states.append(ParameterStats(state.diagonal_statistics, state.statistics, new_preconditioners,
-                                             state.diagonal_momentum, state.momentum, new_training_metrics))
-
-        return new_states
-
-    def _compute_preconditioners(states, params, step):
-        """Computes preconditioners for given statistics in states.
-
-        Args:
-          states: A list of optimizer states.
-          params: A list of params.
-          step: Current step number
-
-        Returns:
-          New optimizer states after computing the preconditioner.
-        """
         statistics = []
-        num_statistics_per_state = []
-        original_shapes = []
-        exponents = []
-        max_size = 0
-        prev_preconditioners = []
-
-        for state, param in zip(states, params):
-            num_statistics = len(state.statistics)
-            num_statistics_per_state.append(num_statistics)
-            original_shapes_for_state = []
-            if num_statistics > 0:
-                preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-                for statistic in state.statistics:
-                    exponents.append(preconditioner.exponent_for_preconditioner())
-                    original_shapes_for_state.append(statistic.shape)
-                    max_size = max(max_size, statistic.shape[0])
-
-                statistics.extend(state.statistics)
-                prev_preconditioners.extend(state.preconditioners)
-                original_shapes.extend(original_shapes_for_state)
-
-        return _pmap_compute_preconditioners(states, step, statistics, num_statistics_per_state, original_shapes,
-                                             exponents, max_size, prev_preconditioners)
-
-    def _transform_grad(grad, state, param, step):
-        """Transform per-parameter gradients."""
-        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-        sgd_update = grad
-        new_diagonal_statistics = state.diagonal_statistics.to_float()
-        grafting_update = sgd_update
-
-        precond_grad = grad
+        preconditioners = []
         if not _skip_preconditioning(param):
-            precond_grad = preconditioner.preconditioned_grad(precond_grad, state.preconditioners)
-        else:
-            precond_grad = grafting_update
+            shapes = preconditioner.shapes_for_preconditioners()
+            statistics = [ctx.optimizer.epsilon * jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
+            preconditioners = [jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
 
-        grafting_update_norm = jnp.linalg.norm(grafting_update)
-        precond_grad_norm = jnp.linalg.norm(precond_grad)
+        diagonal_statistics = []
 
-        multiplier = (grafting_update_norm / (precond_grad_norm + 1e-16))
-        shampoo_update = precond_grad * multiplier
+        momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
+        diagonal_momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
 
-        shampoo_update_with_wd = shampoo_update
-        grafting_update_with_wd = grafting_update
+        return ParameterStats(diagonal_statistics, statistics, preconditioners, diagonal_momentum, momentum,
+                              init_training_metrics(len(statistics)))
 
-        shampoo_update_with_wd_momentum = state.momentum.to_float() * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
-        grafting_update_with_wd_momentum = state.diagonal_momentum.to_float() * ctx.optimizer.adam_beta1 + grafting_update_with_wd
-        run_shampoo = (step >= ctx.optimizer.start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
-        update = run_shampoo * shampoo_update_with_wd_momentum + (1.0 - run_shampoo) * grafting_update_with_wd_momentum
+    state = ctx.parameters['/shampoo/' + param_name]
+    param = ctx.parameters[param_name]
+    step = ctx.parameters['/shampoo/count']
+    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
+    if not _skip_preconditioning(param):
+        def compute_updated_statistics():
+            new_stats = preconditioner.statistics_from_grad(grad)
+            new_stats_accumulators = []
+            for stat, stat_accumulator in zip(new_stats, state.statistics):
+                new_stats_accumulators.append(
+                    ctx.optimizer.adam_beta2 * stat_accumulator + (1.0 - ctx.optimizer.adam_beta2) * stat)
+            return new_stats_accumulators
 
-        new_diagonal_momentum = grafting_update_with_wd_momentum
-        new_momentum = shampoo_update_with_wd_momentum
+        perform_step = step % ctx.optimizer.statistics_compute_steps == 0
+        init_state = state.statistics
+        new_statistics = list(efficient_cond(perform_step, compute_updated_statistics, init_state))
+    else:
+        new_statistics = [[]] * len(state.statistics)
+    state = ParameterStats(state.diagonal_statistics, new_statistics, state.preconditioners,
+                           state.diagonal_momentum, state.momentum, state.training_metrics)
 
-        param_stats = ParameterStats(new_diagonal_statistics, state.statistics, state.preconditioners,
-                                     new_diagonal_momentum.astype(jnp.bfloat16), new_momentum.astype(jnp.bfloat16),
-                                     state.training_metrics)
+    statistics = []
+    original_shapes = []
+    exponents = []
+    max_size = 0
+    prev_preconditioners = []
 
-        return update, param_stats
+    original_shapes_for_state = []
+    if len(state.statistics) > 0:
+        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
+        for statistic in state.statistics:
+            exponents.append(preconditioner.exponent_for_preconditioner())
+            original_shapes_for_state.append(statistic.shape)
+            max_size = max(max_size, statistic.shape[0])
 
-    return init_fn, _compute_stats, _compute_preconditioners, _transform_grad
+        statistics.extend(state.statistics)
+        prev_preconditioners.extend(state.preconditioners)
+        original_shapes.extend(original_shapes_for_state)
+    num_statistics = len(state.statistics)
+    if not statistics:
+        return state
+
+    # Pad statistics and exponents to next multiple of num_devices.
+    packed_statistics = [pad_square_matrix(stat, max_size) for stat in statistics]
+
+    def _internal_inverse_pth_root_all():
+        return jax.vmap(pth_root)(jnp.stack(packed_statistics), jnp.stack(exponents))
+
+    preconditioners_init = packed_statistics
+    errors_init = ([INVERSE_FAILURE_THRESHOLD] * len(packed_statistics))
+    init_state = [preconditioners_init, errors_init]
+    perform_step = step % ctx.optimizer.preconditioning_compute_steps == 0
+    preconditioners_flat, errors_flat = efficient_cond(perform_step, _internal_inverse_pth_root_all, init_state)
+
+    def _skip(error):
+        return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
+
+    def _select_preconditioner(error, new_p, old_p):
+        return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
+
+    new_preconditioners_flat = []
+    new_errors_flat = []
+    for p, shape, prev_p, error in zip(preconditioners_flat, original_shapes, prev_preconditioners, errors_flat):
+        new_preconditioners_flat.append(_select_preconditioner(error, p[:shape[0], :shape[1]], prev_p))
+        new_errors_flat.append(error)
+
+    # Add back empty preconditioners so we that we can set the optimizer state.
+    idx = 0
+    if num_statistics == 0:
+        new_preconditioners = []
+        new_errors = jnp.array(0, jnp.float32)
+    else:
+        preconditioners_for_state = new_preconditioners_flat[idx:idx + num_statistics]
+        new_preconditioners = preconditioners_for_state
+
+        errors_for_state = jnp.stack(new_errors_flat[idx:idx + num_statistics])
+        new_errors = errors_for_state
+
+        idx += num_statistics
+    if state.statistics:
+        new_errors = jnp.where(jnp.logical_and(new_errors > 0.0, new_errors != INVERSE_FAILURE_THRESHOLD),
+                               new_errors, state.training_metrics.inverse_pth_root_errors)
+    new_training_metrics = TrainingMetrics(new_errors)
+    state = ParameterStats(state.diagonal_statistics, state.statistics, new_preconditioners, state.diagonal_momentum,
+                           state.momentum, new_training_metrics)
+
+    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
+    sgd_update = grad
+    new_diagonal_statistics = state.diagonal_statistics.astype(jnp.float32)
+    grafting_update = sgd_update
+
+    precond_grad = grad
+    if not _skip_preconditioning(param):
+        precond_grad = preconditioner.preconditioned_grad(precond_grad, state.preconditioners)
+    else:
+        precond_grad = grafting_update
+
+    grafting_update_norm = jnp.linalg.norm(grafting_update)
+    precond_grad_norm = jnp.linalg.norm(precond_grad)
+
+    multiplier = (grafting_update_norm / (precond_grad_norm + 1e-16))
+    shampoo_update = precond_grad * multiplier
+
+    shampoo_update_with_wd = shampoo_update
+    grafting_update_with_wd = grafting_update
+
+    shampoo_update_with_wd_momentum = state.momentum.astype(jnp.float32) * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
+    grafting_update_with_wd_momentum = state.diagonal_momentum.astype(jnp.float32) * ctx.optimizer.adam_beta1 + grafting_update_with_wd
+    run_shampoo = (step >= ctx.optimizer.start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
+    update = run_shampoo * shampoo_update_with_wd_momentum + (1.0 - run_shampoo) * grafting_update_with_wd_momentum
+
+    new_diagonal_momentum = grafting_update_with_wd_momentum
+    new_momentum = shampoo_update_with_wd_momentum
+
+    param_stats = ParameterStats(new_diagonal_statistics, state.statistics, state.preconditioners,
+                                 new_diagonal_momentum.astype(jnp.bfloat16), new_momentum.astype(jnp.bfloat16),
+                                 state.training_metrics)
+    ctx.parameters['/shampoo/' + param_name] = param_stats
+
+    return update
