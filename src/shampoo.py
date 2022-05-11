@@ -423,11 +423,11 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         preconditioners = []
         if not _skip_preconditioning(param):
             shapes = preconditioner.shapes_for_preconditioners()
-            statistics = [ctx.optimizer.epsilon * jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
-            preconditioners = [jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
+            statistics = [ctx.optimizer.epsilon * jnp.eye(s[0], dtype=ctx.model.storage_dtype) for s in shapes]
+            preconditioners = [jnp.eye(s[0], dtype=ctx.model.storage_dtype) for s in shapes]
 
-        momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
-        diagonal_momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
+        momentum = jnp.zeros_like(param).astype(ctx.model.computation_dtype)
+        diagonal_momentum = jnp.zeros_like(param).astype(ctx.model.computation_dtype)
         ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = diagonal_momentum
         ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum
         for i, stat in enumerate(statistics):
@@ -443,8 +443,8 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     preconditioners = [(key, param) for key, param in ctx.parameters.items() if
                        key.startswith(f'/shampoo/{param_name}/preconditioners_')]
     preconditioners = [param for _, param in sorted(preconditioners, key=lambda x: int(x[0].split('_')[-1]))]
-    diagonal_momentum = ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum']
-    momentum = ctx.parameters[f'/shampoo/{param_name}/momentum']
+    diagonal_momentum = ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'].astype(ctx.model.storage_dtype)
+    momentum = ctx.parameters[f'/shampoo/{param_name}/momentum'].astype(ctx.model.storage_dtype)
     param = ctx.parameters[param_name]
     step = ctx.parameters['/shampoo/count']
     preconditioner = Preconditioner(param, ctx.optimizer.block_size)
@@ -521,17 +521,16 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     shampoo_update_with_wd = shampoo_update
     grafting_update_with_wd = grafting_update
 
-    shampoo_update_with_wd_momentum = momentum.astype(jnp.float32) * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
-    grafting_update_with_wd_momentum = diagonal_momentum.astype(
-        jnp.float32) * ctx.optimizer.adam_beta1 + grafting_update_with_wd
+    shampoo_update_with_wd_momentum = momentum * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
+    grafting_update_with_wd_momentum = diagonal_momentum * ctx.optimizer.adam_beta1 + grafting_update_with_wd
     run_shampoo = (step >= ctx.optimizer.start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
     update = run_shampoo * shampoo_update_with_wd_momentum + (1.0 - run_shampoo) * grafting_update_with_wd_momentum
 
-    new_diagonal_momentum = grafting_update_with_wd_momentum
-    new_momentum = shampoo_update_with_wd_momentum
+    diagonal_momentum = grafting_update_with_wd_momentum
+    momentum = shampoo_update_with_wd_momentum
 
-    ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = new_diagonal_momentum.astype(jnp.bfloat16)
-    ctx.parameters[f'/shampoo/{param_name}/momentum'] = new_momentum.astype(jnp.bfloat16)
+    ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = diagonal_momentum.astype(ctx.model.computation_dtype)
+    ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum.astype(ctx.model.computation_dtype)
     for i, stat in enumerate(new_statistics):
         ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
     for i, prec in enumerate(new_preconditioners):
