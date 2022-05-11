@@ -76,7 +76,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
     if ctx.is_initializing:
-        ctx.parameters['/shampoo/count'] = jnp.zeros()
+        ctx.parameters['/shampoo/count'] = jnp.zeros((), dtype=ctx.model.storage_dtype)
 
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
