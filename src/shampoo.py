@@ -38,6 +38,10 @@ import numpy as np
 from flax import struct
 from jax import lax
 
+from context import Context
+
+INVERSE_FAILURE_THRESHOLD = 0.1
+
 
 @struct.dataclass
 class SlicedSymmetricMatrix:
@@ -534,16 +538,7 @@ class Preconditioner:
         return jnp.reshape(merged_grad, self._original_shape)
 
 
-def distributed_shampoo(
-        block_size,
-        beta1=0.9,
-        beta2=0.999,
-        matrix_epsilon=1e-6,
-        start_preconditioning_step=5,
-        preconditioning_compute_steps=1,
-        statistics_compute_steps=1,
-        inverse_failure_threshold=0.1,
-        skip_preconditioning_dim_size_gt=4096):
+def distributed_shampoo(ctx: Context):
     """Distributed Shampoo optimizer.
 
     Distributed Shampoo is a second-order preconditioned method (concretely, a
@@ -584,18 +579,19 @@ def distributed_shampoo(
     Returns:
       a GradientTransformation.
     """
-    pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=matrix_epsilon, precision=lax.Precision.HIGHEST)
+    pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=ctx.optimizer.epsilon,
+                                 precision=lax.Precision.HIGHEST)
 
     def init_fn(params):
         """Initialise the optimiser's state."""
 
         def _init(param):
-            preconditioner = Preconditioner(param, block_size)
+            preconditioner = Preconditioner(param, ctx.optimizer.block_size)
             statistics = []
             preconditioners = []
             if not _skip_preconditioning(param):
                 shapes = preconditioner.shapes_for_preconditioners()
-                statistics = [matrix_epsilon * jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
+                statistics = [ctx.optimizer.epsilon * jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
                 preconditioners = [jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
 
             diagonal_statistics = []
@@ -609,20 +605,21 @@ def distributed_shampoo(
         return ShampooState(count=jnp.zeros([], jnp.int32), stats=jax.tree_map(_init, params))
 
     def _skip_preconditioning(param):
-        return len(param.shape) < 1 or any([s > skip_preconditioning_dim_size_gt for s in param.shape])
+        return len(param.shape) < 1 or any([s > ctx.optimizer.skip_preconditioning_dim_size_gt for s in param.shape])
 
     def _compute_stats(grad, state, param, step):
         """Compute per-parameter statistics."""
-        preconditioner = Preconditioner(param, block_size)
+        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
         if not _skip_preconditioning(param):
             def compute_updated_statistics():
                 new_stats = preconditioner.statistics_from_grad(grad)
                 new_stats_accumulators = []
                 for stat, stat_accumulator in zip(new_stats, state.statistics):
-                    new_stats_accumulators.append(beta2 * stat_accumulator + (1.0 - beta2) * stat)
+                    new_stats_accumulators.append(
+                        ctx.optimizer.adam_beta2 * stat_accumulator + (1.0 - ctx.optimizer.adam_beta2) * stat)
                 return new_stats_accumulators
 
-            perform_step = step % statistics_compute_steps == 0
+            perform_step = step % ctx.optimizer.statistics_compute_steps == 0
             init_state = state.statistics
             new_statistics = list(efficient_cond(perform_step, compute_updated_statistics, init_state))
             return ParameterStats(state.diagonal_statistics, new_statistics, state.preconditioners,
@@ -662,13 +659,13 @@ def distributed_shampoo(
             return _matrix_inverse_pth_root_vmap(jnp.stack(packed_statistics), jnp.stack(exponents))
 
         preconditioners_init = packed_statistics
-        errors_init = ([inverse_failure_threshold] * len(packed_statistics))
+        errors_init = ([INVERSE_FAILURE_THRESHOLD] * len(packed_statistics))
         init_state = [preconditioners_init, errors_init]
-        perform_step = step % preconditioning_compute_steps == 0
+        perform_step = step % ctx.optimizer.preconditioning_compute_steps == 0
         preconditioners_flat, errors_flat = efficient_cond(perform_step, _internal_inverse_pth_root_all, init_state)
 
         def _skip(error):
-            return jnp.logical_or(jnp.isnan(error), error >= inverse_failure_threshold).astype(error.dtype)
+            return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
 
         def _select_preconditioner(error, new_p, old_p):
             return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
@@ -704,7 +701,7 @@ def distributed_shampoo(
         new_states = []
         for state, new_preconditioners, new_errors in zip(states, preconditioners_for_states, errors_for_states):
             if state.statistics:
-                new_errors = jnp.where(jnp.logical_and(new_errors > 0.0, new_errors != inverse_failure_threshold),
+                new_errors = jnp.where(jnp.logical_and(new_errors > 0.0, new_errors != INVERSE_FAILURE_THRESHOLD),
                                        new_errors, state.training_metrics.inverse_pth_root_errors)
             new_training_metrics = TrainingMetrics(new_errors)
             new_states.append(ParameterStats(state.diagonal_statistics, state.statistics, new_preconditioners,
@@ -735,7 +732,7 @@ def distributed_shampoo(
             num_statistics_per_state.append(num_statistics)
             original_shapes_for_state = []
             if num_statistics > 0:
-                preconditioner = Preconditioner(param, block_size)
+                preconditioner = Preconditioner(param, ctx.optimizer.block_size)
                 for statistic in state.statistics:
                     exponents.append(preconditioner.exponent_for_preconditioner())
                     original_shapes_for_state.append(statistic.shape)
@@ -750,7 +747,7 @@ def distributed_shampoo(
 
     def _transform_grad(grad, state, param, step):
         """Transform per-parameter gradients."""
-        preconditioner = Preconditioner(param, block_size)
+        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
         sgd_update = grad
         new_diagonal_statistics = state.diagonal_statistics.to_float()
         grafting_update = sgd_update
@@ -770,9 +767,9 @@ def distributed_shampoo(
         shampoo_update_with_wd = shampoo_update
         grafting_update_with_wd = grafting_update
 
-        shampoo_update_with_wd_momentum = state.momentum.to_float() * beta1 + shampoo_update_with_wd
-        grafting_update_with_wd_momentum = state.diagonal_momentum.to_float() * beta1 + grafting_update_with_wd
-        run_shampoo = (step >= start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
+        shampoo_update_with_wd_momentum = state.momentum.to_float() * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
+        grafting_update_with_wd_momentum = state.diagonal_momentum.to_float() * ctx.optimizer.adam_beta1 + grafting_update_with_wd
+        run_shampoo = (step >= ctx.optimizer.start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
         update = run_shampoo * shampoo_update_with_wd_momentum + (1.0 - run_shampoo) * grafting_update_with_wd_momentum
 
         new_diagonal_momentum = grafting_update_with_wd_momentum

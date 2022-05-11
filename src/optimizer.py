@@ -57,15 +57,10 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
 
 
-def _shampoo_optimizer(ctx: Context):
-    return distributed_shampoo(ctx.optimizer.block_size, ctx.optimizer.adam_beta1, ctx.optimizer.adam_beta2,
-                               ctx.optimizer.epsilon, ctx.optimizer.start_preconditioning_step,
-                               ctx.optimizer.preconditioning_compute_steps, ctx.optimizer.statistics_compute_steps,
-                               skip_preconditioning_dim_size_gt=ctx.optimizer.skip_preconditioning_dim_size_gt)
 
 
 def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    _, compute_stats, compute_preconditioners, transform_grad = _shampoo_optimizer(ctx)
+    _, compute_stats, compute_preconditioners, transform_grad = distributed_shampoo(ctx)
     new_stat = compute_stats(grad, ctx.parameters['/shampoo/' + param_name], ctx.parameters[param_name],
                              ctx.parameters['/shampoo/count'])  # of type shampoo.ParameterStats
     new_stat = compute_preconditioners([new_stat], [ctx.parameters[param_name]], ctx.parameters['/shampoo/count'])[0]
@@ -93,7 +88,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
     if ctx.is_initializing:
-        state = _shampoo_optimizer(ctx)[0](grads)
+        state = distributed_shampoo(ctx)[0](grads)
         ctx.parameters['/shampoo/count'] = state.count
         for k, v in state.stats.items():
             ctx.parameters['/shampoo/' + k] = v
