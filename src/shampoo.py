@@ -139,31 +139,6 @@ def find_num_blocks(block_rows_concat):
 _MAT_INV_PTH_ROOT_DTYPE = jnp.float64
 
 
-@struct.dataclass
-class TrainingMetrics:
-    inverse_pth_root_errors: chex.Array  # Error for inverse-pth roots.
-    # TODO(rohananil): Add more important metrics to track during training.
-
-
-# Per parameter optimizer state used in data-parallel training.
-class ParameterStats(NamedTuple):
-    """State associated to each parameter of the model being trained."""
-    diagonal_statistics: chex.Array  # Accumulator for diagonal preconditioner
-    statistics: List[Any]  # Statistics (QuantizedValue, chex.Array)
-    preconditioners: List[Any]  # Preconditioners (QuantizedValue, chex.Array)
-    diagonal_momentum: chex.Array  # Momentum for the diagonal preconditioner
-    momentum: chex.Array  # Momentum for the shampoo preconditioner
-    training_metrics: TrainingMetrics  # Metrics (optional for training).
-
-
-def init_training_metrics(num_statistics):
-    # Since the downstream apis expect a jnp.array - we create a dummy one if
-    # num_statistics=0.
-    if not num_statistics:
-        return TrainingMetrics(jnp.array(0, jnp.float32))
-    else:
-        return TrainingMetrics(jnp.zeros([num_statistics], jnp.float32))
-
 
 def power_iteration(matrix, num_iters=100, error_tolerance=1e-6, ):
     r"""Power iteration algorithm.
@@ -522,17 +497,25 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
             statistics = [ctx.optimizer.epsilon * jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
             preconditioners = [jnp.eye(s[0], dtype=jnp.float32) for s in shapes]
 
-        diagonal_statistics = []
-
         momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
         diagonal_momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
-        ctx.parameters['/shampoo/' + param_name] = ParameterStats(diagonal_statistics, statistics, preconditioners,
-                                                                  diagonal_momentum, momentum,
-                                                                  init_training_metrics(len(statistics)))
+        ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = diagonal_momentum
+        ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum
+        for i, stat in enumerate(statistics):
+            ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
+        for i, prec in enumerate(preconditioners):
+            ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
 
         return jnp.zeros_like(grad)
 
-    state = ctx.parameters['/shampoo/' + param_name]
+    statistics = [(key, param) for key, param in ctx.parameters.items() if
+                  key.startswith(f'/shampoo/{param_name}/statistics_')]
+    statistics = [param for _, param in sorted(statistics, key=lambda x: int(x[0].split('_')[-1]))]
+    preconditioners = [(key, param) for key, param in ctx.parameters.items() if
+                       key.startswith(f'/shampoo/{param_name}/preconditioners_')]
+    preconditioners = [param for _, param in sorted(preconditioners, key=lambda x: int(x[0].split('_')[-1]))]
+    diagonal_momentum = ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum']
+    momentum = ctx.parameters[f'/shampoo/{param_name}/momentum']
     param = ctx.parameters[param_name]
     step = ctx.parameters['/shampoo/count']
     preconditioner = Preconditioner(param, ctx.optimizer.block_size)
@@ -540,18 +523,16 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         def compute_updated_statistics():
             new_stats = preconditioner.statistics_from_grad(grad)
             new_stats_accumulators = []
-            for stat, stat_accumulator in zip(new_stats, state.statistics):
+            for stat, stat_accumulator in zip(new_stats, statistics):
                 new_stats_accumulators.append(
                     ctx.optimizer.adam_beta2 * stat_accumulator + (1.0 - ctx.optimizer.adam_beta2) * stat)
             return new_stats_accumulators
 
         perform_step = step % ctx.optimizer.statistics_compute_steps == 0
-        init_state = state.statistics
+        init_state = statistics
         new_statistics = list(efficient_cond(perform_step, compute_updated_statistics, init_state))
     else:
-        new_statistics = [[]] * len(state.statistics)
-    state = ParameterStats(state.diagonal_statistics, new_statistics, state.preconditioners,
-                           state.diagonal_momentum, state.momentum, state.training_metrics)
+        new_statistics = [[]] * len(statistics)
 
     statistics = []
     original_shapes = []
@@ -560,19 +541,19 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     prev_preconditioners = []
 
     original_shapes_for_state = []
-    if len(state.statistics) > 0:
+    if len(new_statistics) > 0:
         preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-        for statistic in state.statistics:
+        for statistic in new_statistics:
             exponents.append(preconditioner.exponent_for_preconditioner())
             original_shapes_for_state.append(statistic.shape)
             max_size = max(max_size, statistic.shape[0])
 
-        statistics.extend(state.statistics)
-        prev_preconditioners.extend(state.preconditioners)
+        statistics.extend(new_statistics)
+        prev_preconditioners.extend(preconditioners)
         original_shapes.extend(original_shapes_for_state)
-    num_statistics = len(state.statistics)
+    num_statistics = len(new_statistics)
     if not statistics:
-        return state
+        return jnp.zeros_like(grad)
 
     # Pad statistics and exponents to next multiple of num_devices.
     packed_statistics = [pad_square_matrix(stat, max_size) for stat in statistics]
@@ -602,30 +583,18 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     idx = 0
     if num_statistics == 0:
         new_preconditioners = []
-        new_errors = jnp.array(0, jnp.float32)
     else:
         preconditioners_for_state = new_preconditioners_flat[idx:idx + num_statistics]
         new_preconditioners = preconditioners_for_state
-
-        errors_for_state = jnp.stack(new_errors_flat[idx:idx + num_statistics])
-        new_errors = errors_for_state
-
         idx += num_statistics
-    if state.statistics:
-        new_errors = jnp.where(jnp.logical_and(new_errors > 0.0, new_errors != INVERSE_FAILURE_THRESHOLD),
-                               new_errors, state.training_metrics.inverse_pth_root_errors)
-    new_training_metrics = TrainingMetrics(new_errors)
-    state = ParameterStats(state.diagonal_statistics, state.statistics, new_preconditioners, state.diagonal_momentum,
-                           state.momentum, new_training_metrics)
 
     preconditioner = Preconditioner(param, ctx.optimizer.block_size)
     sgd_update = grad
-    new_diagonal_statistics = state.diagonal_statistics.astype(jnp.float32)
     grafting_update = sgd_update
 
     precond_grad = grad
     if not _skip_preconditioning(param):
-        precond_grad = preconditioner.preconditioned_grad(precond_grad, state.preconditioners)
+        precond_grad = preconditioner.preconditioned_grad(precond_grad, new_preconditioners)
     else:
         precond_grad = grafting_update
 
@@ -638,17 +607,21 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     shampoo_update_with_wd = shampoo_update
     grafting_update_with_wd = grafting_update
 
-    shampoo_update_with_wd_momentum = state.momentum.astype(jnp.float32) * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
-    grafting_update_with_wd_momentum = state.diagonal_momentum.astype(jnp.float32) * ctx.optimizer.adam_beta1 + grafting_update_with_wd
+    shampoo_update_with_wd_momentum = momentum.astype(
+        jnp.float32) * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
+    grafting_update_with_wd_momentum = diagonal_momentum.astype(
+        jnp.float32) * ctx.optimizer.adam_beta1 + grafting_update_with_wd
     run_shampoo = (step >= ctx.optimizer.start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
     update = run_shampoo * shampoo_update_with_wd_momentum + (1.0 - run_shampoo) * grafting_update_with_wd_momentum
 
     new_diagonal_momentum = grafting_update_with_wd_momentum
     new_momentum = shampoo_update_with_wd_momentum
 
-    param_stats = ParameterStats(new_diagonal_statistics, state.statistics, state.preconditioners,
-                                 new_diagonal_momentum.astype(jnp.bfloat16), new_momentum.astype(jnp.bfloat16),
-                                 state.training_metrics)
-    ctx.parameters['/shampoo/' + param_name] = param_stats
+    ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = new_diagonal_momentum.astype(jnp.bfloat16)
+    ctx.parameters[f'/shampoo/{param_name}/momentum'] = new_momentum.astype(jnp.bfloat16)
+    for i, stat in enumerate(new_statistics):
+        ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
+    for i, prec in enumerate(new_preconditioners):
+        ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
 
     return update
