@@ -141,96 +141,6 @@ def find_num_blocks(block_rows_concat):
     return num_blocks_from_total_blocks(total_blocks)
 
 
-# pylint:disable=no-value-for-parameter
-@struct.dataclass
-class QuantizedValue:
-    """State associated with quantized value."""
-    quantized: chex.Array
-    diagonal: chex.Array  # Diagonal (if extract_diagonal is set)
-    bucket_size: chex.Array
-    quantized_dtype: jnp.dtype = struct.field(pytree_node=False)  # Dtype for the quantized value.
-    extract_diagonal: bool = struct.field(pytree_node=False)  # In case its centered.
-    shape: Any = struct.field(pytree_node=False)  # Shape of the tensor.
-
-    @classmethod
-    def from_float_value(cls, fvalue, quantized_dtype, extract_diagonal=False):
-        if isinstance(fvalue, list) and not fvalue:
-            return QuantizedValue([], [], [], quantized_dtype, extract_diagonal, [])
-        quantized, diagonal_fvalue, bucket_size = QuantizedValue.quantize(
-            fvalue, quantized_dtype, extract_diagonal)
-        return QuantizedValue(quantized, diagonal_fvalue, bucket_size,
-                              quantized_dtype, extract_diagonal,
-                              list(quantized.shape))
-
-    # Quantization is from Lingvo JAX optimizers.
-    # We extend it for int16 quantization of PSD matrices.
-    @classmethod
-    def quantize(cls, fvalue, quantized_dtype, extract_diagonal=False):
-        """Returns quantized value and the bucket."""
-        if quantized_dtype == jnp.float32:
-            return fvalue, [], []
-        elif quantized_dtype == jnp.bfloat16:
-            return fvalue.astype(jnp.bfloat16), [], []
-
-        float_dtype = fvalue.dtype
-        if quantized_dtype == jnp.int8:
-            # value -128 is not used.
-            num_buckets = jnp.array(127.0, dtype=float_dtype)
-        elif quantized_dtype == jnp.int16:
-            # value -32768 is not used.
-            num_buckets = jnp.array(32767.0, dtype=float_dtype)
-        else:
-            raise ValueError(f'Quantized dtype {quantized_dtype} not supported.')
-        # max value is mapped to num_buckets
-
-        if extract_diagonal and fvalue.ndim != 2:
-            raise ValueError(
-                f'Input array {fvalue} must be 2D to work with extract_diagonal.')
-
-        diagonal_fvalue = []
-        if extract_diagonal:
-            diagonal_fvalue = jnp.diag(fvalue)
-            # Remove the diagonal entries.
-            fvalue = fvalue - jnp.diag(diagonal_fvalue)
-
-        # TODO(rohananil): Extend this by making use of information about the blocks
-        # SM3 style which will be useful for diagonal statistics
-        # We first decide the scale.
-        if fvalue.ndim < 1:
-            raise ValueError(
-                f'Input array {fvalue} must have a strictly positive number of '
-                'dimensions.')
-
-        max_abs = jnp.max(jnp.abs(fvalue), axis=0)
-        bucket_size = max_abs / num_buckets
-        bs_expanded = bucket_size[jnp.newaxis, Ellipsis]
-        # To avoid divide by 0.0
-        bs_nonzero = jnp.where(bs_expanded > 0.0, bs_expanded,
-                               jnp.ones_like(bs_expanded))
-        ratio = fvalue / bs_nonzero
-        # We use rounding to remove bias.
-        quantized = jnp.round(ratio)
-        return quantized.astype(quantized_dtype), diagonal_fvalue, bucket_size
-
-    def to_float(self):
-        """Returns the float value."""
-        if isinstance(self.quantized, list) and not self.quantized:
-            return self.quantized
-
-        if self.quantized_dtype == jnp.float32:
-            return self.quantized
-
-        if self.quantized_dtype == jnp.bfloat16:
-            return self.quantized.astype(jnp.float32)
-
-        float_dtype = self.bucket_size.dtype
-        bucket_size = self.bucket_size[jnp.newaxis, Ellipsis]
-        val = self.quantized.astype(float_dtype) * bucket_size
-        if self.extract_diagonal:
-            val += jnp.diag(self.diagonal)
-        return val
-
-
 # Dtype for inverse-pth root routine
 # Switch to f64 if you have hardware that supports it. Enable the jax flag
 # jax_enable_x64 for this to work, otherwise it will default to float32.
@@ -246,11 +156,11 @@ class TrainingMetrics:
 # Per parameter optimizer state used in data-parallel training.
 class ParameterStats(NamedTuple):
     """State associated to each parameter of the model being trained."""
-    diagonal_statistics: QuantizedValue  # Accumulator for diagonal preconditioner
+    diagonal_statistics: chex.Array  # Accumulator for diagonal preconditioner
     statistics: List[Any]  # Statistics (QuantizedValue, chex.Array)
     preconditioners: List[Any]  # Preconditioners (QuantizedValue, chex.Array)
-    diagonal_momentum: QuantizedValue  # Momentum for the diagonal preconditioner
-    momentum: QuantizedValue  # Momentum for the shampoo preconditioner
+    diagonal_momentum: chex.Array  # Momentum for the diagonal preconditioner
+    momentum: chex.Array  # Momentum for the shampoo preconditioner
     training_metrics: TrainingMetrics  # Metrics (optional for training).
 
 
@@ -481,25 +391,6 @@ def pad_square_matrix(mat, max_size):
     return mat
 
 
-def pad_vector(vec, max_size):
-    """Pad a vector to a max_size.
-
-    Args:
-      vec: a vector to pad.
-      max_size: matrix size requested.
-
-    Returns:
-      Given V returns [V, 0]
-    """
-    size = vec.shape[0]
-    assert size <= max_size
-    if size == max_size:
-        return vec
-    pad_size = max_size - size
-    zs1 = jnp.zeros([pad_size], dtype=vec.dtype)
-    return jnp.concatenate([vec, zs1], 0)
-
-
 def efficient_cond(predicate, compute_fn, init_state, *args, **kwargs):
     """Avoids wasteful buffer allocation with XLA."""
 
@@ -643,28 +534,6 @@ class Preconditioner:
         return jnp.reshape(merged_grad, self._original_shape)
 
 
-def batch(x, num_devices):
-    """Batch `x` so that so that leading axis is num_devices."""
-    n = len(x)
-    b = int(n / num_devices)
-    return jnp.stack([jnp.stack(x[idx:idx + b]) for idx in range(0, n, b)])
-
-
-def unbatch(batched_values):
-    """Unbatch values across leading axis and return a list of elements."""
-    b1, b2 = batched_values.shape[0], batched_values.shape[1]
-    results = []
-    for v_array in jnp.split(batched_values, indices_or_sections=b1, axis=0):
-        v_array = jnp.squeeze(v_array)
-        # b2 = batches (number of preconditioner computation) per core.
-        if b2 > 1:
-            for v in jnp.split(v_array, indices_or_sections=b2, axis=0):
-                results.append(jnp.squeeze(v))
-        else:
-            results.append(v_array)
-    return results
-
-
 def distributed_shampoo(
         block_size,
         beta1=0.9,
@@ -717,15 +586,6 @@ def distributed_shampoo(
     """
     pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=matrix_epsilon, precision=lax.Precision.HIGHEST)
 
-    def _to_float(maybe_quantized):
-        if isinstance(maybe_quantized, QuantizedValue):
-            return maybe_quantized.to_float()
-        else:
-            return maybe_quantized
-
-    def _quantize_momentum(momentum_statistics):
-        return QuantizedValue.from_float_value(momentum_statistics, jnp.bfloat16)
-
     def init_fn(params):
         """Initialise the optimiser's state."""
 
@@ -740,12 +600,10 @@ def distributed_shampoo(
 
             diagonal_statistics = []
 
-            momentum = _quantize_momentum(jnp.zeros_like(param))
-            diagonal_momentum = _quantize_momentum(jnp.zeros_like(param))
+            momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
+            diagonal_momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
 
-            return ParameterStats(QuantizedValue.from_float_value(diagonal_statistics, jnp.float32),
-                                  statistics,
-                                  preconditioners, diagonal_momentum,
+            return ParameterStats(diagonal_statistics, statistics, preconditioners, diagonal_momentum,
                                   momentum, init_training_metrics(len(statistics)))
 
         return ShampooState(count=jnp.zeros([], jnp.int32), stats=jax.tree_map(_init, params))
@@ -756,41 +614,23 @@ def distributed_shampoo(
     def _compute_stats(grad, state, param, step):
         """Compute per-parameter statistics."""
         preconditioner = Preconditioner(param, block_size)
-        new_statistics = [[]] * len(state.statistics)
         if not _skip_preconditioning(param):
             def compute_updated_statistics():
                 new_stats = preconditioner.statistics_from_grad(grad)
                 new_stats_accumulators = []
                 for stat, stat_accumulator in zip(new_stats, state.statistics):
-                    new_stats_accumulators.append(beta2 * _to_float(stat_accumulator) + (1.0 - beta2) * stat)
+                    new_stats_accumulators.append(beta2 * stat_accumulator + (1.0 - beta2) * stat)
                 return new_stats_accumulators
 
-            if statistics_compute_steps > 1:
-                perform_step = step % statistics_compute_steps == 0
-                init_state = state.statistics
-                new_statistics = list(
-                    efficient_cond(perform_step, compute_updated_statistics,
-                                   init_state))
-            else:
-                new_statistics = compute_updated_statistics()
-        return ParameterStats(state.diagonal_statistics, new_statistics,
-                              state.preconditioners, state.diagonal_momentum,
-                              state.momentum, state.training_metrics)
+            perform_step = step % statistics_compute_steps == 0
+            init_state = state.statistics
+            new_statistics = list(efficient_cond(perform_step, compute_updated_statistics, init_state))
+            return ParameterStats(state.diagonal_statistics, new_statistics, state.preconditioners,
+                                  state.diagonal_momentum,
+                                  state.momentum, state.training_metrics)
 
     def _matrix_inverse_pth_root_vmap(xs, ps):
         return jax.vmap(pth_root)(xs, ps)
-
-    def _quantized_matrix_inverse_pth_root_vmap(qxs, qds, qbs, ps):
-        def _quantized_to_float(qx, qd, qb):
-            return QuantizedValue(qx, qd, qb, qx.dtype, True, list(qx.shape)).to_float()
-
-        def matrix_inverse_pth_root_wrapper(qx, qd, qb, p):
-            v = _quantized_to_float(qx, qd, qb)
-            preconditioner, error = pth_root(v, p)
-            qp = QuantizedValue.from_float_value(preconditioner, qx.dtype, True)
-            return qp.quantized, qp.diagonal, qp.bucket_size, error
-
-        return jax.vmap(matrix_inverse_pth_root_wrapper)(qxs, qds, qbs, ps)
 
     def _pmap_compute_preconditioners(states, step, statistics,
                                       num_statistics_per_state, original_shapes,
@@ -811,39 +651,21 @@ def distributed_shampoo(
         Returns:
           New optimizer states after computing the preconditioner.
         """
-        num_devices = 1
+        if not statistics:
+            return states
+
         num_statistics = len(statistics)
         # Pad statistics and exponents to next multiple of num_devices.
         packed_statistics = [pad_square_matrix(stat, max_size) for stat in statistics]
-        to_pad = -num_statistics % num_devices
-        packed_statistics.extend([jnp.eye(max_size, dtype=packed_statistics[0].dtype) for _ in range(to_pad)])
-        exponents.extend([1 for _ in range(to_pad)])
-
-        if not packed_statistics:
-            return states
-
-        all_statistics = batch(packed_statistics, num_devices)
-        all_exponents = batch(exponents, num_devices)
 
         def _internal_inverse_pth_root_all():
-            current_replica = 0
-            preconditioners, errors = _matrix_inverse_pth_root_vmap(all_statistics[current_replica],
-                                                                    all_exponents[current_replica])
-            preconditioners_flat = unbatch(preconditioners)
-            errors_flat = unbatch(errors)
-            return preconditioners_flat, errors_flat
+            return _matrix_inverse_pth_root_vmap(jnp.stack(packed_statistics), jnp.stack(exponents))
 
-        if preconditioning_compute_steps == 1:
-            preconditioners_flat, errors_flat = _internal_inverse_pth_root_all()
-        else:
-            # Passing statistics instead of preconditioners as they are similarly
-            # shaped tensors. Note statistics will be ignored as we are passing in
-            # a large init value for error.
-            preconditioners_init = packed_statistics
-            errors_init = ([inverse_failure_threshold] * len(packed_statistics))
-            init_state = [preconditioners_init, errors_init]
-            perform_step = step % preconditioning_compute_steps == 0
-            preconditioners_flat, errors_flat = efficient_cond(perform_step, _internal_inverse_pth_root_all, init_state)
+        preconditioners_init = packed_statistics
+        errors_init = ([inverse_failure_threshold] * len(packed_statistics))
+        init_state = [preconditioners_init, errors_init]
+        perform_step = step % preconditioning_compute_steps == 0
+        preconditioners_flat, errors_flat = efficient_cond(perform_step, _internal_inverse_pth_root_all, init_state)
 
         def _skip(error):
             return jnp.logical_or(jnp.isnan(error), error >= inverse_failure_threshold).astype(error.dtype)
@@ -878,149 +700,6 @@ def distributed_shampoo(
                 assert len(state.statistics) == len(errors_for_state)
                 errors_for_states.append(errors_for_state)
 
-                idx += num_statistics
-        new_states = []
-        for state, new_preconditioners, new_errors in zip(
-                states, preconditioners_for_states, errors_for_states):
-            if state.statistics:
-                new_errors = jnp.where(jnp.logical_and(new_errors > 0.0, new_errors != inverse_failure_threshold),
-                                       new_errors, state.training_metrics.inverse_pth_root_errors)
-            new_training_metrics = TrainingMetrics(new_errors)
-            new_states.append(ParameterStats(state.diagonal_statistics, state.statistics, new_preconditioners,
-                                             state.diagonal_momentum, state.momentum, new_training_metrics))
-
-        return new_states
-
-    def _pmap_quantized_compute_preconditioners(states, step, statistics, num_statistics_per_state, original_shapes,
-                                                exponents, max_size, prev_preconditioners):
-        """Computes preconditioners for given statistics in states in PMAP mode.
-
-        For quantization, each statistic is represented by three values:
-          quantized matrix, diagonal, and bucket sizes, we run inverse pth-roots
-          without ever recreating the original matrix in f32.
-
-        Args:
-          states: A list of optimizer states.
-          step: Current step number
-          statistics: A list of statistics for all variables (for every dim)
-          num_statistics_per_state: Number of statistis per state to reconstruct
-            output states.
-          original_shapes: A list of shapes of the statistics.
-          exponents: Exponent power to use for inverse-pth roots.
-          max_size: Maximum dim of the statistics to pad.
-          prev_preconditioners: Previously available preconditioner.
-
-        Returns:
-          New optimizer states after computing the preconditioner.
-        """
-        num_devices = 1
-        num_statistics = len(statistics)
-        # Complexity here is around: shapes needing be statically shaped,
-        # our custom quantization type requires a different type of packing.
-
-        # Parallel tensors:
-        # quantized [dxd]
-        # diagonals [d] f32
-        # bucket_sizes [d] f32
-        packed_quantized_statistics = [pad_square_matrix(stat.quantized, max_size) for stat in statistics]
-        packed_quantized_diagonals = [pad_vector(stat.diagonal, max_size) for stat in statistics]
-        packed_quantized_bucket_sizes = [pad_vector(stat.bucket_size, max_size) for stat in statistics]
-
-        to_pad = -num_statistics % num_devices
-        padded_eye = jnp.eye(max_size, dtype=jnp.float32)
-        quantized_eye = QuantizedValue.from_float_value(padded_eye, jnp.float32, True)
-        packed_quantized_statistics.extend([quantized_eye.quantized for _ in range(to_pad)])
-        packed_quantized_diagonals.extend([quantized_eye.diagonal for _ in range(to_pad)])
-        packed_quantized_bucket_sizes.extend([quantized_eye.bucket_size for _ in range(to_pad)])
-        exponents.extend([1 for _ in range(to_pad)])
-
-        if not packed_quantized_statistics:
-            return states
-
-        all_quantized_statistics = batch(packed_quantized_statistics, num_devices)
-        all_quantized_diagonals = batch(packed_quantized_diagonals, num_devices)
-        all_quantized_bucket_sizes = batch(packed_quantized_bucket_sizes, num_devices)
-        all_exponents = batch(exponents, num_devices)
-
-        def _internal_inverse_pth_root_all():
-            current_replica = 0
-            (quantized_preconditioners, quantized_diagonals, quantized_bucket_sizes, errors
-             ) = (_quantized_matrix_inverse_pth_root_vmap(all_quantized_statistics[current_replica],
-                                                          all_quantized_diagonals[current_replica],
-                                                          all_quantized_bucket_sizes[current_replica],
-                                                          all_exponents[current_replica]))
-            quantized_preconditioners_flat = unbatch(quantized_preconditioners)
-            quantized_diagonals_flat = unbatch(quantized_diagonals)
-            quantized_bucket_sizes_flat = unbatch(quantized_bucket_sizes)
-            errors_flat = unbatch(errors)
-            return quantized_preconditioners_flat, quantized_diagonals_flat, quantized_bucket_sizes_flat, errors_flat
-
-        if preconditioning_compute_steps == 1:
-            (quantized_preconditioners_flat, quantized_diagonals_flat, quantized_bucket_sizes_flat, errors_flat
-             ) = _internal_inverse_pth_root_all()
-        else:
-            # Passing statistics instead of preconditioners as they are similarly
-            # shaped tensors. Note statistics will be ignored as we are passing in
-            # a large init value for error.
-            quantized_preconditioners_init = packed_quantized_statistics
-            quantized_diagonals_init = packed_quantized_diagonals
-            quantized_bucket_sizes_init = packed_quantized_bucket_sizes
-            errors_init = [inverse_failure_threshold] * len(quantized_preconditioners_init)
-            init_state = [quantized_preconditioners_init, quantized_diagonals_init, quantized_bucket_sizes_init,
-                          errors_init]
-            perform_step = step % preconditioning_compute_steps == 0
-            (quantized_preconditioners_flat, quantized_diagonals_flat, quantized_bucket_sizes_flat, errors_flat
-             ) = (efficient_cond(perform_step, _internal_inverse_pth_root_all, init_state))
-
-        def _skip(error):
-            return jnp.logical_or(jnp.isnan(error), error >= inverse_failure_threshold).astype(error.dtype)
-
-        def _select_preconditioner(error, new_p, old_p):
-            return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
-
-        new_quantized_preconditioners_flat = []
-        new_quantized_diagonals_flat = []
-        new_quantized_bucket_sizes_flat = []
-        new_errors_flat = []
-        for p, d, b, shape, prev_p, error in zip(quantized_preconditioners_flat, quantized_diagonals_flat,
-                                                 quantized_bucket_sizes_flat, original_shapes,
-                                                 prev_preconditioners, errors_flat):
-            new_quantized_preconditioners_flat.append(_select_preconditioner(error, p[:shape[0], :shape[1]],
-                                                                             prev_p.quantized))
-            new_quantized_diagonals_flat.append(_select_preconditioner(error, d[:shape[0]], prev_p.diagonal))
-            new_quantized_bucket_sizes_flat.append(_select_preconditioner(error, b[:shape[0]], prev_p.bucket_size))
-            new_errors_flat.append(error)
-
-        assert len(states) == len(num_statistics_per_state)
-        assert len(new_quantized_preconditioners_flat) == num_statistics
-        assert len(new_quantized_diagonals_flat) == num_statistics
-        assert len(new_quantized_bucket_sizes_flat) == num_statistics
-
-        # Add back empty preconditioners so we that we can set the optimizer state.
-        preconditioners_for_states = []
-        errors_for_states = []
-        idx = 0
-        for num_statistics, state in zip(num_statistics_per_state, states):
-            if num_statistics == 0:
-                preconditioners_for_states.append([])
-                errors_for_states.append(jnp.array(0, jnp.float32))
-            else:
-                quantized_preconditioners_for_state = new_quantized_preconditioners_flat[idx:idx + num_statistics]
-                quantized_diagonals_for_state = new_quantized_diagonals_flat[idx:idx + num_statistics]
-                quantized_bucket_sizes_for_state = new_quantized_bucket_sizes_flat[idx:idx + num_statistics]
-                errors_for_state = jnp.stack(new_errors_flat[idx:idx + num_statistics])
-
-                assert len(state.statistics) == len(quantized_preconditioners_for_state)
-                assert len(state.statistics) == len(quantized_diagonals_for_state)
-                assert len(state.statistics) == len(quantized_bucket_sizes_for_state)
-                assert len(state.statistics) == len(errors_for_state)
-
-                quantized_preconditioners = []
-                for qv, qd, qb in zip(quantized_preconditioners_for_state, quantized_diagonals_for_state,
-                                      quantized_bucket_sizes_for_state):
-                    quantized_preconditioners.append(QuantizedValue(qv, qd, qb, qv.dtype, True, list(qv.shape)))
-                preconditioners_for_states.append(quantized_preconditioners)
-                errors_for_states.append(errors_for_state)
                 idx += num_statistics
         new_states = []
         for state, new_preconditioners, new_errors in zip(states, preconditioners_for_states, errors_for_states):
@@ -1100,7 +779,7 @@ def distributed_shampoo(
         new_momentum = shampoo_update_with_wd_momentum
 
         param_stats = ParameterStats(new_diagonal_statistics, state.statistics, state.preconditioners,
-                                     _quantize_momentum(new_diagonal_momentum), _quantize_momentum(new_momentum),
+                                     new_diagonal_momentum.astype(jnp.bfloat16), new_momentum.astype(jnp.bfloat16),
                                      state.training_metrics)
 
         return update, param_stats

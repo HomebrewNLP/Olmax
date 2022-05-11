@@ -67,7 +67,7 @@ def _shampoo_optimizer(ctx: Context):
 def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     _, compute_stats, compute_preconditioners, transform_grad = _shampoo_optimizer(ctx)
     new_stat = compute_stats(grad, ctx.parameters['/shampoo/' + param_name], ctx.parameters[param_name],
-                             ctx.parameters['/shampoo/count'])
+                             ctx.parameters['/shampoo/count'])  # of type shampoo.ParameterStats
     new_stat = compute_preconditioners([new_stat], [ctx.parameters[param_name]], ctx.parameters['/shampoo/count'])[0]
     grad, new_stat = transform_grad(grad, new_stat, ctx.parameters[param_name], ctx.parameters['/shampoo/count'])
     ctx.parameters['/shampoo/' + param_name] = new_stat
