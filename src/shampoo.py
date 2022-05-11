@@ -162,7 +162,7 @@ def mat_power(mat_m, p):
     return result
 
 
-def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_tolerance=1e-6, ):
+def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_tolerance=1e-6):
     """Computes `matrix^(-1/p)`, where `p` is a positive integer.
 
     This function uses the Coupled newton iterations algorithm for
@@ -424,8 +424,7 @@ class Preconditioner:
 
 
 def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=ctx.optimizer.epsilon,
-                                 precision=lax.Precision.HIGHEST)
+    pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=ctx.optimizer.epsilon)
     param = ctx.parameters[param_name]
 
     def _skip_preconditioning(param):
