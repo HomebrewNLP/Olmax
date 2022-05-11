@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from shampoo import distributed_shampoo
+from shampoo import shampoo
 from .backend import zero_param, assign, prefixed_name
 from .context import Context
 
@@ -58,17 +58,6 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
 
 
 
-
-def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    _, compute_stats, compute_preconditioners, transform_grad = distributed_shampoo(ctx)
-    new_stat = compute_stats(grad, ctx.parameters['/shampoo/' + param_name], ctx.parameters[param_name],
-                             ctx.parameters['/shampoo/count'])  # of type shampoo.ParameterStats
-    new_stat = compute_preconditioners([new_stat], [ctx.parameters[param_name]], ctx.parameters['/shampoo/count'])[0]
-    grad, new_stat = transform_grad(grad, new_stat, ctx.parameters[param_name], ctx.parameters['/shampoo/count'])
-    ctx.parameters['/shampoo/' + param_name] = new_stat
-    return grad
-
-
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
     wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
@@ -88,10 +77,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
     if ctx.is_initializing:
-        state = distributed_shampoo(ctx)[0](grads)
-        ctx.parameters['/shampoo/count'] = state.count
-        for k, v in state.stats.items():
-            ctx.parameters['/shampoo/' + k] = v
+        ctx.parameters['/shampoo/count'] = jnp.zeros()
 
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)

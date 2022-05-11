@@ -165,11 +165,6 @@ def init_training_metrics(num_statistics):
         return TrainingMetrics(jnp.zeros([num_statistics], jnp.float32))
 
 
-class ShampooState(NamedTuple):
-    count: chex.Array
-    stats: Any
-
-
 def power_iteration(matrix, num_iters=100, error_tolerance=1e-6, ):
     r"""Power iteration algorithm.
 
@@ -531,9 +526,11 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 
         momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
         diagonal_momentum = jnp.zeros_like(param).astype(jnp.bfloat16)
+        ctx.parameters['/shampoo/' + param_name] = ParameterStats(diagonal_statistics, statistics, preconditioners,
+                                                                  diagonal_momentum, momentum,
+                                                                  init_training_metrics(len(statistics)))
 
-        return ParameterStats(diagonal_statistics, statistics, preconditioners, diagonal_momentum, momentum,
-                              init_training_metrics(len(statistics)))
+        return jnp.zeros_like(grad)
 
     state = ctx.parameters['/shampoo/' + param_name]
     param = ctx.parameters[param_name]
