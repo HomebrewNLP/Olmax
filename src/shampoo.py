@@ -29,38 +29,37 @@
 
 import functools
 import itertools
-from typing import Any, List, NamedTuple
 
-import chex
 import jax
 import jax.numpy as jnp
 import numpy as np
-from flax import struct
 from jax import lax
 
 from context import Context
 
+# Dtype for inverse-pth root routine
+# Switch to f64 if you have hardware that supports it. Enable the jax flag
+# jax_enable_x64 for this to work, otherwise it will default to float32.
+_MAT_INV_PTH_ROOT_DTYPE = jnp.float64
 INVERSE_FAILURE_THRESHOLD = 0.1
 
 
-@struct.dataclass
-class SlicedSymmetricMatrix:
-    """A symmetric matrix represented by lower-triangular block row slices.
-    For example, the symmetric matrix M = [[a, b^T], [b, c]] would be represented
-    by the block rows a and [b, c].
-    The matrix may be batched, in which case each entry of block_rows may have
-    dimension greater than 2. The last two dimensions represent the rows and cols.
-    """
-    block_rows: List[jnp.ndarray]
-
-
 @jax.jit
-def materialize_matrix(symmetric_matrix):
-    """Returns a materialized symmetric matrix.
+def materialize_matrix_from_concat(block_rows_concat):
+    """Returns a materialized symmetric matrix from concatenated slices.
     Args:
-      symmetric_matrix: the matrix represented by lower-triangular block slices.
+      block_rows_concat: The matrix represented as the concatenated
+        lower-triangular blocks.
+      num_blocks: The number of block-rows used to represent the symmetric matrix.
+        If not specified, it is inferred from the shape of block_rows_concat.
     """
-    block_rows = symmetric_matrix.block_rows
+    num_blocks = find_num_blocks(block_rows_concat)
+
+    block_size = block_rows_concat.shape[-2]
+
+    block_rows = [block_rows_concat[Ellipsis, (k * (k + 1)) // 2 * block_size:
+                                              (((k + 1) * (k + 2)) // 2 + 1) * block_size]
+                  for k in range(num_blocks)]
     block_size = block_rows[0].shape[-2]
     num_blocks = len(block_rows)
 
@@ -74,45 +73,7 @@ def materialize_matrix(symmetric_matrix):
         for i in range(k + 1):
             off_diags[i].append(jnp.swapaxes(a=block_row[Ellipsis, i * block_size:(i + 1) * block_size], axis1=-1,
                                              axis2=-2))
-
     return jnp.block([row + row_t for row, row_t in zip(blocks[:-1], off_diags)] + [blocks[-1]])
-
-
-@functools.partial(jax.jit, static_argnames=("num_blocks"))
-def materialize_matrix_from_concat(block_rows_concat, num_blocks=None):
-    """Returns a materialized symmetric matrix from concatenated slices.
-    Args:
-      block_rows_concat: The matrix represented as the concatenated
-        lower-triangular blocks.
-      num_blocks: The number of block-rows used to represent the symmetric matrix.
-        If not specified, it is inferred from the shape of block_rows_concat.
-    """
-    if num_blocks is None:
-        num_blocks = find_num_blocks(block_rows_concat)
-
-    block_size = block_rows_concat.shape[-2]
-
-    block_rows = [block_rows_concat[Ellipsis, (k * (k + 1)) // 2 * block_size:
-                                              (((k + 1) * (k + 2)) // 2 + 1) * block_size]
-                  for k in range(num_blocks)]
-
-    return materialize_matrix(SlicedSymmetricMatrix(block_rows=block_rows))
-
-
-def num_blocks_from_total_blocks(total_blocks):
-    """Returns the number of blocks (i.e.
-    block rows) from the total blocks.
-    This is the inverse of the function x -> x*(x+1)/2.
-    For example, the matrix M = [[A, B^T], [B, C]] may be represented using a
-    total of 3 blocks ([A, B, C]). The number of corresponding block rows is 2.
-    Args:
-      total_blocks: The total blocks used to represent the matrix.
-    """
-    num_blocks = np.round((np.sqrt(8 * total_blocks + 1) - 1) / 2).astype(np.int32)
-    if (num_blocks * (num_blocks + 1)) / 2 != total_blocks:
-        raise ValueError(f"total_blocks={total_blocks} does not correspond to "
-                         f"a symmetric matrix. It must have the form total_blocks = x*(x+1)/2.")
-    return num_blocks
 
 
 def find_num_blocks(block_rows_concat):
@@ -130,14 +91,11 @@ def find_num_blocks(block_rows_concat):
     # Compute the number of square blocks used to represent the matrix.
     total_blocks = block_rows_concat.shape[-1] / block_rows_concat.shape[-2]
     # Determine the number of block rows by inverting y = x*(x+1)/2.
-    return num_blocks_from_total_blocks(total_blocks)
-
-
-# Dtype for inverse-pth root routine
-# Switch to f64 if you have hardware that supports it. Enable the jax flag
-# jax_enable_x64 for this to work, otherwise it will default to float32.
-_MAT_INV_PTH_ROOT_DTYPE = jnp.float64
-
+    num_blocks = np.round((np.sqrt(8 * total_blocks + 1) - 1) / 2).astype(np.int32)
+    if (num_blocks * (num_blocks + 1)) / 2 != total_blocks:
+        raise ValueError(f"total_blocks={total_blocks} does not correspond to "
+                         f"a symmetric matrix. It must have the form total_blocks = x*(x+1)/2.")
+    return num_blocks
 
 
 def power_iteration(matrix, num_iters=100, error_tolerance=1e-6, ):
@@ -270,8 +228,7 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
         new_mat_m_0 = damped_matrix * z
         new_error = jnp.max(jnp.abs(new_mat_m_0 - identity))
         new_mat_h_0 = identity * jnp.power(z, 1.0 / p)
-        init_state = tuple(
-            [0, new_mat_m_0, new_mat_h_0, new_mat_h_0, new_error, True])
+        init_state = tuple([0, new_mat_m_0, new_mat_h_0, new_mat_h_0, new_error, True])
         _, mat_m, mat_h, old_mat_h, error, convergence = lax.while_loop(_iter_condition, _iter_body, init_state)
         error = jnp.max(jnp.abs(mat_m - identity)).astype(jnp.float32)
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)
@@ -323,11 +280,9 @@ def pad_square_matrix(mat, max_size):
     """
     rows, cols = mat.shape
     if rows != cols:
-        raise ValueError("Must have rows == cols, instead got "
-                         f"rows={rows}, cols={cols}")
+        raise ValueError(f"Must have rows == cols, instead got rows={rows}, cols={cols}")
     if cols > max_size:
-        raise ValueError("Must have cols <= max_size. Instead got "
-                         f"cols={cols}, max_size={max_size}.")
+        raise ValueError(f"Must have cols <= max_size. Instead got cols={cols}, max_size={max_size}.")
     if rows == max_size:
         return mat
     pad_size = max_size - rows
@@ -353,10 +308,14 @@ def efficient_cond(predicate, compute_fn, init_state, *args, **kwargs):
     return tuple(jax.lax.while_loop(_iter_condition, _iter_body, tuple([predicate] + init_state))[1:])
 
 
-class BlockPartitioner:
-    """Partitions a tensor into smaller tensors."""
+class Preconditioner:
+    """Compute statistics/shape from gradients for preconditioning."""
 
     def __init__(self, param, block_size):
+        self._original_shape = param.shape
+        self._transformed_shape = param.shape
+        self._transformed_shape = merge_small_dims(self._original_shape, block_size)
+        param = jnp.reshape(param, self._transformed_shape)
         self._shape = param.shape
         self._splits = []
         split_sizes = []
@@ -410,17 +369,6 @@ class BlockPartitioner:
         assert len(partitions) == 1
         return partitions[0]
 
-
-class Preconditioner:
-    """Compute statistics/shape from gradients for preconditioning."""
-
-    def __init__(self, param, block_size):
-        self._original_shape = param.shape
-        self._transformed_shape = param.shape
-        self._transformed_shape = merge_small_dims(self._original_shape, block_size)
-        reshaped_param = jnp.reshape(param, self._transformed_shape)
-        self._partitioner = BlockPartitioner(reshaped_param, block_size)
-
     def statistics_from_grad(self, grad):
         """Compute statistics from gradients.
 
@@ -431,7 +379,7 @@ class Preconditioner:
           A list of gradient statistics for each partition.
         """
         reshaped_grad = jnp.reshape(grad, self._transformed_shape)
-        partitioned_grads = self._partitioner.partition(reshaped_grad)
+        partitioned_grads = self.partition(reshaped_grad)
         stats = []
         for g in partitioned_grads:
             g_stats = []
@@ -442,10 +390,6 @@ class Preconditioner:
                 g_stats.append(stat)
             stats.extend(g_stats)
         return stats
-
-    def shapes_for_preconditioners(self):
-        """Returns shape from statistics."""
-        return self._partitioner.shapes_for_preconditioners()
 
     def exponent_for_preconditioner(self):
         """Returns exponent to use for inverse-pth root M^{-1/p}."""
@@ -463,9 +407,9 @@ class Preconditioner:
         """
 
         reshaped_grad = jnp.reshape(grad, self._transformed_shape)
-        partitioned_grads = self._partitioner.partition(reshaped_grad)
+        partitioned_grads = self.partition(reshaped_grad)
         preconditioned_partitioned_grads = []
-        num_splits = self._partitioner.num_splits()
+        num_splits = self.num_splits()
         for i, g in enumerate(partitioned_grads):
             preconditioners_for_grad = preconditioners[i * num_splits:(i + 1) *
                                                                       num_splits]
@@ -475,8 +419,7 @@ class Preconditioner:
                 precond_g = jnp.tensordot(
                     precond_g, preconditioners_for_grad[j], axes=[[0], [0]])
             preconditioned_partitioned_grads.append(precond_g)
-        merged_grad = self._partitioner.merge_partitions(
-            preconditioned_partitioned_grads)
+        merged_grad = self.merge_partitions(preconditioned_partitioned_grads)
         return jnp.reshape(merged_grad, self._original_shape)
 
 
@@ -607,8 +550,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     shampoo_update_with_wd = shampoo_update
     grafting_update_with_wd = grafting_update
 
-    shampoo_update_with_wd_momentum = momentum.astype(
-        jnp.float32) * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
+    shampoo_update_with_wd_momentum = momentum.astype(jnp.float32) * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
     grafting_update_with_wd_momentum = diagonal_momentum.astype(
         jnp.float32) * ctx.optimizer.adam_beta1 + grafting_update_with_wd
     run_shampoo = (step >= ctx.optimizer.start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
