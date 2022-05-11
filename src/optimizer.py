@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from shampoo import shampoo
+from .shampoo import shampoo
 from .backend import zero_param, assign, prefixed_name
 from .context import Context
 
@@ -55,7 +55,6 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
     exp_avg = ema(ctx, param_name, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg", False)
     exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq", False)
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
-
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:

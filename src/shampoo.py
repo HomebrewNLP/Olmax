@@ -35,7 +35,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from context import Context
+from .context import Context
 
 # Dtype for inverse-pth root routine
 # Switch to f64 if you have hardware that supports it. Enable the jax flag
