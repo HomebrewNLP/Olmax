@@ -230,10 +230,9 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
         new_mat_h_0 = identity * jnp.power(z, 1.0 / p)
         init_state = tuple([0, new_mat_m_0, new_mat_h_0, new_mat_h_0, new_error, True])
         _, mat_m, mat_h, old_mat_h, error, convergence = lax.while_loop(_iter_condition, _iter_body, init_state)
-        error = jnp.max(jnp.abs(mat_m - identity)).astype(jnp.float32)
+        error = jnp.max(jnp.abs(mat_m - identity))
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)
         resultant_mat_h = is_converged * mat_h + (1 - is_converged) * old_mat_h
-        resultant_mat_h = jnp.asarray(resultant_mat_h, orig_dtype)
     return resultant_mat_h, error
 
 
