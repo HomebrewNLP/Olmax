@@ -295,19 +295,6 @@ def pad_square_matrix(mat, max_size):
     return mat
 
 
-def efficient_cond(predicate, compute_fn, init_state, *args, **kwargs):
-    """Avoids wasteful buffer allocation with XLA."""
-
-    def _iter_body(unused_state):
-        results = compute_fn(*args, **kwargs)
-        return tuple([False] + list(results))
-
-    def _iter_condition(state):
-        return state[0]
-
-    return tuple(jax.lax.while_loop(_iter_condition, _iter_body, tuple([predicate] + init_state))[1:])
-
-
 class Preconditioner:
     """Compute statistics/shape from gradients for preconditioning."""
 
@@ -462,17 +449,10 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     step = ctx.parameters['/shampoo/count']
     preconditioner = Preconditioner(param, ctx.optimizer.block_size)
     if not _skip_preconditioning(param):
-        def compute_updated_statistics():
-            new_stats = preconditioner.statistics_from_grad(grad)
-            new_stats_accumulators = []
-            for stat, stat_accumulator in zip(new_stats, statistics):
-                new_stats_accumulators.append(
-                    ctx.optimizer.adam_beta2 * stat_accumulator + (1.0 - ctx.optimizer.adam_beta2) * stat)
-            return new_stats_accumulators
-
-        perform_step = step % ctx.optimizer.statistics_compute_steps == 0
-        init_state = statistics
-        new_statistics = list(efficient_cond(perform_step, compute_updated_statistics, init_state))
+        new_stats = preconditioner.statistics_from_grad(grad)
+        new_statistics = []
+        for stat, stat_accumulator in zip(new_stats, statistics):
+            new_statistics.append(ctx.optimizer.adam_beta2 * stat_accumulator + (1.0 - ctx.optimizer.adam_beta2) * stat)
     else:
         new_statistics = [[]] * len(statistics)
 
@@ -499,15 +479,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
 
     # Pad statistics and exponents to next multiple of num_devices.
     packed_statistics = [pad_square_matrix(stat, max_size) for stat in statistics]
-
-    def _internal_inverse_pth_root_all():
-        return jax.vmap(pth_root)(jnp.stack(packed_statistics), jnp.stack(exponents))
-
-    preconditioners_init = packed_statistics
-    errors_init = ([INVERSE_FAILURE_THRESHOLD] * len(packed_statistics))
-    init_state = [preconditioners_init, errors_init]
-    perform_step = step % ctx.optimizer.preconditioning_compute_steps == 0
-    preconditioners_flat, errors_flat = efficient_cond(perform_step, _internal_inverse_pth_root_all, init_state)
+    preconditioners_flat, errors_flat = jax.vmap(pth_root)(jnp.stack(packed_statistics), jnp.stack(exponents))
 
     def _skip(error):
         return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
