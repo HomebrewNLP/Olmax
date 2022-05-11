@@ -233,7 +233,7 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
         error = jnp.max(jnp.abs(mat_m - identity))
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)
         resultant_mat_h = is_converged * mat_h + (1 - is_converged) * old_mat_h
-    return resultant_mat_h, error
+    return resultant_mat_h.astype(orig_dtype), error.astype(orig_dtype)
 
 
 def merge_small_dims(shape_to_merge, max_dim):
