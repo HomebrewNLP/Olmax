@@ -532,8 +532,8 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = diagonal_momentum.astype(ctx.model.computation_dtype)
     ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum.astype(ctx.model.computation_dtype)
     for i, stat in enumerate(new_statistics):
-        ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
+        ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat.astype(ctx.model.storage_dtype)
     for i, prec in enumerate(new_preconditioners):
-        ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
+        ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec.astype(ctx.model.storage_dtype)
 
     return update
