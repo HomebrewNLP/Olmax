@@ -60,12 +60,12 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 class DataContext(DataClass):
     path: str = "gs://homebrewnlp-eu/the-token-pile/*"
     shuffle_buffer: int = 0
-    parallel_workers: int = 8
-    interleaved_datasets: int = 8
+    parallel_workers: int = 2
+    interleaved_datasets: int = 2
     prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 65536  # should be divisible by 128
-    datasets_used_per_step: int = 8
+    datasets_used_per_step: int = 4
 
 
 class DimSizes(DataClass):
@@ -129,6 +129,13 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
+    use_shampoo: bool = False
+    block_size: int = 512
+    epsilon: float = 1e-6
+    start_preconditioning_step: int = 16
+    preconditioning_compute_steps: int = 128
+    statistics_compute_steps: int = 4
+    skip_preconditioning_dim_size_gt: int = 1024
     momentum_beta: float = 0.1
     learning_rate: float = 10
     gradient_clip: float = 0.001
@@ -164,7 +171,7 @@ class EarlyStopping(DataClass):
 
 
 class Training(DataClass):
-    pretrained_embedding_path: typing.Optional[str] = None
+    pretrained_embedding_path: str = ''
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False

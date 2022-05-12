@@ -18,7 +18,7 @@ TIMEOUT_MULTIPLIER = 10
 API = googleapiclient.discovery.build('tpu', 'v1')
 _, PROJECT = google.auth.default()
 OLD_DATA_PATH = DataContext.path.replace("/", "\\/")[:-1]  # remove * at the end
-OLD_PRETRAINED_PATH = Training.pretrained_embedding_path.replace("/", "\\/")[:-1]  # remove * at the end
+# OLD_PRETRAINED_PATH = Training.pretrained_embedding_path.replace("/", "\\/")  # TODO: Figure out how to do the sed
 MANAGER = multiprocessing.Manager()
 GLOBAL_DICT = MANAGER.dict()
 CACHE_TIME = 10
@@ -33,7 +33,7 @@ def exec_command(wandb_key: str, sweep_id: str, data_path: str, pretrained_path:
                         f"git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/", f"cd HomebrewNLP-Jax",
                         f"(bash setup.sh ; exit 0)", f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
                         f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
-                        f'sed -i "s/{OLD_PRETRAINED_PATH}/{pretrained_path}/g" src/context.py',
+                        # f'sed -i "s/{OLD_PRETRAINED_PATH}/{pretrained_path}/g" src/context.py',
                         f'screen -dmS model '
                         f'bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent {sweep_id}"'))
 
@@ -118,8 +118,7 @@ def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, servic
 
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
-                 data_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
-                 pretrained_path: str,
+                 data_path: str, pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
                  creation_semaphore: multiprocessing.Semaphore):
     host = f"{prefix}-{tpu_id}"
     time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER * timeout_multiplier)

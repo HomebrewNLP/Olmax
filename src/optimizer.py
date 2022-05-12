@@ -5,6 +5,7 @@ from jax import numpy as jnp
 
 from .backend import zero_param, assign, prefixed_name
 from .context import Context
+from .shampoo import shampoo
 
 
 def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
@@ -74,19 +75,25 @@ def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
     ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, current_step)
+    if ctx.is_initializing:
+        ctx.parameters['/shampoo/count'] = jnp.zeros((), dtype=ctx.model.storage_dtype)
 
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
-        if "optimizer" in param_name:
+        if "optimizer" in param_name or "shampoo" in param_name:
             continue
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(ctx.model.storage_dtype)
-        grad = adaptive_gradient_clipping(inner_ctx, param_name, grad)
+        grad = adaptive_gradient_clipping(ctx, param_name, grad)
+
         if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
             grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
-        else:
-            grad = sm3(inner_ctx, param_name, grad)
-            grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
+        else:  # Do shampoo/sm3 update for large parameters
+            if ctx.optimizer.use_shampoo:
+                grad = shampoo(inner_ctx, param_name, grad)
+            else:
+                grad = sm3(inner_ctx, param_name, grad)
+                grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]

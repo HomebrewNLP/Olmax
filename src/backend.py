@@ -135,7 +135,7 @@ def get_param(ctx: Context, name: str, str_shape: typing.Optional[typing.List[st
     return param.astype(computation_dtype)
 
 
-def zero_param(ctx: Context, name: str, shape: typing.List[str], dtype:typing.Optional[jnp.dtype]) -> jnp.ndarray:
+def zero_param(ctx: Context, name: str, shape: typing.List[str], dtype: typing.Optional[jnp.dtype]) -> jnp.ndarray:
     return get_param(ctx, name, shape, 0, 0, dtype=dtype)
 
 
