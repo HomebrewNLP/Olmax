@@ -92,4 +92,4 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             grad = shampoo(inner_ctx, param_name, grad)  # Do shampoo update for large parameters
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
-        ctx.parameters[param_name] = grad + ctx.parameters[param_name]
+        ctx.parameters[param_name] = (grad + ctx.parameters[param_name]).astype(ctx.model.storage_dtype)

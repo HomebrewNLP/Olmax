@@ -58,6 +58,8 @@ def prefixed_name(ctx: Context, name: str):
 
 def assign(ctx: Context, name: str, inp: jnp.ndarray):
     name = prefixed_name(ctx, name)
+    if name in ctx.parameters:
+        inp = inp.astype(ctx.parameters[name].dtype)
     ctx.parameters[name] = inp
 
 
