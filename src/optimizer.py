@@ -3,9 +3,9 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from .shampoo import shampoo
 from .backend import zero_param, assign, prefixed_name
 from .context import Context
+from .shampoo import shampoo
 
 
 def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
@@ -88,8 +88,12 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
 
         if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
             grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
-        else:
-            grad = shampoo(inner_ctx, param_name, grad)  # Do shampoo update for large parameters
+        else:  # Do shampoo/sm3 update for large parameters
+            if ctx.optimizer.use_shampoo:
+                grad = shampoo(inner_ctx, param_name, grad)
+            else:
+                grad = sm3(inner_ctx, param_name, grad)
+                grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]

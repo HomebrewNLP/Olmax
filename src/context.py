@@ -60,8 +60,8 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 class DataContext(DataClass):
     path: str = "gs://homebrewnlp-eu/the-token-pile/*"
     shuffle_buffer: int = 0
-    parallel_workers: int = 4
-    interleaved_datasets: int = 4
+    parallel_workers: int = 2
+    interleaved_datasets: int = 2
     prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 65536  # should be divisible by 128
@@ -129,6 +129,7 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
+    use_shampoo: bool = False
     block_size: int = 512
     epsilon: float = 1e-6
     start_preconditioning_step: int = 16
