@@ -426,8 +426,6 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
             preconditioners = [jnp.eye(s[0], dtype=ctx.model.storage_dtype) for s in shapes]
 
         momentum = jnp.zeros_like(param).astype(ctx.model.computation_dtype)
-        diagonal_momentum = jnp.zeros_like(param).astype(ctx.model.computation_dtype)
-        ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = diagonal_momentum
         ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum
         for i, stat in enumerate(statistics):
             ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat.astype(ctx.model.storage_dtype)
@@ -442,7 +440,6 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     preconditioners = [(key, param) for key, param in ctx.parameters.items() if
                        key.startswith(f'/shampoo/{param_name}/preconditioners_')]
     preconditioners = [param for _, param in sorted(preconditioners, key=lambda x: int(x[0].split('_')[-1]))]
-    diagonal_momentum = ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'].astype(ctx.model.storage_dtype)
     momentum = ctx.parameters[f'/shampoo/{param_name}/momentum'].astype(ctx.model.storage_dtype)
     param = ctx.parameters[param_name]
     step = ctx.parameters['/shampoo/count']
@@ -502,38 +499,22 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         new_preconditioners = preconditioners_for_state
         idx += num_statistics
 
-    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-    sgd_update = grad
-    grafting_update = sgd_update
-
-    precond_grad = grad
-    if not _skip_preconditioning(param):
-        precond_grad = preconditioner.preconditioned_grad(precond_grad, new_preconditioners)
+    if _skip_preconditioning(param):
+        shampoo_update = grad
     else:
-        precond_grad = grafting_update
-
-    grafting_update_norm = jnp.linalg.norm(grafting_update)
-    precond_grad_norm = jnp.linalg.norm(precond_grad)
-
-    multiplier = (grafting_update_norm / (precond_grad_norm + 1e-16))
-    shampoo_update = precond_grad * multiplier
+        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
+        precond_grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
+        multiplier = (jnp.linalg.norm(grad) / (jnp.linalg.norm(grad) + 1e-16))
+        shampoo_update = precond_grad * multiplier
 
     shampoo_update_with_wd = shampoo_update
-    grafting_update_with_wd = grafting_update
 
-    shampoo_update_with_wd_momentum = momentum * ctx.optimizer.adam_beta1 + shampoo_update_with_wd
-    grafting_update_with_wd_momentum = diagonal_momentum * ctx.optimizer.adam_beta1 + grafting_update_with_wd
-    run_shampoo = (step >= ctx.optimizer.start_preconditioning_step).astype(grafting_update_with_wd_momentum.dtype)
-    update = run_shampoo * shampoo_update_with_wd_momentum + (1.0 - run_shampoo) * grafting_update_with_wd_momentum
-
-    diagonal_momentum = grafting_update_with_wd_momentum
-    momentum = shampoo_update_with_wd_momentum
-
-    ctx.parameters[f'/shampoo/{param_name}/diagonal_momentum'] = diagonal_momentum.astype(ctx.model.computation_dtype)
+    momentum = momentum * ctx.optimizer.adam_beta1 + shampoo_update
+    
     ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum.astype(ctx.model.computation_dtype)
     for i, stat in enumerate(new_statistics):
         ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat.astype(ctx.model.storage_dtype)
     for i, prec in enumerate(new_preconditioners):
         ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec.astype(ctx.model.storage_dtype)
 
-    return update
+    return momentum
