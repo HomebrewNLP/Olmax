@@ -60,12 +60,12 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 class DataContext(DataClass):
     path: str = "gs://homebrewnlp-eu/the-token-pile/*"
     shuffle_buffer: int = 0
-    parallel_workers: int = 8
-    interleaved_datasets: int = 8
+    parallel_workers: int = 4
+    interleaved_datasets: int = 4
     prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 65536  # should be divisible by 128
-    datasets_used_per_step: int = 8
+    datasets_used_per_step: int = 4
 
 
 class DimSizes(DataClass):
