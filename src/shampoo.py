@@ -428,9 +428,9 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         momentum = jnp.zeros_like(param).astype(ctx.model.computation_dtype)
         ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum
         for i, stat in enumerate(statistics):
-            ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat.astype(ctx.model.storage_dtype)
+            ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
         for i, prec in enumerate(preconditioners):
-            ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec.astype(ctx.model.storage_dtype)
+            ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
 
         return jnp.zeros_like(grad)
 
