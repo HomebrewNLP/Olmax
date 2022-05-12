@@ -486,8 +486,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     new_preconditioners_flat = []
     new_errors_flat = []
     for p, shape, prev_p, error in zip(preconditioners_flat, original_shapes, prev_preconditioners, errors_flat):
-        new_preconditioners_flat.append(_select_preconditioner(error, p.astype(prev_p.dtype)[:shape[0], :shape[1]],
-                                                               prev_p))
+        new_preconditioners_flat.append(_select_preconditioner(error, p[:shape[0], :shape[1]], prev_p))
         new_errors_flat.append(error)
 
     # Add back empty preconditioners so we that we can set the optimizer state.
