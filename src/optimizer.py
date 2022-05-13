@@ -72,8 +72,8 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
         new_p = select_preconditioner(error, new_p, prev_p)
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
-
-    preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
+    if ctx.is_initializing:
+        return grad
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
 
 
