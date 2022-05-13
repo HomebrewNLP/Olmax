@@ -68,7 +68,7 @@ class DataContext(DataClass):
     datasets_used_per_step: int = 4
 
 
-class DimSizes(DataClass):
+class Dims(DataClass):
     batch: int = 128
     outer_bottleneck_kernel: int = 25
     inner_bottleneck_kernel: int = 49
@@ -87,25 +87,6 @@ class DimSizes(DataClass):
 
     def __getitem__(self, item: str):
         return getattr(self, item)
-
-
-class Dims(DataClass):
-    batch: str = "batch"
-    outer_bottleneck_kernel: str = "outer_bottleneck_kernel"
-    inner_bottleneck_kernel: str = "inner_bottleneck_kernel"
-    inner_bottleneck_features: str = "inner_bottleneck_features"
-    pointwise_kernel: str = "pointwise_kernel"
-    features: str = "features"
-    pointwise_features: str = "pointwise_features"
-    moe_intermediate: str = "moe_intermediate"
-    heads: str = "heads"
-    one: str = "one"
-    sequence: str = "sequence"
-    depth: str = "depth"
-    vocab: str = "vocab"
-
-    def __init__(self, data: DataContext):
-        self.sizes: DimSizes = DimSizes(data)
 
 
 class TensorboardTrace(DataClass):
@@ -217,7 +198,6 @@ class Context(DataClass):
         self.name_cache: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_variance: typing.Dict[str, float] = {}
-        self.parameter_dims: typing.Dict[str, typing.List[str]] = {}
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
 
@@ -239,7 +219,7 @@ class Context(DataClass):
 
     def config(self) -> dict:
         cfg = self.__dict__.copy()
-        del cfg['name_cache'], cfg['parameters'], cfg['parameter_dims'], cfg['prng_key'], cfg['is_initializing']
+        del cfg['name_cache'], cfg['parameters'], cfg['prng_key'], cfg['is_initializing']
         del cfg['parameter_variance'], cfg['depth']
         return serialize(cfg)
 
@@ -288,9 +268,9 @@ class WhilePredictContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
 
-        batch_dim_size = self.ctx.dims.sizes.batch
-        sequence_dim_size = self.ctx.dims.sizes.sequence
-        vocab_dim_size = self.ctx.dims.sizes.vocab
+        batch_dim_size = self.ctx.dims.batch
+        sequence_dim_size = self.ctx.dims.sequence
+        vocab_dim_size = self.ctx.dims.vocab
 
         self.start_pos = jnp.zeros([batch_dim_size])
         self.stop_pos = jnp.array([sequence_dim_size] * batch_dim_size)[0]

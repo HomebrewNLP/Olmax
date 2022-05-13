@@ -51,7 +51,7 @@ def write_ckpt(ctx: Context):
     with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
         f.write(structure)
 
-    for shard in range(ctx.dims.sizes.heads):
+    for shard in range(ctx.dims.heads):
         cpu_flattened = index_weights(flattened, shard)
 
         k, m = divmod(len(cpu_flattened), pieces)
@@ -90,9 +90,9 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
     _, new_structure = jax.tree_util.tree_flatten(new_structure)
 
-    with multiprocessing.pool.ThreadPool(ctx.dims.sizes.heads) as p:
+    with multiprocessing.pool.ThreadPool(ctx.dims.heads) as p:
         start = time.time()
-        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_path}/{i}_" for i in range(ctx.dims.sizes.heads)]))
+        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_path}/{i}_" for i in range(ctx.dims.heads)]))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
     unsharded = []

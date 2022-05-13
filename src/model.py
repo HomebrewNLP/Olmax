@@ -24,7 +24,7 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
-def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: str, weight: typing.Optional[jnp.ndarray] = None,
+def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
                    psum: bool = False, act: bool = True) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
@@ -73,21 +73,21 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
     return inp * scale
 
 
-def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: str, scale: float, in_features: str, out_features: str):
+def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
     ctx = ctx.add_to_prefix("conv")
-    fan_in = ctx.dims.sizes[in_features] * ctx.dims.sizes[conv_kernel]
+    fan_in = ctx.dims[in_features] * ctx.dims[conv_kernel]
     weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale,
                        lr_scale=1 / fan_in)
 
     if ctx.is_initializing:
-        return jnp.zeros(inp.shape[:-1] + (ctx.dims.sizes[out_features],))
+        return jnp.zeros(inp.shape[:-1] + (ctx.dims[out_features],))
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
 
 
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
     inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.dims.sizes.heads,
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.dims.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
     inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1,
@@ -107,7 +107,7 @@ def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     dtype = forget.dtype
-    for i in range(int(math.log2(ctx.dims.sizes.sequence))):
+    for i in range(int(math.log2(ctx.dims.sequence))):
         x += jnp.concatenate([jnp.zeros((x.shape[0], 2 ** i, x.shape[2])), x[:, :-2 ** i] * forget[:, 2 ** i:]], 1)
         forget *= jnp.concatenate([jnp.ones((x.shape[0], 2 ** i, x.shape[2])), forget[:, :-2 ** i]], 1)
     return x.astype(dtype)
@@ -209,7 +209,7 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
     assignments = jnp.take_along_axis(assignments, indices, 0)
 
     # get slice of tokens
-    index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) / ctx.dims.sizes.heads
+    index = lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) / ctx.dims.heads
     own_indices = jnp.argsort(assignments == index)[-overflow:]
     weight = jnp.take_along_axis(gate, assignments.reshape(*assignments.shape, 1), -1)
     weight = jnp.take_along_axis(weight, own_indices.reshape(-1, 1), 0)
@@ -239,8 +239,7 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1e-5,
-                      lr_scale=1 / ctx.dims.sizes.features)
+    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1e-5, lr_scale=1 / ctx.dims.features)
     normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0, mean=1,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
 
@@ -258,7 +257,6 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
         new_ctx.parameters = params
         out = fn(new_ctx, x10)
         ctx.parameters = new_ctx.parameters
-        ctx.parameter_dims = new_ctx.parameter_dims
         ctx.name_cache = new_ctx.name_cache
         ctx.prng_key = new_ctx.prng_key
         return new_ctx.parameters, x10, x11, out, x01
@@ -296,16 +294,16 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
     src, param = src_wgt
-    devices = ctx.dims.sizes.heads
+    devices = ctx.dims.heads
 
     def _xent_slice(inp: typing.Tuple[
         jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
                     carry):
         inp, i, wgt, inner_tgt, index, d_wgt, loss, accuracy = inp
         inp_slice = inp[i]
-        tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.sizes.vocab)
+        tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.vocab)
         tmp = promote_to(tmp, jnp.float32)
-        tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.sizes.vocab)
+        tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.vocab)
         tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
         lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
 
@@ -319,16 +317,16 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         d_tmp = jnp.transpose(dx, (1, 0))
         d_tmp = d_tmp.astype(inp_slice.dtype)
         d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
-        d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.sizes.vocab, -1)
+        d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.vocab, -1)
         d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
         return (inp, i + 1, wgt, inner_tgt, index, d_wgt, loss, accuracy), d_x
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
         original_shape = inp.shape
-        inp = inp.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1, ctx.dims.sizes.features)
-        inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.sizes.inner_bottleneck_features, -1)
-        index = lax.psum_scatter(jnp.arange(ctx.dims.sizes.heads), ParallelAxes.model) // devices
+        inp = inp.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1, ctx.dims.features)
+        inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1)
+        index = lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
         (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (inp, jnp.zeros((), dtype=jnp.int32),
                                                                             wgt,
@@ -339,7 +337,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
                                                                             jnp.zeros((), dtype=jnp.float32)), None,
                                                               inp.shape[0])
         dx = dx.transpose(1, 0, 2) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
-        dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.sizes.features, -1).transpose(1, 0)
+        dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.features, -1).transpose(1, 0)
         dx = dx.reshape(original_shape)
         d_wgt = d_wgt.transpose(1, 0) / tgt.size
         d_wgt = d_wgt.reshape(param.shape)
@@ -370,7 +368,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
-    for i in range(ctx.dims.sizes.depth):
+    for i in range(ctx.dims.depth):
         src = reversible(ctx, pointwise_block, src)
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, pointwise_block, src)
@@ -381,7 +379,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
-                    scale=1 / ctx.dims.sizes.heads / ctx.dims.sizes.features)
+                    scale=1 / ctx.dims.heads / ctx.dims.features)
     if ctx.is_initializing:
         return out
     return out, wgt

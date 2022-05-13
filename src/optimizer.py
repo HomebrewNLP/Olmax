@@ -1,11 +1,12 @@
+import functools
 import typing
 
 import jax
 from jax import numpy as jnp
 
-from .backend import zero_param, assign, prefixed_name
+from .backend import zero_param, assign, prefixed_name, get_param
 from .context import Context
-from .shampoo import shampoo
+from .shampoo import Preconditioner, pad_square_matrix, matrix_inverse_pth_root, INVERSE_FAILURE_THRESHOLD
 
 
 def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
@@ -13,18 +14,18 @@ def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def zero_param_like(ctx: Context, new_name: str, original_name: str, dtype: jnp.dtype) -> jnp.ndarray:
-    return zero_param(ctx, new_name, ctx.parameter_dims.get(original_name, []), dtype).astype(jnp.float32)
+    return zero_param(ctx, new_name, ctx.parameters[original_name].shape, dtype).astype(jnp.float32)
 
 
-def one_shape(ndim: int, dim_name: str, dim_idx: int) -> typing.List[str]:
-    base = ["one"] * ndim
+def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
+    base = [1] * ndim
     base[dim_idx] = dim_name
     return base
 
 
 def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("sm3", count=False)
-    dims = ctx.parameter_dims[param_name] if param_name in ctx.parameter_dims else ["one"] * grad.ndim
+    dims = ctx.parameters[param_name].shape if param_name in ctx.parameters else ["one"] * grad.ndim
     weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0), ctx.model.storage_dtype)
     buffer = [weight_update]
 
@@ -55,6 +56,55 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
     exp_avg = ema(ctx, param_name, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg", False)
     exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq", False)
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
+
+
+def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+    ctx = ctx.add_to_prefix("shampoo", count=False)
+
+    pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=ctx.optimizer.epsilon)
+
+    param = ctx.parameters[param_name]
+    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
+    new_stats = preconditioner.statistics_from_grad(grad)
+    new_statistics = []
+    preconditioners = []
+    for i, stat in enumerate(new_stats):
+        new_statistics.append(ema(ctx, param_name, stat, step, 1 - ctx.optimizer.adam_beta2, f"statistics_{i}", True))
+        preconditioners.append(get_param(init_val=jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype)))
+
+    exponents = []
+    max_size = 0
+
+    original_shapes_for_state = []
+    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
+    for statistic in new_statistics:
+        exponents.append(preconditioner.exponent_for_preconditioner())
+        original_shapes_for_state.append(statistic.shape)
+        max_size = max(max_size, statistic.shape[0])
+
+    # Pad statistics and exponents to next multiple of num_devices.
+    packed_statistics = [pad_square_matrix(stat, max_size) for stat in new_statistics]
+    preconditioners_flat, errors_flat = jax.vmap(pth_root)(jnp.stack(packed_statistics), jnp.stack(exponents))
+
+    def _skip(error):
+        return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
+
+    def _select_preconditioner(error, new_p, old_p):
+        return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
+
+    new_preconditioners = []
+    for p, shape, prev_p, error in zip(preconditioners_flat, original_shapes_for_state, preconditioners, errors_flat):
+        new_preconditioners.append(_select_preconditioner(error, p[:shape[0], :shape[1]], prev_p))
+
+    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
+    precond_grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
+
+    for i, stat in enumerate(new_statistics):
+        ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
+    for i, prec in enumerate(new_preconditioners):
+        ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
+
+    return precond_grad
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:

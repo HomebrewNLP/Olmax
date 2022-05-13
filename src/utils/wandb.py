@@ -31,7 +31,7 @@ class WandbLog:
         self.run.log({f"Accuracy/Median{s * device_steps}": np.median(self.accuracies[-s:]) for s in sizes}, step=step)
 
         rate = step / (time.time() - self.start_time)
-        tokens_per_day = 3600 * 24 * rate * ctx.dims.sizes.batch * ctx.dims.sizes.sequence
+        tokens_per_day = 3600 * 24 * rate * ctx.dims.batch * ctx.dims.sequence
 
         self.run.log({"Loss/Current": self.losses[-1], "Accuracy/Current": self.accuracies[-1],
                       "Speed/Batches per Second": rate, "Speed/Tokens per Day": tokens_per_day,
