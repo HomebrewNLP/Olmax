@@ -409,3 +409,12 @@ class Preconditioner:
         merged_grad = self.merge_partitions(preconditioned_partitioned_grads)
         return jnp.reshape(merged_grad, self._original_shape)
 
+
+def _skip(error):
+    return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
+
+
+def select_preconditioner(error, new_p, old_p):
+    return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
+
+

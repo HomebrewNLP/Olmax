@@ -1,4 +1,3 @@
-import functools
 import typing
 
 import jax
@@ -6,7 +5,7 @@ from jax import numpy as jnp
 
 from .backend import zero_param, assign, prefixed_name, get_param
 from .context import Context
-from .shampoo import Preconditioner, pad_square_matrix, matrix_inverse_pth_root, INVERSE_FAILURE_THRESHOLD
+from .shampoo import Preconditioner, matrix_inverse_pth_root, select_preconditioner
 
 
 def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
@@ -61,50 +60,20 @@ def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.nda
 def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("shampoo", count=False)
 
-    pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=ctx.optimizer.epsilon)
-
-    param = ctx.parameters[param_name]
-    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-    new_stats = preconditioner.statistics_from_grad(grad)
-    new_statistics = []
-    preconditioners = []
-    for i, stat in enumerate(new_stats):
-        new_statistics.append(ema(ctx, param_name, stat, step, 1 - ctx.optimizer.adam_beta2, f"statistics_{i}", True))
-        preconditioners.append(get_param(init_val=jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype)))
-
-    exponents = []
-    max_size = 0
-
-    original_shapes_for_state = []
-    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-    for statistic in new_statistics:
-        exponents.append(preconditioner.exponent_for_preconditioner())
-        original_shapes_for_state.append(statistic.shape)
-        max_size = max(max_size, statistic.shape[0])
-
-    # Pad statistics and exponents to next multiple of num_devices.
-    packed_statistics = [pad_square_matrix(stat, max_size) for stat in new_statistics]
-    preconditioners_flat, errors_flat = jax.vmap(pth_root)(jnp.stack(packed_statistics), jnp.stack(exponents))
-
-    def _skip(error):
-        return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
-
-    def _select_preconditioner(error, new_p, old_p):
-        return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
-
+    preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
     new_preconditioners = []
-    for p, shape, prev_p, error in zip(preconditioners_flat, original_shapes_for_state, preconditioners, errors_flat):
-        new_preconditioners.append(_select_preconditioner(error, p[:shape[0], :shape[1]], prev_p))
+    for i, new_stat in enumerate(preconditioner.statistics_from_grad(grad)):
+        stat = ema(ctx, param_name, new_stat, step, 1 - ctx.optimizer.adam_beta2, f"statistics_{i}", True)
+        prev_p = get_param(ctx, f'preconditioner_{i}', new_stat.shape, dtype=ctx.model.storage_dtype,
+                           init_val=jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype))
+        new_p, error = matrix_inverse_pth_root(stat, preconditioner.exponent_for_preconditioner(),
+                                               ridge_epsilon=ctx.optimizer.epsilon)
+        new_p = select_preconditioner(error, new_p, prev_p)
+        new_preconditioners.append(new_p)
+        assign(ctx, f"preconditioner_{i}", new_p)
 
-    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-    precond_grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
-
-    for i, stat in enumerate(new_statistics):
-        ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
-    for i, prec in enumerate(new_preconditioners):
-        ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
-
-    return precond_grad
+    preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
+    return preconditioner.preconditioned_grad(grad, new_preconditioners)
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
