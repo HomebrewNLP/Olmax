@@ -12,10 +12,6 @@ def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
 
 
-def zero_param_like(ctx: Context, new_name: str, original_name: str, dtype: jnp.dtype) -> jnp.ndarray:
-    return zero_param(ctx, new_name, ctx.parameters[original_name].shape, dtype).astype(jnp.float32)
-
-
 def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
     base = [1] * ndim
     base[dim_idx] = dim_name
@@ -41,19 +37,19 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     return grad * optimizer_rsqrt(weight_update)
 
 
-def ema(ctx: Context, param_name: str, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float,
-        prefix: str, quantize: bool) -> jnp.ndarray:
+def ema(ctx: Context, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float, prefix: str, quantize: bool
+        ) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
-    state = zero_param_like(ctx, "momentum_buffer", param_name, jnp.bfloat16 if quantize else ctx.model.storage_dtype)
-    new_state = state * beta + inp * (1 - beta)
+    state = zero_param(ctx, "momentum_buffer", inp.shape, jnp.bfloat16 if quantize else ctx.model.storage_dtype)
+    new_state = state.astype(jnp.float32) * beta + inp * (1 - beta)
     assign(ctx, "momentum_buffer", new_state)
     return new_state * (1 - beta ** (current_step + 1))  # debias
 
 
-def adam(ctx: Context, param_name: str, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
+def adam(ctx: Context, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("adam", count=False)
-    exp_avg = ema(ctx, param_name, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg", False)
-    exp_avg_sq = ema(ctx, param_name, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq", False)
+    exp_avg = ema(ctx, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg", False)
+    exp_avg_sq = ema(ctx, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq", False)
     return exp_avg * optimizer_rsqrt(exp_avg_sq)
 
 
@@ -63,7 +59,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
     preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
     new_preconditioners = []
     for i, new_stat in enumerate(preconditioner.statistics_from_grad(grad)):
-        stat = ema(ctx, param_name, new_stat, step, 1 - ctx.optimizer.adam_beta2, f"statistics_{i}", True)
+        stat = ema(ctx, new_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True)
         prev_p = get_param(ctx, f'preconditioner_{i}', new_stat.shape, dtype=ctx.model.storage_dtype,
                            init_val=jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype))
         new_p, error = matrix_inverse_pth_root(stat, preconditioner.exponent_for_preconditioner(),
@@ -110,13 +106,13 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
         if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
-            grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
+            grad = adam(inner_ctx, grad, current_step)  # Do adam update for small parameters
         else:  # Do shampoo/sm3 update for large parameters
             if ctx.optimizer.use_shampoo:
                 grad = graft(shampoo(inner_ctx, param_name, grad, current_step), grad)
             else:
                 grad = sm3(inner_ctx, param_name, grad)
-            grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
+            grad = ema(inner_ctx, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]
