@@ -184,7 +184,7 @@ class Context(DataClass):
         self.training = Training()
         self.wandb = WandB()
         self.dims = Dims(self.data)
-        self.dims.sizes.intermediate = self.dims.sizes.features * 2
+        self.dims.intermediate = self.dims.features * 2
 
         if 'CONFIG' in os.environ:
             with open(os.environ['CONFIG']) as f:
