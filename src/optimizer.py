@@ -90,7 +90,7 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
 def graft(ctx: Context, update0: jnp.ndarray, update1: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return update0
-    return update0 / jnp.linalg.norm(update0) * jnp.linalg.norm(update1)
+    return update0 / jnp.maximum(jnp.linalg.norm(update0), ctx.optimizer.epsilon) * jnp.linalg.norm(update1)
 
 
 def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
