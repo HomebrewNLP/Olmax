@@ -64,11 +64,17 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
                    jnp.eye(new_stat.shape[0], dtype=ctx.model.storage_dtype) * ctx.optimizer.epsilon)
         prev_p = get_param(ctx, f'preconditioner_{i}', new_stat.shape, dtype=ctx.model.storage_dtype,
                            init_val=jnp.eye(new_stat.shape[0], dtype=ctx.model.storage_dtype))
+        if ctx.is_initializing:
+            continue
+
         new_p, error = matrix_inverse_pth_root(stat, preconditioner.exponent_for_preconditioner(),
                                                ridge_epsilon=ctx.optimizer.epsilon)
         new_p = select_preconditioner(error, new_p, prev_p)
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
+
+    if ctx.is_initializing:
+        return grad
 
     preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
