@@ -37,10 +37,11 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     return grad * optimizer_rsqrt(weight_update)
 
 
-def ema(ctx: Context, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float, prefix: str, quantize: bool
-        ) -> jnp.ndarray:
+def ema(ctx: Context, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float, prefix: str, quantize: bool,
+        init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
-    state = zero_param(ctx, "momentum_buffer", inp.shape, jnp.bfloat16 if quantize else ctx.model.storage_dtype)
+    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else ctx.model.storage_dtype,
+                      init_val=jnp.zeros_like(inp) if init_val is None else init_val)
     new_state = state.astype(jnp.float32) * beta + inp * (1 - beta)
     assign(ctx, "momentum_buffer", new_state)
     return new_state * (1 - beta ** (current_step + 1))  # debias
@@ -59,7 +60,8 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
     preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
     new_preconditioners = []
     for i, new_stat in enumerate(preconditioner.statistics_from_grad(grad)):
-        stat = ema(ctx, new_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True)
+        stat = ema(ctx, new_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
+                   jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype) * ctx.optimizer.epsilon)
         prev_p = get_param(ctx, f'preconditioner_{i}', new_stat.shape, dtype=ctx.model.storage_dtype,
                            init_val=jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype))
         new_p, error = matrix_inverse_pth_root(stat, preconditioner.exponent_for_preconditioner(),
