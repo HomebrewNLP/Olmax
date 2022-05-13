@@ -75,12 +75,12 @@ def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
 
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
     ctx = ctx.add_to_prefix("conv")
-    fan_in = ctx.dims[in_features] * ctx.dims[conv_kernel]
+    fan_in = in_features * conv_kernel
     weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale,
                        lr_scale=1 / fan_in)
 
     if ctx.is_initializing:
-        return jnp.zeros(inp.shape[:-1] + (ctx.dims[out_features],))
+        return jnp.zeros(inp.shape[:-1] + (out_features,))
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
 
 
