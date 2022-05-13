@@ -485,17 +485,14 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
 
     new_preconditioners_flat = []
-    new_errors_flat = []
     for p, shape, prev_p, error in zip(preconditioners_flat, original_shapes, prev_preconditioners, errors_flat):
         new_preconditioners_flat.append(_select_preconditioner(error, p[:shape[0], :shape[1]], prev_p))
-        new_errors_flat.append(error)
 
     # Add back empty preconditioners so we that we can set the optimizer state.
-    idx = 0
     if num_statistics == 0:
         new_preconditioners = []
     else:
-        preconditioners_for_state = new_preconditioners_flat[idx:idx + num_statistics]
+        preconditioners_for_state = new_preconditioners_flat[:num_statistics]
         new_preconditioners = preconditioners_for_state
         idx += num_statistics
 
@@ -506,11 +503,6 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         precond_grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
         multiplier = (jnp.linalg.norm(grad) / (jnp.linalg.norm(grad) + 1e-16))
         shampoo_update = precond_grad * multiplier
-
-    shampoo_update_with_wd = shampoo_update
-
-    momentum = momentum * ctx.optimizer.adam_beta1 + shampoo_update
-    
     ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum.astype(ctx.model.computation_dtype)
     for i, stat in enumerate(new_statistics):
         ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
