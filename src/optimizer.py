@@ -61,7 +61,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
     new_preconditioners = []
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
         new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
-                   jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype) * ctx.optimizer.epsilon)
+                       jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype) * ctx.optimizer.epsilon)
         prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=ctx.model.storage_dtype,
                            init_val=jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype))
         if ctx.is_initializing:
@@ -72,9 +72,6 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
         new_p = select_preconditioner(error, new_p, prev_p)
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
-
-    if ctx.is_initializing:
-        return grad
 
     preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
@@ -119,7 +116,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             grad = adam(inner_ctx, grad, current_step)  # Do adam update for small parameters
         else:  # Do shampoo/sm3 update for large parameters
             if ctx.optimizer.use_shampoo:
-                grad = graft(ctx, shampoo(inner_ctx, param_name, grad, current_step), grad)
+                grad = shampoo(inner_ctx, param_name, grad, current_step)
             else:
                 grad = sm3(inner_ctx, param_name, grad)
             grad = ema(inner_ctx, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
