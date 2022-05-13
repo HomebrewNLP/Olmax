@@ -27,15 +27,12 @@
 #
 """Distributed Shampoo Implementation."""
 
-import functools
 import itertools
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
-
-from .context import Context
 
 # Dtype for inverse-pth root routine
 # Switch to f64 if you have hardware that supports it. Enable the jax flag
@@ -268,33 +265,6 @@ def merge_small_dims(shape_to_merge, max_dim):
     return resulting_shape
 
 
-def pad_square_matrix(mat, max_size):
-    """Pad a square matrix up to max_size.
-
-    Args:
-      mat: a matrix to pad.
-      max_size: matrix size requested.
-
-    Returns:
-      Given M returns [[M, 0], [0, I]]
-    """
-    rows, cols = mat.shape
-    if rows != cols:
-        raise ValueError(f"Must have rows == cols, instead got rows={rows}, cols={cols}")
-    if cols > max_size:
-        raise ValueError(f"Must have cols <= max_size. Instead got cols={cols}, max_size={max_size}.")
-    if rows == max_size:
-        return mat
-    pad_size = max_size - rows
-
-    zs1 = jnp.zeros([rows, pad_size], dtype=mat.dtype)
-    zs2 = jnp.zeros([pad_size, rows], dtype=mat.dtype)
-    eye = jnp.eye(pad_size, dtype=mat.dtype)
-    mat = jnp.concatenate([mat, zs1], 1)
-    mat = jnp.concatenate([mat, jnp.concatenate([zs2, eye], 1)], 0)
-    return mat
-
-
 class Preconditioner:
     """Compute statistics/shape from gradients for preconditioning."""
 
@@ -416,5 +386,3 @@ def _skip(error):
 
 def select_preconditioner(error, new_p, old_p):
     return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
-
-
