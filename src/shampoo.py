@@ -368,13 +368,11 @@ class Preconditioner:
         preconditioned_partitioned_grads = []
         num_splits = self.num_splits()
         for i, g in enumerate(partitioned_grads):
-            preconditioners_for_grad = preconditioners[i * num_splits:(i + 1) *
-                                                                      num_splits]
+            preconditioners_for_grad = preconditioners[i * num_splits:(i + 1) * num_splits]
             rank = len(g.shape)
             precond_g = g
             for j in range(rank):
-                precond_g = jnp.tensordot(
-                    precond_g, preconditioners_for_grad[j], axes=[[0], [0]])
+                precond_g = jnp.tensordot(precond_g, preconditioners_for_grad[j], axes=[[0], [0]])
             preconditioned_partitioned_grads.append(precond_g)
         merged_grad = self.merge_partitions(preconditioned_partitioned_grads)
         return jnp.reshape(merged_grad, self._original_shape)

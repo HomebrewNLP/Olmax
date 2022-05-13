@@ -59,15 +59,15 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
 
     preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
     new_preconditioners = []
-    for i, new_stat in enumerate(preconditioner.statistics_from_grad(grad)):
-        stat = ema(ctx, new_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
-                   jnp.eye(new_stat.shape[0], dtype=ctx.model.storage_dtype) * ctx.optimizer.epsilon)
-        prev_p = get_param(ctx, f'preconditioner_{i}', new_stat.shape, dtype=ctx.model.storage_dtype,
-                           init_val=jnp.eye(new_stat.shape[0], dtype=ctx.model.storage_dtype))
+    for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
+        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
+                   jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype) * ctx.optimizer.epsilon)
+        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=ctx.model.storage_dtype,
+                           init_val=jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype))
         if ctx.is_initializing:
             continue
 
-        new_p, error = matrix_inverse_pth_root(stat, preconditioner.exponent_for_preconditioner(),
+        new_p, error = matrix_inverse_pth_root(new_stat, preconditioner.exponent_for_preconditioner(),
                                                ridge_epsilon=ctx.optimizer.epsilon)
         new_p = select_preconditioner(error, new_p, prev_p)
         new_preconditioners.append(new_p)
