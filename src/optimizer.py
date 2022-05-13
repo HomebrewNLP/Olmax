@@ -113,7 +113,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
             grad = adam(inner_ctx, param_name, grad, current_step)  # Do adam update for small parameters
         else:  # Do shampoo/sm3 update for large parameters
             if ctx.optimizer.use_shampoo:
-                grad = graft(shampoo(inner_ctx, param_name, grad), grad)
+                grad = graft(shampoo(inner_ctx, param_name, grad, current_step), grad)
             else:
                 grad = sm3(inner_ctx, param_name, grad)
             grad = ema(inner_ctx, param_name, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
