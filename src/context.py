@@ -110,7 +110,7 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
-    use_shampoo: bool = False
+    use_shampoo: bool = True
     block_size: int = 512
     epsilon: float = 1e-6
     start_preconditioning_step: int = 16
@@ -123,7 +123,7 @@ class Optimizer(DataClass):
     adam_beta1: float = 0.1
     adam_beta2: float = 0.01
     shampoo_beta2: float = 0.01
-    weight_decay: float = 0.001
+    weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 1e-4
 
@@ -132,7 +132,7 @@ class Model(DataClass):
     norm_eps: float = 1e-5
     qrnn_frequency: int = 8
     rezero_lr_scale: float = 0.01
-    leaky_relu_slope: float = 0.02
+    leaky_relu_slope: float = 0.01
     activation_std: float = 0.5893595616022745
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
