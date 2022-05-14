@@ -56,9 +56,9 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         ctx.parameter_variance = {}
         return params, var
 
-    inp = jnp.broadcast_to(inp, (ctx.dims.sizes.heads,) + inp.shape)
+    inp = jnp.broadcast_to(inp, (ctx.dims.heads,) + inp.shape)
     pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=(0, 0))
-    ctx.parameters, variance = pmapped(inp, jnp.arange(ctx.dims.sizes.heads))
+    ctx.parameters, variance = pmapped(inp, jnp.arange(ctx.dims.heads))
     ctx.parameter_variance = {name: var.mean() for name, var in variance.items()}
 
 
@@ -116,9 +116,6 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
         wctx.ctx.parameters[key] = jnp.asarray(param)
         del param
 
-    wctx.ctx.parameter_dims = {name: [wctx.ctx.dims.heads] + dims for name, dims in wctx.ctx.parameter_dims.items()}
-    # It's not used anywhere, but nice to have
-
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()},
                  'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': None,
                  'current_step': None, 'loss': None, 'top_loss': None}
@@ -134,7 +131,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
         step_start = time.time()
         wctx = step(dat)
         if idx % wctx.ctx.training.print_interval == 0:
-            millions_processed = wctx.ctx.training.device_steps * wctx.ctx.dims.sizes.sequence * wctx.ctx.dims.sizes.batch
+            millions_processed = wctx.ctx.training.device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
             print(f'[{idx * wctx.ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
                   f'Loss: {wctx.loss / wctx.ctx.training.device_steps:6.3f} - '
                   f'TopLoss: {wctx.top_loss / wctx.ctx.training.device_steps:8.3f} | '

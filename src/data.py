@@ -47,8 +47,8 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     rng.shuffle(filenames)
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
-    sequence_length = ctx.dims.sizes.sequence
-    batch_size = ctx.dims.sizes.batch
+    sequence_length = ctx.dims.sequence
+    batch_size = ctx.dims.batch
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
     sequence_length_1 = sequence_length + 1

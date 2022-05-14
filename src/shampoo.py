@@ -27,15 +27,12 @@
 #
 """Distributed Shampoo Implementation."""
 
-import functools
 import itertools
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
-
-from .context import Context
 
 # Dtype for inverse-pth root routine
 # Switch to f64 if you have hardware that supports it. Enable the jax flag
@@ -268,33 +265,6 @@ def merge_small_dims(shape_to_merge, max_dim):
     return resulting_shape
 
 
-def pad_square_matrix(mat, max_size):
-    """Pad a square matrix up to max_size.
-
-    Args:
-      mat: a matrix to pad.
-      max_size: matrix size requested.
-
-    Returns:
-      Given M returns [[M, 0], [0, I]]
-    """
-    rows, cols = mat.shape
-    if rows != cols:
-        raise ValueError(f"Must have rows == cols, instead got rows={rows}, cols={cols}")
-    if cols > max_size:
-        raise ValueError(f"Must have cols <= max_size. Instead got cols={cols}, max_size={max_size}.")
-    if rows == max_size:
-        return mat
-    pad_size = max_size - rows
-
-    zs1 = jnp.zeros([rows, pad_size], dtype=mat.dtype)
-    zs2 = jnp.zeros([pad_size, rows], dtype=mat.dtype)
-    eye = jnp.eye(pad_size, dtype=mat.dtype)
-    mat = jnp.concatenate([mat, zs1], 1)
-    mat = jnp.concatenate([mat, jnp.concatenate([zs2, eye], 1)], 0)
-    return mat
-
-
 class Preconditioner:
     """Compute statistics/shape from gradients for preconditioning."""
 
@@ -398,123 +368,19 @@ class Preconditioner:
         preconditioned_partitioned_grads = []
         num_splits = self.num_splits()
         for i, g in enumerate(partitioned_grads):
-            preconditioners_for_grad = preconditioners[i * num_splits:(i + 1) *
-                                                                      num_splits]
+            preconditioners_for_grad = preconditioners[i * num_splits:(i + 1) * num_splits]
             rank = len(g.shape)
             precond_g = g
             for j in range(rank):
-                precond_g = jnp.tensordot(
-                    precond_g, preconditioners_for_grad[j], axes=[[0], [0]])
+                precond_g = jnp.tensordot(precond_g, preconditioners_for_grad[j], axes=[[0], [0]])
             preconditioned_partitioned_grads.append(precond_g)
         merged_grad = self.merge_partitions(preconditioned_partitioned_grads)
         return jnp.reshape(merged_grad, self._original_shape)
 
 
-def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    pth_root = functools.partial(matrix_inverse_pth_root, ridge_epsilon=ctx.optimizer.epsilon)
-    param = ctx.parameters[param_name]
+def _skip(error):
+    return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
 
-    def _skip_preconditioning(param):
-        return len(param.shape) < 1 or any([s > ctx.optimizer.skip_preconditioning_dim_size_gt for s in param.shape])
 
-    if ctx.is_initializing:
-        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-        statistics = []
-        preconditioners = []
-        if not _skip_preconditioning(param):
-            shapes = preconditioner.shapes_for_preconditioners()
-            statistics = [ctx.optimizer.epsilon * jnp.eye(s[0], dtype=ctx.model.storage_dtype) for s in shapes]
-            preconditioners = [jnp.eye(s[0], dtype=ctx.model.storage_dtype) for s in shapes]
-
-        momentum = jnp.zeros_like(param).astype(ctx.model.computation_dtype)
-        ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum
-        for i, stat in enumerate(statistics):
-            ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
-        for i, prec in enumerate(preconditioners):
-            ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
-
-        return jnp.zeros_like(grad)
-
-    statistics = [(key, param) for key, param in ctx.parameters.items() if
-                  key.startswith(f'/shampoo/{param_name}/statistics_')]
-    statistics = [param for _, param in sorted(statistics, key=lambda x: int(x[0].split('_')[-1]))]
-    preconditioners = [(key, param) for key, param in ctx.parameters.items() if
-                       key.startswith(f'/shampoo/{param_name}/preconditioners_')]
-    preconditioners = [param for _, param in sorted(preconditioners, key=lambda x: int(x[0].split('_')[-1]))]
-    momentum = ctx.parameters[f'/shampoo/{param_name}/momentum'].astype(ctx.model.storage_dtype)
-    param = ctx.parameters[param_name]
-    step = ctx.parameters['/shampoo/count']
-    preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-    if not _skip_preconditioning(param):
-        new_stats = preconditioner.statistics_from_grad(grad)
-        new_statistics = []
-        for stat, stat_accumulator in zip(new_stats, statistics):
-            new_statistics.append(ctx.optimizer.adam_beta2 * stat_accumulator + (1.0 - ctx.optimizer.adam_beta2) * stat)
-    else:
-        new_statistics = [[]] * len(statistics)
-
-    statistics = []
-    original_shapes = []
-    exponents = []
-    max_size = 0
-    prev_preconditioners = []
-
-    original_shapes_for_state = []
-    if len(new_statistics) > 0:
-        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-        for statistic in new_statistics:
-            exponents.append(preconditioner.exponent_for_preconditioner())
-            original_shapes_for_state.append(statistic.shape)
-            max_size = max(max_size, statistic.shape[0])
-
-        statistics.extend(new_statistics)
-        prev_preconditioners.extend(preconditioners)
-        original_shapes.extend(original_shapes_for_state)
-    num_statistics = len(new_statistics)
-    if not statistics:
-        return jnp.zeros_like(grad)
-
-    # Pad statistics and exponents to next multiple of num_devices.
-    packed_statistics = [pad_square_matrix(stat, max_size) for stat in statistics]
-    preconditioners_flat, errors_flat = jax.vmap(pth_root)(jnp.stack(packed_statistics), jnp.stack(exponents))
-
-    def _skip(error):
-        return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
-
-    def _select_preconditioner(error, new_p, old_p):
-        return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
-
-    new_preconditioners_flat = []
-    new_errors_flat = []
-    for p, shape, prev_p, error in zip(preconditioners_flat, original_shapes, prev_preconditioners, errors_flat):
-        new_preconditioners_flat.append(_select_preconditioner(error, p[:shape[0], :shape[1]], prev_p))
-        new_errors_flat.append(error)
-
-    # Add back empty preconditioners so we that we can set the optimizer state.
-    idx = 0
-    if num_statistics == 0:
-        new_preconditioners = []
-    else:
-        preconditioners_for_state = new_preconditioners_flat[idx:idx + num_statistics]
-        new_preconditioners = preconditioners_for_state
-        idx += num_statistics
-
-    if _skip_preconditioning(param):
-        shampoo_update = grad
-    else:
-        preconditioner = Preconditioner(param, ctx.optimizer.block_size)
-        precond_grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
-        multiplier = (jnp.linalg.norm(grad) / (jnp.linalg.norm(grad) + 1e-16))
-        shampoo_update = precond_grad * multiplier
-
-    shampoo_update_with_wd = shampoo_update
-
-    momentum = momentum * ctx.optimizer.adam_beta1 + shampoo_update
-    
-    ctx.parameters[f'/shampoo/{param_name}/momentum'] = momentum.astype(ctx.model.computation_dtype)
-    for i, stat in enumerate(new_statistics):
-        ctx.parameters[f'/shampoo/{param_name}/statistics_{i:02d}'] = stat
-    for i, prec in enumerate(new_preconditioners):
-        ctx.parameters[f'/shampoo/{param_name}/preconditioners_{i:02d}'] = prec
-
-    return momentum
+def select_preconditioner(error, new_p, old_p):
+    return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)

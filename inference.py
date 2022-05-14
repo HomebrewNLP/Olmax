@@ -21,10 +21,10 @@ from src.utils.checkpoint import read_ckpt
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     wctx = WhilePredictContext(while_ctx_dict)
     is_eos = wctx.data == wctx.ctx.eval.eos
-    behind_start = wctx.start_pos.reshape(-1, 1) > jnp.arange(wctx.ctx.dims.sizes.sequence).reshape(1, -1)
+    behind_start = wctx.start_pos.reshape(-1, 1) > jnp.arange(wctx.ctx.dims.sequence).reshape(1, -1)
     is_eos = jnp.logical_and(is_eos, behind_start)
     is_eos = jnp.cumsum(is_eos, axis=1)
-    eos_at_seq = (is_eos > 0).sum(0) == wctx.ctx.dims.sizes.batch
+    eos_at_seq = (is_eos > 0).sum(0) == wctx.ctx.dims.batch
     eos = jnp.take_along_axis(eos_at_seq.reshape(-1), wctx.current_step.reshape(-1), axis=0)
     stop = jnp.less(wctx.current_step, wctx.stop_pos)
     return jnp.logical_or(eos, stop).reshape(())
@@ -34,7 +34,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     wctx = WhilePredictContext(while_ctx_dict)
 
     out, wgt = body_ctx(wctx.ctx, wctx.data)
-    out = (out * one_hot(wctx.current_step - 1, wctx.ctx.dims.sizes.sequence).reshape(1, -1, 1)).sum(1, keepdims=True)
+    out = (out * one_hot(wctx.current_step - 1, wctx.ctx.dims.sequence).reshape(1, -1, 1)).sum(1, keepdims=True)
     out = matmul(out, wgt.transpose(1, 0)).reshape(out.shape[0], 1, -1)
     out = promote_to(out, jnp.float32)
     out_token = lax.psum(out, ParallelAxes.model)
@@ -48,7 +48,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out, -1)
-    top_k_mask = jnp.less(ranks, wctx.ctx.dims.sizes.vocab - wctx.top_k)  # we want to mask the bottom vocab - k
+    top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k)  # we want to mask the bottom vocab - k
 
     cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(sorted_out), (1,)), -1), (1,))
     overflow = jnp.greater(cumulative_probabilities, wctx.top_p)
@@ -58,7 +58,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     out_token = out_token + (top_k_mask + top_p_mask) * -1e9
 
     out_token = jnp.argmax(out_token, -1)
-    wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sizes.sequence).reshape(1, -1), out_token, wctx.data)
+    wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sequence).reshape(1, -1), out_token, wctx.data)
     wctx.current_step += 1
     return wctx.serialize()
 
@@ -85,7 +85,7 @@ def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp
 class Inference:
     def __init__(self, ctx: Context):
         ctx.is_initializing = True
-        dummy_data = np.zeros((1, ctx.dims.sizes.sequence), dtype=np.int32)
+        dummy_data = np.zeros((1, ctx.dims.sequence), dtype=np.int32)
         get_parameters(ctx, dummy_data)
         read_ckpt(ctx)
         self.parameters = ctx.parameters
@@ -104,7 +104,7 @@ class Inference:
 
     def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, seed: int, length: int
                         ) -> jnp.ndarray:
-        tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sizes.sequence - prompt.shape[1])))
+        tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sequence - prompt.shape[1])))
         base = jnp.zeros(())
         start = base + prompt.shape[1]
         return self.complete_jax(tokens, temperature, base + top_k, base + top_p, base + seed, start, start + length)
@@ -146,7 +146,7 @@ class RestAPI:
     def __init__(self):
         self._ctx = Context()
         self._interface = Inference(self._ctx)
-        if self._ctx.dims.sizes.vocab == 256:
+        if self._ctx.dims.vocab == 256:
             self._encode = lambda x: list(x.encode())
             self._decode = lambda x: np.asarray(x).astype(np.uint8).tobytes().decode(errors='ignore')
         else:
@@ -155,17 +155,17 @@ class RestAPI:
             self._decode = tokenizer.decode
 
     async def check_tokens(self, tokens: typing.List[int], error: bool = True) -> SanitizedTokens:
-        if tokens and max(tokens) > self._ctx.dims.sizes.vocab:
+        if tokens and max(tokens) > self._ctx.dims.vocab:
             if error:
                 raise HTTPException(status_code=400, detail=f"Invalid tokens sent. Tokens go up to "
-                                                            f"{self._ctx.dims.sizes.vocab} but received {max(tokens)}.")
-            tokens = [t for t in tokens if t < self._ctx.dims.sizes.vocab]
-        if len(tokens) > self._ctx.dims.sizes.sequence:
+                                                            f"{self._ctx.dims.vocab} but received {max(tokens)}.")
+            tokens = [t for t in tokens if t < self._ctx.dims.vocab]
+        if len(tokens) > self._ctx.dims.sequence:
             if error:
                 raise HTTPException(status_code=400, detail=f"Context too big. The model supports up to "
-                                                            f"{self._ctx.dims.sizes.sequence} tokens but received "
+                                                            f"{self._ctx.dims.sequence} tokens but received "
                                                             f"{len(tokens)}.")
-            tokens = tokens[:self._ctx.dims.sizes.sequence]
+            tokens = tokens[:self._ctx.dims.sequence]
         return SanitizedTokens(tokens=tokens)
 
     async def encode(self, prompt: str) -> Tokens:
