@@ -57,7 +57,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         return params, var
 
     inp = jnp.broadcast_to(inp, (ctx.dims.heads,) + inp.shape)
-    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=(0, 0))
+    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=(0, 0), donate_argnums=(0, 1))
     ctx.parameters, variance = pmapped(inp, jnp.arange(ctx.dims.heads))
     ctx.parameter_variance = {name: var.mean() for name, var in variance.items()}
 
@@ -72,7 +72,8 @@ def get_optimizer_state(ctx: Context):
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
-    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=({k: 0 for k in ctx.parameters.keys()},), out_axes=0)
+    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=({k: 0 for k in ctx.parameters.keys()},), out_axes=0,
+                       donate_argnums=(0,))
     ctx.parameters = pmapped(ctx.parameters)
 
 
@@ -120,7 +121,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
                  'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': None,
                  'current_step': None, 'loss': None, 'top_loss': None}
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
-                                   in_axes=(partition,), out_axes=partition))
+                                   in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
 
     timeit("Compiling model and performing first step", step, next(data))
     timeit("Running second step", step, next(data))
