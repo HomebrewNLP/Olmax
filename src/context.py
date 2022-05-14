@@ -118,13 +118,13 @@ class Optimizer(DataClass):
     statistics_compute_steps: int = 4
     skip_preconditioning_dim_size_gt: int = 1024
     momentum_beta: float = 0.1
-    learning_rate: float = 10
+    learning_rate: float = 1
     gradient_clip: float = 0.001
     adam_beta1: float = 0.1
     adam_beta2: float = 0.01
     shampoo_beta2: float = 0.01
     weight_decay: float = 0.001
-    warmup_end: int = 1024
+    warmup_end: int = 16384
     exponential_decay: float = 1e-4
 
 
