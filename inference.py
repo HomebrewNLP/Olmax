@@ -30,14 +30,11 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     return jnp.logical_or(eos, stop).reshape(())
 
 
-def get_top_p_mask(probability: jnp.ndarray, mass: jnp.ndarray) -> jnp.ndarray:
-    arange = lax.broadcasted_iota(jnp.int32, probability.shape, dimension=2)
-    sorted_out, argsort_out = lax.sort_key_val(probability, arange)
-    ranks = jnp.argsort(argsort_out, -1)
-    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(sorted_out, (1,)), -1), (1,))
-    overflow = jnp.greater(cumulative_probabilities, mass.reshape(-1, 1, 1))
+def get_top_p_mask(out: jnp.ndarray, undo_indices: jnp.ndarray, top_p: jnp.ndarray) -> jnp.ndarray:
+    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(out), (1,)), -1), (1,))
+    overflow = jnp.greater(cumulative_probabilities, top_p.reshape(-1, 1, 1))
     overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
-    return jnp.take_along_axis(overflow, ranks, axis=2)
+    return jnp.take_along_axis(overflow, undo_indices, axis=2)
 
 
 def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -56,13 +53,17 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     temp = jnp.log(temp)
     temp = temp * -wctx.temperature
 
-    sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
+    arange = lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2)
+    sorted_out, argsort_out = lax.sort_key_val(out_token, arange)
     ranks = jnp.argsort(argsort_out, -1)
     top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k.reshape(-1, 1, 1))  # we want to not mask top k
-    top_p_mask = get_top_p_mask(jax.nn.softmax(out_token), wctx.top_p)
-    typical_mask = get_top_p_mask(jax.nn.softmax(out_token) * jax.nn.log_softmax(out_token), wctx.mass)
-    out_token = out_token + temp
-    out_token = out_token + (top_k_mask + top_p_mask + typical_mask) * -1e9
+
+    top_p_mask = get_top_p_mask(sorted_out, ranks, wctx.top_p)
+
+    sorted_out, argsort_out = lax.sort_key_val(jax.nn.softmax(out_token) * jax.nn.log_softmax(out_token), arange)
+    typical_mask = get_top_p_mask(sorted_out, jnp.argsort(argsort_out, -1), wctx.mass)
+
+    out_token = out_token + temp + (top_k_mask + top_p_mask + typical_mask) * -1e9
 
     out_token = jnp.argmax(out_token, -1)
     wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sequence).reshape(1, -1), out_token, wctx.data)
