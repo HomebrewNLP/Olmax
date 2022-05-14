@@ -60,7 +60,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     ranks = jnp.argsort(argsort_out, -1)
     top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k)  # we want to mask the bottom vocab - k
     top_p_mask = get_top_p_mask(jax.nn.softmax(out_token), wctx.top_p)
-    typical_mask = get_top_p_mask(jax.nn.softmax(out_token) * jax.nn.log_softmax, wctx.mass)
+    typical_mask = get_top_p_mask(jax.nn.softmax(out_token) * jax.nn.log_softmax(out_token), wctx.mass)
     out_token = out_token + temp
     out_token = out_token + (top_k_mask + top_p_mask + typical_mask) * -1e9
 

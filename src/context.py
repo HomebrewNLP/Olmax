@@ -286,6 +286,7 @@ class WhilePredictContext(WhileContext):
             self.stop_pos = config['stop_pos']
             self.temperature = config['temperature']
             self.top_k = config['top_k']
+            self.top_p = config['top_p']
             self.mass = config['mass']
             self.ctx.seed = config['seed']
 
