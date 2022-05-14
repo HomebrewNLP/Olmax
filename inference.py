@@ -147,7 +147,8 @@ class CompletionInput(BaseModel):
     length: int = 16
     temperature: float = 1.
     top_k: int = 64
-    top_p: int = 0.9
+    top_p: float = 0.9
+    mass: float = 1
     seed: int = 0
     error: bool = True
 
@@ -188,7 +189,7 @@ class RestAPI:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
         tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
-                                              params.top_p, params.seed, params.length)
+                                              params.top_p, params.mass, params.seed, params.length)
         tok = tok[0, len(tokens):len(tokens) + params.length].tolist()
         out = []
         for t in tok:
