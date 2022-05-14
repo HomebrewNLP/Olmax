@@ -172,6 +172,7 @@ def dump_ctx(ctx: Context, run):
 
 def main():
     warnings.filterwarnings("ignore", message=".*is an experimental feature and probably has bugs!.*")
+    warnings.filterwarnings("ignore", message=".*Some donated buffers were not usable.*")
     # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
     ctx = wctx.ctx
