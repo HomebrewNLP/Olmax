@@ -30,6 +30,16 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     return jnp.logical_or(eos, stop).reshape(())
 
 
+def get_top_p_mask(probability: jnp.ndarray, mass: jnp.ndarray) -> jnp.ndarray:
+    arange = lax.broadcasted_iota(jnp.int32, probability.shape, dimension=2)
+    sorted_out, argsort_out = lax.sort_key_val(probability, arange)
+    ranks = jnp.argsort(argsort_out, -1)
+    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(sorted_out), (1,)), -1), (1,))
+    overflow = jnp.greater(cumulative_probabilities, mass)
+    overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
+    return jnp.take_along_axis(overflow, ranks, axis=2)
+
+
 def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhilePredictContext(while_ctx_dict)
 
@@ -49,13 +59,10 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out, -1)
     top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k)  # we want to mask the bottom vocab - k
-
-    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(sorted_out), (1,)), -1), (1,))
-    overflow = jnp.greater(cumulative_probabilities, wctx.top_p)
-    overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
-    top_p_mask = jnp.take_along_axis(overflow, ranks, axis=2)
+    top_p_mask = get_top_p_mask(jax.nn.softmax(out_token), wctx.top_p)
+    typical_mask = get_top_p_mask(jax.nn.softmax(out_token) * jax.nn.log_softmax, wctx.mass)
     out_token = out_token + temp
-    out_token = out_token + (top_k_mask + top_p_mask) * -1e9
+    out_token = out_token + (top_k_mask + top_p_mask + typical_mask) * -1e9
 
     out_token = jnp.argmax(out_token, -1)
     wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sequence).reshape(1, -1), out_token, wctx.data)
@@ -64,7 +71,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
 
 def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray,
-                            temperature: jnp.ndarray, top_k: jnp.ndarray, top_p: jnp.ndarray,
+                            temperature: jnp.ndarray, top_k: jnp.ndarray, top_p: jnp.ndarray, mass: jnp.ndarray,
                             seed: jnp.ndarray, start_pos: jnp.ndarray, stop_pos: jnp.ndarray) -> jnp.ndarray:
     wctx = WhilePredictContext()
     wctx.ctx.parameters = parameters
@@ -72,6 +79,7 @@ def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp
     wctx.temperature = temperature
     wctx.top_k = top_k
     wctx.top_p = top_p
+    wctx.mass = mass
     wctx.ctx.seed = seed
     wctx.start_pos = start_pos
     wctx.stop_pos = stop_pos
@@ -93,26 +101,28 @@ class Inference:
         ctx.is_initializing = False
         partition = {k: 0 for k in ctx.parameters.keys()}
         self.step = jax.pmap(jitless_prediction_step, axis_name=ParallelAxes.model,
-                             in_axes=(partition, None, None, None, None, None, None, None), out_axes=None)
+                             in_axes=(partition, None, None, None, None, None, None, None, None), out_axes=None)
         self.ctx = ctx
 
-        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.zeros(()), np.ones(()))
+        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.ones(()),
+                          np.zeros(()), np.ones(()))
 
-    def complete_jax(self, prompt: np.array, temperature: np.array, top_k: np.array, top_p: np.array, seed: np.array,
-                     start_pos: np.array, stop_pos: np.array) -> np.array:
-        return self.step(self.parameters, prompt, temperature, top_k, top_p, seed, start_pos, stop_pos)
+    def complete_jax(self, prompt: jnp.array, temperature: jnp.array, top_k: jnp.array, top_p: jnp.array,
+                     mass: jnp.ndarray, seed: jnp.array, start_pos: jnp.array, stop_pos: jnp.array) -> np.array:
+        return self.step(self.parameters, prompt, temperature, top_k, top_p, mass, seed, start_pos, stop_pos)
 
-    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, seed: int, length: int
-                        ) -> jnp.ndarray:
+    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, mass: float, seed: int,
+                        length: int) -> jnp.ndarray:
         tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sequence - prompt.shape[1])))
         base = jnp.zeros(())
         start = base + prompt.shape[1]
-        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, base + seed, start, start + length)
+        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, base + mass, base + seed, start,
+                                 start + length)
 
-    def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, seed: int = 0,
-                 length: int = 128):
+    def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, mass: float = 0.9,
+                 seed: int = 0, length: int = 128):
         tokens = jnp.asarray(np.frombuffer(text.encode(), np.uint8)).astype(jnp.int32).reshape(1, -1)
-        out = self.complete_tokens(tokens, temperature, top_k, top_p, seed, length)[0]
+        out = self.complete_tokens(tokens, temperature, top_k, top_p, mass, seed, length)[0]
         return np.asarray(out).astype(np.uint8).tobytes().decode(errors='ignore')[len(text):len(text) + length]
 
 
