@@ -35,7 +35,7 @@ def get_top_p_mask(probability: jnp.ndarray, mass: jnp.ndarray) -> jnp.ndarray:
     sorted_out, argsort_out = lax.sort_key_val(probability, arange)
     ranks = jnp.argsort(argsort_out, -1)
     cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(sorted_out), (1,)), -1), (1,))
-    overflow = jnp.greater(cumulative_probabilities, mass)
+    overflow = jnp.greater(cumulative_probabilities, mass.reshape(-1, 1, 1))
     overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
     return jnp.take_along_axis(overflow, ranks, axis=2)
 
@@ -58,7 +58,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out, -1)
-    top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k)  # we want to mask the bottom vocab - k
+    top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k.reshape(-1, 1, 1))  # we want to not mask top k
     top_p_mask = get_top_p_mask(jax.nn.softmax(out_token), wctx.top_p)
     typical_mask = get_top_p_mask(jax.nn.softmax(out_token) * jax.nn.log_softmax(out_token), wctx.mass)
     out_token = out_token + temp
