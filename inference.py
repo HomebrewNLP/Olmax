@@ -34,7 +34,7 @@ def get_top_p_mask(probability: jnp.ndarray, mass: jnp.ndarray) -> jnp.ndarray:
     arange = lax.broadcasted_iota(jnp.int32, probability.shape, dimension=2)
     sorted_out, argsort_out = lax.sort_key_val(probability, arange)
     ranks = jnp.argsort(argsort_out, -1)
-    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(sorted_out), (1,)), -1), (1,))
+    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(sorted_out, (1,)), -1), (1,))
     overflow = jnp.greater(cumulative_probabilities, mass.reshape(-1, 1, 1))
     overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
     return jnp.take_along_axis(overflow, ranks, axis=2)
