@@ -4,7 +4,7 @@ import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
 
-from constants import ParallelAxes
+from .constants import ParallelAxes
 from .context import Context
 
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
