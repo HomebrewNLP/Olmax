@@ -1,6 +1,5 @@
 import argparse
 import datetime
-import multiprocessing
 import netrc
 import os
 import subprocess
@@ -19,8 +18,7 @@ API = googleapiclient.discovery.build('tpu', 'v1')
 _, PROJECT = google.auth.default()
 OLD_DATA_PATH = DataContext.path.replace("/", "\\/")[:-1]  # remove * at the end
 # OLD_PRETRAINED_PATH = Training.pretrained_embedding_path.replace("/", "\\/")  # TODO: Figure out how to do the sed
-MANAGER = multiprocessing.Manager()
-GLOBAL_DICT = MANAGER.dict()
+GLOBAL_DICT = {}
 CACHE_TIME = 10
 
 
@@ -75,7 +73,9 @@ def tpu_names(zone: str, preempted: bool = True, deleting: bool = False, prefix:
         try:
             tpus = all_tpus(zone)
             tpus = [t['name'].split('/')[-1] for t in tpus if
-                    (deleting or t['state'] != "DELETING") and (preempted or t['state'] != "PREEMPTED")]
+                    "state" in t
+                    and (deleting or t['state'] != "DELETING")
+                    and (preempted or t['state'] != "PREEMPTED")]
             return [t for t in tpus if t.startswith(prefix)]
         except KeyboardInterrupt as exc:
             raise exc
@@ -119,7 +119,7 @@ def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, servic
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
                  data_path: str, pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
-                 creation_semaphore: multiprocessing.Semaphore):
+                 creation_semaphore: threading.Semaphore):
     host = f"{prefix}-{tpu_id}"
     time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER * timeout_multiplier)
     if host in tpu_names(zone, preempted=True, deleting=True):
@@ -149,11 +149,12 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
                    pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
     procs = []
-    creation_semaphore = multiprocessing.Semaphore(2)
+    creation_semaphore = threading.Semaphore(2)
     for tpu_id in range(tpus):
-        proc = multiprocessing.Process(target=start_single, daemon=True, args=(
-            prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone, data_path, pretrained_path, preemptible,
-            timeout_multiplier, service_account, creation_semaphore))
+        proc = threading.Thread(target=start_single, daemon=True,
+                                args=(prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone, data_path,
+                                      pretrained_path, preemptible, timeout_multiplier, service_account,
+                                      creation_semaphore))
         proc.start()
         procs.append(proc)
     while all(t.is_alive() for t in procs):
