@@ -1,5 +1,6 @@
 import argparse
 import netrc
+import pathlib
 import subprocess
 import threading
 import typing
@@ -20,7 +21,11 @@ def install(zone: str, name: str, worker: int):
     base = ["gcloud", "alpha", "compute", "tpus", "tpu-vm"]
     args = ["--zone", zone, "--worker", str(worker)]
     name = f"ubuntu@{name}"
+
     if subprocess.call(base + ["scp", "exec.sh", f"{name}:~/exec.sh"] + args):
+        return
+    if subprocess.call(base + ["scp", str(pathlib.Path(__file__).parent.resolve().parent / "config.yaml"),
+                               f"{name}:~/HomebrewNLP/config.yaml"] + args):
         return
     if subprocess.call(base + ["ssh", name, "--command", "bash exec.sh"] + args):
         return
