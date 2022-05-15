@@ -30,13 +30,6 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     return jnp.logical_or(eos, stop).reshape(())
 
 
-def get_top_p_mask(out: jnp.ndarray, undo_indices: jnp.ndarray, top_p: jnp.ndarray) -> jnp.ndarray:
-    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(out), (1,)), -1), (1,))
-    overflow = jnp.greater(cumulative_probabilities, top_p.reshape(-1, 1, 1))
-    overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
-    return jnp.take_along_axis(overflow, undo_indices, axis=2)
-
-
 def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhilePredictContext(while_ctx_dict)
 
@@ -58,13 +51,21 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     ranks = jnp.argsort(argsort_out, -1)
     top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k.reshape(-1, 1, 1))  # we want to not mask top k
 
-    top_p_mask = get_top_p_mask(sorted_out, ranks, wctx.top_p)
+    cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(out), (1,)), -1), (1,))
+    overflow = jnp.greater(cumulative_probabilities, wctx.top_p.reshape(-1, 1, 1))
+    overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
+    top_p_mask = jnp.take_along_axis(overflow, ranks, axis=2)
 
     log_softmax = jax.nn.log_softmax(out_token)
-    entropy = (jnp.exp(log_softmax) * log_softmax).sum(-1, keepdims=True)
-    argsort_out = jnp.argsort(jnp.abs(entropy - log_softmax))
-    sorted_logits = jnp.take_along_axis(out_token, argsort_out, axis=2)
-    typical_mask = get_top_p_mask(sorted_logits, jnp.argsort(argsort_out, -1), wctx.mass)
+    shifted_scores = jnp.abs((jnp.exp(log_softmax) * log_softmax).sum(-1, keepdims=True) - log_softmax)
+    sorted_out, argsort_out = lax.sort_key_val(shifted_scores, arange)
+    cumulative_probabilities = jnp.cumsum(jax.nn.softmax(jnp.take_along_axis(out_token, argsort_out, axis=2)), -1)
+    overflow = jnp.less(cumulative_probabilities, wctx.mass.reshape(-1, 1, 1))
+    overflow_at = overflow.sum(-1, keepdims=True).astype(jnp.int32)
+    overflow = jnp.take_along_axis(sorted_out, overflow_at, axis=2)
+    overflow = jnp.greater(sorted_out, overflow)
+    overflow = jnp.concatenate([jnp.zeros_like(overflow[:, :, :1]), overflow[:, :, :-1]], -1)
+    typical_mask = jnp.take_along_axis(overflow, jnp.argsort(argsort_out, -1), axis=2)
 
     out_token = out_token + temp + (top_k_mask + top_p_mask + typical_mask) * -1e9
 
