@@ -58,7 +58,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     softmax = jax.nn.softmax(out_token)
     min_prob_mask = softmax < wctx.max_probability_to_filter.reshape(-1, 1, 1)
     adaptive_filter = jnp.max(softmax, axis=2, keepdims=True) ** wctx.adaptive_filter_power * wctx.adaptive_filter_scale
-    adaptive_mask = softmax > adaptive_filter
+    adaptive_mask = softmax < adaptive_filter
 
     out_token = out_token + temp + (top_k_mask + top_p_mask + adaptive_mask) * min_prob_mask * -1e9
     out_token = jnp.argmax(out_token, -1)
