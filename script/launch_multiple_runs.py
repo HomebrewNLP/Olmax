@@ -61,6 +61,7 @@ def exec_tpu(host: str, zone: str, command: str):
 
 
 def all_tpus(zone: str):
+    zone = 'projects/' + PROJECT + '/locations/' + zone
     if GLOBAL_DICT.get(f"last_write_{zone}", 0) < time.time() - CACHE_TIME:
         GLOBAL_DICT[f"last_write_{zone}"] = time.time()
         GLOBAL_DICT[f"tpus_{zone}"] = API.projects().locations().nodes().list(parent=zone).execute().get('nodes', [])
@@ -68,7 +69,6 @@ def all_tpus(zone: str):
 
 
 def tpu_names(zone: str, preempted: bool = True, deleting: bool = False, prefix: str = ''):
-    zone = 'projects/' + PROJECT + '/locations/' + zone
     while True:
         try:
             tpus = all_tpus(zone)

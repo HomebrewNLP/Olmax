@@ -37,7 +37,7 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
         dat = tf.reshape(dat, (-1, batch_prod))
         return tf.data.Dataset.from_tensor_slices(dat)
 
-    return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1)
+    return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1, deterministic=True)
 
 
 def text_dataset(ctx: Context) -> NumpyIterator:
@@ -71,14 +71,15 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, rng.randint(0, 2 ** 32),
                                              sequence_length_1, full_batch // ctx.data.datasets_used_per_step),
                            cycle_length=ctx.data.interleaved_datasets,
-                           num_parallel_calls=ctx.data.parallel_workers)
+                           num_parallel_calls=ctx.data.parallel_workers,
+                           deterministic=True)
     if ctx.data.shuffle_buffer > 0:
         dset = dset.shuffle(ctx.data.shuffle_buffer, seed=rng.randint(0, 2 ** 32))
-    dset = dset.batch(ctx.data.datasets_used_per_step).map(_slice_target)
+    dset = dset.batch(ctx.data.datasets_used_per_step, deterministic=True).map(_slice_target, deterministic=True)
     if ctx.data.prefetch_buffer > 0:
         dset = dset.prefetch(ctx.data.prefetch_buffer)
     options = tf.data.Options()
-    options.deterministic = False
+    options.deterministic = True
     options.experimental_optimization.apply_default_optimizations = True
     options.experimental_optimization.filter_fusion = True
     options.experimental_optimization.map_and_batch_fusion = True
@@ -90,7 +91,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     options.experimental_optimization.shuffle_and_repeat_fusion = True
     options.threading.max_intra_op_parallelism = 1
     options.threading.private_threadpool_size = 96
-    options.experimental_slack = True
+    options.experimental_slack = False
     options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
     dset = dset.with_options(options)
     return dset.as_numpy_iterator()
