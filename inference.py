@@ -46,16 +46,21 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     sorted_out, argsort_out = lax.sort_key_val(out_token, lax.broadcasted_iota(jnp.int32, out_token.shape, dimension=2))
     ranks = jnp.argsort(argsort_out, -1)
-    top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.top_k.reshape(-1, 1, 1))  # we want to not mask top k
+    top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.max_tokens.reshape(-1, 1, 1))  # we want to not mask top k
 
     cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(sorted_out), (1,)), -1), (1,))
-    overflow = jnp.greater(cumulative_probabilities, wctx.top_p.reshape(-1, 1, 1))
+    overflow = jnp.greater(cumulative_probabilities, wctx.max_probability_mass.reshape(-1, 1, 1))
     overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
     top_p_mask = jnp.take_along_axis(overflow, ranks, axis=2)
 
-    min_prob_mask = jax.nn.softmax(sorted_out) < wctx.min_prob.reshape(-1, 1, 1)
-    out_token = out_token + temp + (top_k_mask + top_p_mask) * min_prob_mask * -1e9
+    # min_prob_mask ("top-p-x") and adaptive_mask ("top-a") are ideas taken from
+    # https://github.com/BlinkDL/RWKV-LM/blob/4bbee4bb1a26059c6425d25c59e057891ae7c4c7/README.md
+    softmax = jax.nn.softmax(out_token)
+    min_prob_mask = softmax < wctx.max_probability_to_filter.reshape(-1, 1, 1)
+    adaptive_filter = jnp.max(softmax, axis=2, keepdims=True) ** wctx.adaptive_filter_power * wctx.adaptive_filter_scale
+    adaptive_mask = softmax > adaptive_filter
 
+    out_token = out_token + temp + (top_k_mask + top_p_mask + adaptive_mask) * min_prob_mask * -1e9
     out_token = jnp.argmax(out_token, -1)
     wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sequence).reshape(1, -1), out_token, wctx.data)
     wctx.current_step += 1
@@ -63,15 +68,19 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
 
 def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray,
-                            temperature: jnp.ndarray, top_k: jnp.ndarray, top_p: jnp.ndarray, min_prob: jnp.ndarray,
-                            seed: jnp.ndarray, start_pos: jnp.ndarray, stop_pos: jnp.ndarray) -> jnp.ndarray:
+                            temperature: jnp.ndarray, max_tokens: jnp.ndarray, max_probability_mass: jnp.ndarray,
+                            max_probability_to_filter: jnp.ndarray, adaptive_filter_power: jnp.ndarray,
+                            adaptive_filter_scale: jnp.ndarray, seed: jnp.ndarray, start_pos: jnp.ndarray,
+                            stop_pos: jnp.ndarray) -> jnp.ndarray:
     wctx = WhilePredictContext()
     wctx.ctx.parameters = parameters
     wctx.data = data
     wctx.temperature = temperature
-    wctx.top_k = top_k
-    wctx.min_prob = min_prob
-    wctx.top_p = top_p
+    wctx.max_tokens = max_tokens
+    wctx.max_probability_to_filter = max_probability_to_filter
+    wctx.max_probability_mass = max_probability_mass
+    wctx.adaptive_filter_power = adaptive_filter_power
+    wctx.adaptive_filter_scale = adaptive_filter_scale
     wctx.ctx.seed = seed
     wctx.start_pos = start_pos
     wctx.stop_pos = stop_pos
@@ -93,28 +102,37 @@ class Inference:
         ctx.is_initializing = False
         partition = {k: 0 for k in ctx.parameters.keys()}
         self.step = jax.pmap(jitless_prediction_step, axis_name=ParallelAxes.model,
-                             in_axes=(partition, None, None, None, None, None, None, None, None), out_axes=None)
+                             in_axes=(partition, None, None, None, None, None, None, None, None, None, None),
+                             out_axes=None)
         self.ctx = ctx
 
-        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.zeros(()), np.zeros(()),
-                          np.ones(()))
+        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.ones(()), np.ones(()),
+                          np.zeros(()), np.zeros(()), np.ones(()))
 
-    def complete_jax(self, prompt: jnp.array, temperature: jnp.array, top_k: jnp.array, top_p: jnp.array,
-                     min_prob: jnp.ndarray, seed: jnp.array, start_pos: jnp.array, stop_pos: jnp.array) -> jnp.array:
-        return self.step(self.parameters, prompt, temperature, top_k, top_p, min_prob, seed, start_pos, stop_pos)
+    def complete_jax(self, prompt: jnp.array, temperature: jnp.array, max_tokens: jnp.array,
+                     max_probability_mass: jnp.array, max_probability_to_filter: jnp.ndarray,
+                     adaptive_filter_power: jnp.ndarray, adaptive_filter_scale: jnp.ndarray,
+                     seed: jnp.array, start_pos: jnp.array, stop_pos: jnp.array) -> jnp.array:
+        return self.step(self.parameters, prompt, temperature, max_tokens, max_probability_mass,
+                         max_probability_to_filter, adaptive_filter_power, adaptive_filter_scale, seed, start_pos,
+                         stop_pos)
 
-    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, min_prob: float,
+    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, max_tokens: int, max_probability_mass: float,
+                        max_probability_to_filter: float, adaptive_filter_power: float, adaptive_filter_scale: float,
                         seed: int, length: int) -> jnp.ndarray:
         tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sequence - prompt.shape[1])))
         base = jnp.zeros(())
         start = base + prompt.shape[1]
-        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, base + min_prob, base + seed, start,
-                                 start + length)
+        return self.complete_jax(tokens, temperature, base + max_tokens, base + max_probability_mass,
+                                 base + max_probability_to_filter, base + adaptive_filter_power,
+                                 base + adaptive_filter_scale, base + seed, start, start + length)
 
-    def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, min_prob: float = 1.,
-                 seed: int = 0, length: int = 128):
+    def complete(self, text: str, temperature: float = 0.5, max_tokens: int = 32, max_probability_mass: float = 0.9,
+                 max_probability_to_filter: float = 1., adaptive_filter_power: float = 1,
+                 adaptive_filter_scale: float = 0, seed: int = 0, length: int = 128):
         tokens = jnp.asarray(np.frombuffer(text.encode(), np.uint8)).astype(jnp.int32).reshape(1, -1)
-        out = self.complete_tokens(tokens, temperature, top_k, top_p, min_prob, seed, length)[0]
+        out = self.complete_tokens(tokens, temperature, max_tokens, max_probability_mass, max_probability_to_filter,
+                                   adaptive_filter_power, adaptive_filter_scale, seed, length)[0]
         return np.asarray(out).astype(np.uint8).tobytes().decode(errors='ignore')[len(text):len(text) + length]
 
 
@@ -138,9 +156,11 @@ class CompletionInput(BaseModel):
     prompt: str = ""
     length: int = 16
     temperature: float = 1.
-    top_k: int = 64
-    top_p: int = 0.9
-    min_prob: int = 1
+    max_tokens: int = 64
+    max_probability_mass: int = 0.9
+    max_probability_to_filter: int = 1
+    adaptive_filter_power: int = 1
+    adaptive_filter_scale: int = 0
     seed: int = 0
     error: bool = True
 
@@ -180,8 +200,10 @@ class RestAPI:
     async def token_completion(self, params: CompletionInput) -> TokenCompletion:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
-        tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
-                                              params.top_p, params.min_prob, params.seed, params.length)
+        tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.max_tokens,
+                                              params.max_probability_mass, params.max_probability_to_filter,
+                                              params.adaptive_filter_power, params.adaptive_filter_scale,
+                                              params.seed, params.length)
         tok = tok[0, len(tokens):len(tokens) + params.length].tolist()
         out = []
         for t in tok:
