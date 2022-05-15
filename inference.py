@@ -62,8 +62,9 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
     log_softmax = jax.nn.log_softmax(out_token)
     entropy = (jnp.exp(log_softmax) * log_softmax).sum(-1, keepdims=True)
-    sorted_out, argsort_out = lax.sort_key_val(jnp.abs(entropy - log_softmax), arange)
-    typical_mask = get_top_p_mask(sorted_out, jnp.argsort(argsort_out, -1), wctx.mass)
+    argsort_out = jnp.argsort(jnp.abs(entropy - log_softmax))
+    sorted_logits = jnp.take_along_axis(out_token, argsort_out, axis=2)
+    typical_mask = get_top_p_mask(sorted_logits, jnp.argsort(argsort_out, -1), wctx.mass)
 
     out_token = out_token + temp + (top_k_mask + top_p_mask + typical_mask) * -1e9
 
