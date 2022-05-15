@@ -59,18 +59,18 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 
 
 class DataContext(DataClass):
-    path: str = "gs://homebrewnlp-eu/the-token-pile/*"
+    path: str = "gs://homebrewnlp-eu/the-char-pile/*"
     shuffle_buffer: int = 0
     parallel_workers: int = 2
     interleaved_datasets: int = 2
     prefetch_buffer: int = 2
     seed: int = 0
-    vocab_size: int = 65536  # should be divisible by 128
-    datasets_used_per_step: int = 4
+    vocab_size: int = 256  # should be divisible by 128
+    datasets_used_per_step: int = 2
 
 
 class Dims(DataClass):
-    batch: int = 128
+    batch: int = 512
     outer_bottleneck_kernel: int = 25
     inner_bottleneck_kernel: int = 49
     inner_bottleneck_features: int = 128
@@ -97,7 +97,7 @@ class TensorboardTrace(DataClass):
     """
     start_step: int = 16
     stop_step: int = 64 + 16
-    do_trace: bool = False
+    do_trace: bool = True
     output_path: str = "trace"
 
 
