@@ -125,7 +125,8 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
 
     timeit("Compiling model and performing first step", step, next(data))
     timeit("Running second step", step, next(data))
-    print(f"\n\nParameters: {parameter_count:,}\nBuffers:    {buffer_count:,}\n\n")
+    print(f"\n\nParameters: {jax.process_count() * parameter_count:,}")
+    print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
 
     start_time = time.time()
     for idx, dat in enumerate(data):
