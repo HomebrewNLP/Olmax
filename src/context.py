@@ -65,7 +65,7 @@ class DataContext(DataClass):
     prefetch_buffer: int = 2
     seed: int = 0
     vocab_size: int = 65536  # should be divisible by 128
-    datasets_used_per_step: int = 4
+    datasets_used_per_step: int = 2
 
 
 class Dims(DataClass):
