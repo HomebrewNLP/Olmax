@@ -4,6 +4,7 @@ import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
 
+from .constants import ParallelAxes
 from .context import Context
 
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
@@ -35,6 +36,10 @@ def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tupl
     dimension_numbers = lax.ConvDimensionNumbers(dimension_numbers, tuple(range(ndim)), dimension_numbers)
     return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
                                     dimension_numbers=dimension_numbers, precision='fastest')
+
+
+def device_id(ctx: Context):
+    return (lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) / ctx.dims.heads).astype(jnp.int32)
 
 
 def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
