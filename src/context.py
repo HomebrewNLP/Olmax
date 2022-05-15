@@ -4,6 +4,7 @@ import typing
 
 import yaml
 from jax import numpy as jnp, random
+import jax
 
 
 class DataClass:
@@ -77,7 +78,7 @@ class Dims(DataClass):
     features: int = 256
     pointwise_features: int = 512
     moe_intermediate: int = 4096
-    heads: int = 8
+    heads: int = jax.device_count()
     sequence: int = 4096
     one: int = 1
     depth: int = 16

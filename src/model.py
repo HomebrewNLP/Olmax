@@ -6,7 +6,7 @@ import jax
 from jax import lax, numpy as jnp
 from jax.experimental.compilation_cache import compilation_cache
 
-from src.backend import get_param, matmul, conv as lax_conv
+from src.backend import get_param, matmul, conv as lax_conv, device_id
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -65,12 +65,6 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
         return out, _grad
 
     return _fn(inp, weight)
-
-
-def rezero(ctx: Context, inp: jnp.ndarray, scale: float = 1) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("rezero")
-    scale = get_param(ctx, "scale", [ctx.dims.one], std=0, lr_scale=ctx.model.rezero_lr_scale * scale)
-    return inp * scale
 
 
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
@@ -209,7 +203,7 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
     assignments = jnp.take_along_axis(assignments, indices, 0)
 
     # get slice of tokens
-    index = lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) / ctx.dims.heads
+    index = device_id(ctx)
     own_indices = jnp.argsort(assignments == index)[-overflow:]
     weight = jnp.take_along_axis(gate, assignments.reshape(*assignments.shape, 1), -1)
     weight = jnp.take_along_axis(weight, own_indices.reshape(-1, 1), 0)
@@ -226,7 +220,6 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features, ctx.dims.moe_intermediate],
                         scale=1 / ctx.model.activation_std)
     out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features])
-    out_wgt = rezero(ctx, out_wgt)
 
     gates = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.features)
     mid, indices = top1_gating(ctx, gates, inp)

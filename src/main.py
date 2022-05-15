@@ -13,7 +13,7 @@ import yaml
 from jax import numpy as jnp
 from smart_open import open as sm_open
 
-from src.backend import loop
+from src.backend import loop, device_id
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
@@ -42,10 +42,10 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
 
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):
-    def _fn(x: jnp.ndarray, idx: jnp.ndarray):
+    def _fn(x: jnp.ndarray):
         initial_seed = ctx.seed
         initial_prng_key = ctx.prng_key
-        ctx.seed += idx
+        ctx.seed += device_id(ctx)
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
         body_ctx(ctx, x)
         params = ctx.parameters
@@ -57,8 +57,8 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         return params, var
 
     inp = jnp.broadcast_to(inp, (ctx.dims.heads,) + inp.shape)
-    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=(0, 0), donate_argnums=(0, 1))
-    ctx.parameters, variance = pmapped(inp, jnp.arange(ctx.dims.heads))
+    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0, 0), out_axes=(0, 0), donate_argnums=(0,))
+    ctx.parameters, variance = pmapped(inp)
     ctx.parameter_variance = {name: var.mean() for name, var in variance.items()}
 
 
