@@ -1,7 +1,5 @@
-import os
 import typing
 
-import click
 import jax
 import numpy as np
 import uvicorn
@@ -54,7 +52,9 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     overflow = jnp.greater(cumulative_probabilities, wctx.top_p.reshape(-1, 1, 1))
     overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
     top_p_mask = jnp.take_along_axis(overflow, ranks, axis=2)
-    out_token = out_token + temp + (top_k_mask + top_p_mask) * -1e9
+
+    min_prob_mask = jax.nn.softmax(sorted_out) < wctx.min_prob.reshape(-1, 1, 1)
+    out_token = out_token + temp + (top_k_mask + top_p_mask) * min_prob_mask * -1e9
 
     out_token = jnp.argmax(out_token, -1)
     wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sequence).reshape(1, -1), out_token, wctx.data)
@@ -63,13 +63,14 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
 
 
 def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray,
-                            temperature: jnp.ndarray, top_k: jnp.ndarray, top_p: jnp.ndarray,
+                            temperature: jnp.ndarray, top_k: jnp.ndarray, top_p: jnp.ndarray, min_prob: jnp.ndarray,
                             seed: jnp.ndarray, start_pos: jnp.ndarray, stop_pos: jnp.ndarray) -> jnp.ndarray:
     wctx = WhilePredictContext()
     wctx.ctx.parameters = parameters
     wctx.data = data
     wctx.temperature = temperature
     wctx.top_k = top_k
+    wctx.min_prob = min_prob
     wctx.top_p = top_p
     wctx.ctx.seed = seed
     wctx.start_pos = start_pos
@@ -92,26 +93,28 @@ class Inference:
         ctx.is_initializing = False
         partition = {k: 0 for k in ctx.parameters.keys()}
         self.step = jax.pmap(jitless_prediction_step, axis_name=ParallelAxes.model,
-                             in_axes=(partition, None, None, None, None, None, None, None), out_axes=None)
+                             in_axes=(partition, None, None, None, None, None, None, None, None), out_axes=None)
         self.ctx = ctx
 
-        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.zeros(()), np.ones(()))
+        self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.zeros(()), np.zeros(()),
+                          np.ones(()))
 
-    def complete_jax(self, prompt: np.array, temperature: np.array, top_k: np.array, top_p: np.array, seed: np.array,
-                     start_pos: np.array, stop_pos: np.array) -> np.array:
-        return self.step(self.parameters, prompt, temperature, top_k, top_p, seed, start_pos, stop_pos)
+    def complete_jax(self, prompt: jnp.array, temperature: jnp.array, top_k: jnp.array, top_p: jnp.array,
+                     min_prob: jnp.ndarray, seed: jnp.array, start_pos: jnp.array, stop_pos: jnp.array) -> jnp.array:
+        return self.step(self.parameters, prompt, temperature, top_k, top_p, min_prob, seed, start_pos, stop_pos)
 
-    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, seed: int, length: int
-                        ) -> jnp.ndarray:
+    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, top_k: int, top_p: float, min_prob: float,
+                        seed: int, length: int) -> jnp.ndarray:
         tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sequence - prompt.shape[1])))
         base = jnp.zeros(())
         start = base + prompt.shape[1]
-        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, base + seed, start, start + length)
+        return self.complete_jax(tokens, temperature, base + top_k, base + top_p, base + min_prob, base + seed, start,
+                                 start + length)
 
-    def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, seed: int = 0,
-                 length: int = 128):
+    def complete(self, text: str, temperature: float = 0.5, top_k: int = 32, top_p: float = 0.9, min_prob: float = 1.,
+                 seed: int = 0, length: int = 128):
         tokens = jnp.asarray(np.frombuffer(text.encode(), np.uint8)).astype(jnp.int32).reshape(1, -1)
-        out = self.complete_tokens(tokens, temperature, top_k, top_p, seed, length)[0]
+        out = self.complete_tokens(tokens, temperature, top_k, top_p, min_prob, seed, length)[0]
         return np.asarray(out).astype(np.uint8).tobytes().decode(errors='ignore')[len(text):len(text) + length]
 
 
@@ -137,6 +140,7 @@ class CompletionInput(BaseModel):
     temperature: float = 1.
     top_k: int = 64
     top_p: int = 0.9
+    min_prob: int = 1
     seed: int = 0
     error: bool = True
 
@@ -177,7 +181,7 @@ class RestAPI:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
         tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.top_k,
-                                              params.top_p, params.seed, params.length)
+                                              params.top_p, params.min_prob, params.seed, params.length)
         tok = tok[0, len(tokens):len(tokens) + params.length].tolist()
         out = []
         for t in tok:
@@ -190,13 +194,7 @@ class RestAPI:
         return await self.decode((await self.token_completion(params)).token_completion)
 
 
-@click.group()
 def main():
-    pass
-
-
-@main.command()
-def api():
     rest_api = RestAPI()
     fast_api = FastAPI()
 
@@ -207,35 +205,6 @@ def api():
         fast_api.post('/' + key, response_model=typing.get_type_hints(fn)["return"])(fn)
 
     uvicorn.run(fast_api, host='0.0.0.0', port=62220, log_level='info', workers=1)
-
-
-@main.command()
-@click.option('--temperature', default=0.5, type=float,
-              help="Sampling temperature. Higher -> wider distribution / more random")
-@click.option('--top-k', default=32, type=int, help="Across how many of the top tokens should be sampled")
-@click.option('--top-p', default=1, type=float, help="How much probability mass to sample from")
-@click.option('--length', default=128, type=int, help="Number of tokens to generate")
-@click.option('--seed', default=0, type=int, help="Seed value for the random number generator")
-def interactive(temperature: float, top_k: int, top_p: float, seed: int, length: int):
-    model = Inference(Context())
-    while True:
-        prompt = input(">>> ")
-        out = model.complete(prompt, temperature, top_k, top_p, seed, length)
-        print(out, "-" * os.get_terminal_size().columns, sep='\n')
-
-
-@main.command()
-@click.option('--prompt', help="Text to feed into the language model.")
-@click.option('--temperature', default=0.5, type=float,
-              help="Sampling temperature. Higher -> wider distribution / more random")
-@click.option('--top-k', default=32, type=int, help="Across how many of the top tokens should be sampled")
-@click.option('--top-p', default=1, type=float, help="How much probability mass to sample from")
-@click.option('--length', default=128, type=int, help="Number of tokens to generate")
-@click.option('--seed', default=0, type=int, help="Seed value for the random number generator")
-def once(prompt: str, temperature: float, top_k: int, top_p: float, seed: int, length: int):
-    model = Inference(Context())
-    out = model.complete(prompt, temperature, top_k, top_p, seed, length)
-    print(out, "-" * os.get_terminal_size().columns, sep='\n')
 
 
 if __name__ == '__main__':
