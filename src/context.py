@@ -97,7 +97,7 @@ class TensorboardTrace(DataClass):
     """
     start_step: int = 16
     stop_step: int = 64 + 16
-    do_trace: bool = True
+    do_trace: bool = False
     output_path: str = "trace"
 
 
@@ -279,6 +279,7 @@ class WhilePredictContext(WhileContext):
         self.temperature = jnp.zeros([batch_dim_size])
         self.max_tokens = jnp.array([vocab_dim_size] * batch_dim_size)
         self.max_probability_mass = jnp.array([1] * batch_dim_size)
+        self.typical_mass = jnp.array([1] * batch_dim_size)
         self.seed = jnp.array([0] * batch_dim_size)
         self.max_probability_to_filter = jnp.array([0] * batch_dim_size)
         self.adaptive_filter_scale = jnp.array([0] * batch_dim_size)
@@ -293,6 +294,7 @@ class WhilePredictContext(WhileContext):
             self.max_probability_to_filter = config['max_probability_to_filter']
             self.adaptive_filter_scale = config['adaptive_filter_scale']
             self.adaptive_filter_power = config['adaptive_filter_power']
+            self.typical_mass = config['typical_mass']
             self.ctx.seed = config['seed']
 
     def serialize(self):
@@ -305,6 +307,7 @@ class WhilePredictContext(WhileContext):
         serialized['max_probability_to_filter'] = self.max_probability_to_filter
         serialized['adaptive_filter_scale'] = self.adaptive_filter_scale
         serialized['adaptive_filter_power'] = self.adaptive_filter_power
+        serialized['typical_mass'] = self.typical_mass
         serialized['seed'] = self.ctx.seed
 
         return serialized
