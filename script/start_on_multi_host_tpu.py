@@ -1,5 +1,7 @@
 import argparse
+import inspect
 import netrc
+import os
 import pathlib
 import subprocess
 import threading
@@ -24,8 +26,9 @@ def install(zone: str, name: str, worker: int):
 
     if subprocess.call(base + ["scp", "exec.sh", f"{name}:~/exec.sh"] + args):
         return
-    if subprocess.call(base + ["scp", str(pathlib.Path(__file__).parent.resolve().parent / "config.yaml"),
-                               f"{name}:~/HomebrewNLP/config.yaml"] + args):
+    file_path = os.path.abspath(inspect.getfile(inspect.currentframe()))
+    if subprocess.call(base + ["scp", str(pathlib.Path(file_path).parent.parent / "config.yaml"),
+                               f"{name}:~/config.yaml"] + args):
         return
     if subprocess.call(base + ["ssh", name, "--command", "bash exec.sh"] + args):
         return
@@ -39,12 +42,13 @@ def main():
     with open("exec.sh", "w") as f:
         f.write("git clone https://github.com/HomebrewNLP/HomebrewNLP-Jax/ ; "
                 "cd HomebrewNLP-Jax ; "
-                f"git fetch ; "
+                "mv ../config.yaml config.yaml ; "
+                "git fetch ; "
                 f"git checkout {branch} ; "
-                f"git pull ; "
+                "git pull ; "
                 "bash setup.sh ; "
                 f"/home/ubuntu/.local/bin/wandb login {wandb_key} ; "
-                "screen -dmS model bash run.sh")
+                "screen -dmS model bash -c 'bash run.sh; sleep 100000'")
     for i in range(hosts):
         threading.Thread(target=install, args=(zone, name, i)).start()
 
