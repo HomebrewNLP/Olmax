@@ -277,18 +277,24 @@ class WhilePredictContext(WhileContext):
         self.start_pos = jnp.zeros([batch_dim_size])
         self.stop_pos = jnp.array([sequence_dim_size] * batch_dim_size)[0]
         self.temperature = jnp.zeros([batch_dim_size])
-        self.top_k = jnp.array([vocab_dim_size] * batch_dim_size)
-        self.top_p = jnp.array([1] * batch_dim_size)
-        self.mass = jnp.array([1] * batch_dim_size)
+        self.max_tokens = jnp.array([vocab_dim_size] * batch_dim_size)
+        self.max_probability_mass = jnp.array([1] * batch_dim_size)
+        self.typical_mass = jnp.array([1] * batch_dim_size)
         self.seed = jnp.array([0] * batch_dim_size)
+        self.max_probability_to_filter = jnp.array([0] * batch_dim_size)
+        self.adaptive_filter_scale = jnp.array([0] * batch_dim_size)
+        self.adaptive_filter_power = jnp.array([1] * batch_dim_size)
 
         if self.config is not None:
             self.start_pos = config['start_pos']
             self.stop_pos = config['stop_pos']
             self.temperature = config['temperature']
-            self.top_k = config['top_k']
-            self.top_p = config['top_p']
-            self.mass = config['mass']
+            self.max_tokens = config['max_tokens']
+            self.max_probability_mass = config['max_probability_mass']
+            self.max_probability_to_filter = config['max_probability_to_filter']
+            self.adaptive_filter_scale = config['adaptive_filter_scale']
+            self.adaptive_filter_power = config['adaptive_filter_power']
+            self.typical_mass = config['typical_mass']
             self.ctx.seed = config['seed']
 
     def serialize(self):
@@ -296,9 +302,12 @@ class WhilePredictContext(WhileContext):
         serialized['start_pos'] = self.start_pos
         serialized['stop_pos'] = self.stop_pos
         serialized['temperature'] = self.temperature
-        serialized['top_k'] = self.top_k
-        serialized['top_p'] = self.top_p
-        serialized['mass'] = self.mass
+        serialized['max_tokens'] = self.max_tokens
+        serialized['max_probability_mass'] = self.max_probability_mass
+        serialized['max_probability_to_filter'] = self.max_probability_to_filter
+        serialized['adaptive_filter_scale'] = self.adaptive_filter_scale
+        serialized['adaptive_filter_power'] = self.adaptive_filter_power
+        serialized['typical_mass'] = self.typical_mass
         serialized['seed'] = self.ctx.seed
 
         return serialized
