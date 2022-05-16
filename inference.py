@@ -50,7 +50,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     top_k_mask = jnp.less(ranks, wctx.ctx.dims.vocab - wctx.max_tokens.reshape(-1, 1, 1))  # we want to not mask top k
 
     cumulative_probabilities = lax.rev(jnp.cumsum(lax.rev(jax.nn.softmax(out), (1,)), -1), (1,))
-    overflow = jnp.greater(cumulative_probabilities, wctx.top_p.reshape(-1, 1, 1))
+    overflow = jnp.greater(cumulative_probabilities, wctx.max_probability_mass.reshape(-1, 1, 1))
     overflow = jnp.concatenate([overflow[:, :, 1:], jnp.zeros_like(overflow[:, :, :1])], -1)
     top_p_mask = jnp.take_along_axis(overflow, ranks, axis=2)
 
@@ -58,7 +58,7 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     shifted_scores = jnp.abs((jnp.exp(log_softmax) * log_softmax).sum(-1, keepdims=True) - log_softmax)
     sorted_out, argsort_out = lax.sort_key_val(shifted_scores, arange)
     cumulative_probabilities = jnp.cumsum(jax.nn.softmax(jnp.take_along_axis(out_token, argsort_out, axis=2)), -1)
-    overflow = jnp.less(cumulative_probabilities, wctx.mass.reshape(-1, 1, 1))
+    overflow = jnp.less(cumulative_probabilities, wctx.typical_mass.reshape(-1, 1, 1))
     overflow_at = overflow.sum(-1, keepdims=True).astype(jnp.int32)
     overflow = jnp.take_along_axis(sorted_out, overflow_at, axis=2)
     overflow = jnp.greater(sorted_out, overflow)
