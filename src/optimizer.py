@@ -45,7 +45,7 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
         quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
     if quantize is None:
-        quantize = small_parameter(ctx.global_prefix, inp)
+        quantize = not small_parameter(ctx.global_prefix, inp)
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else ctx.model.storage_dtype,
                       init_val=jnp.zeros_like(inp) if init_val is None else init_val)
     new_state = state.astype(jnp.float32) * beta + inp * (1 - beta)
