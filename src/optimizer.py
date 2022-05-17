@@ -37,21 +37,30 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
     return grad * optimizer_rsqrt(weight_update)
 
 
-def ema(ctx: Context, inp: jnp.ndarray, current_step: jnp.ndarray, beta: float, prefix: str, quantize: bool,
-        init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
+def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
+    return "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2
+
+
+def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: str,
+        quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
+    if quantize is None:
+        quantize = small_parameter(ctx.global_prefix, inp)
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else ctx.model.storage_dtype,
                       init_val=jnp.zeros_like(inp) if init_val is None else init_val)
     new_state = state.astype(jnp.float32) * beta + inp * (1 - beta)
     assign(ctx, "momentum_buffer", new_state)
-    return new_state * (1 - beta ** (current_step + 1))  # debias
+    return new_state * (1 - beta ** (step + 1))  # debias
 
 
-def adam(ctx: Context, grad: jnp.ndarray, current_step: jnp.ndarray) -> jnp.ndarray:
+def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
+    ctx = ctx.add_to_prefix("square_ema", count=False)
+    return optimizer_rsqrt(ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "rms"))
+
+
+def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("adam", count=False)
-    exp_avg = ema(ctx, grad, current_step, 1 - ctx.optimizer.adam_beta1, "avg", False)
-    exp_avg_sq = ema(ctx, jnp.square(grad), current_step, 1 - ctx.optimizer.adam_beta2, "avg_sq", False)
-    return exp_avg * optimizer_rsqrt(exp_avg_sq)
+    return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg") * square_ema(ctx, grad, step)
 
 
 def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
@@ -90,17 +99,17 @@ def graft(ctx: Context, update0: jnp.ndarray, update1: jnp.ndarray) -> jnp.ndarr
     return update0 / jnp.maximum(jnp.linalg.norm(update0), ctx.optimizer.epsilon) * jnp.linalg.norm(update1)
 
 
-def get_current_lr(ctx: Context, current_step: jnp.ndarray) -> jnp.ndarray:
+def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
-    learning_rate *= jnp.minimum(current_step, opt.warmup_end).astype(jnp.float32) / opt.warmup_end
-    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(current_step.astype(jnp.float32) - opt.warmup_end)
+    learning_rate *= jnp.minimum(step, opt.warmup_end).astype(jnp.float32) / opt.warmup_end
+    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(step.astype(jnp.float32) - opt.warmup_end)
     return learning_rate.astype(ctx.model.storage_dtype)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp.ndarray):
+def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray):
     ctx = ctx.add_to_prefix("optimizer")
-    lr = -get_current_lr(ctx, current_step)
+    lr = -get_current_lr(ctx, step)
 
     for param_name, grad in grads.items():
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
@@ -110,14 +119,14 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], current_step: jnp
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
-        if "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2:
-            grad = adam(inner_ctx, grad, current_step)  # Do adam update for small parameters
+        if small_parameter(param_name, grad):
+            grad = adam(inner_ctx, grad, step)  # Do adam update for small parameters
         else:  # Do shampoo/sm3 update for large parameters
             if ctx.optimizer.use_shampoo:
-                grad = shampoo(inner_ctx, param_name, grad, current_step)
+                grad = shampoo(inner_ctx, param_name, grad, step)
             else:
                 grad = sm3(inner_ctx, param_name, grad)
-            grad = ema(inner_ctx, grad, current_step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
+            grad = ema(inner_ctx, grad, step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
         ctx.parameters[param_name] = grad + ctx.parameters[param_name]
