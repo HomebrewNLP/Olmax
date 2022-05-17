@@ -22,17 +22,18 @@ GLOBAL_DICT = {}
 CACHE_TIME = 10
 
 
-def exec_command(wandb_key: str, sweep_id: str, data_path: str, pretrained_path: str):
+def exec_command(wandb_key: str, sweep_id: str, data_path: str, pretrained_path: str, branch: str):
     data_path = data_path.replace("/", "\\/")
     pretrained_path = pretrained_path.replace("/", "\\/")
     # Bottom one doesn't use , on purpose
-    return ' && '.join((f"sudo apt --fix-missing --fix-broken install -y git python3 python3-pip",
-                        f"(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
-                        f"git clone --depth 1 https://github.com/HomebrewNLP/HomebrewNLP-Jax/", f"cd HomebrewNLP-Jax",
-                        f"(bash setup.sh ; exit 0)", f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
+    return ' && '.join(("sudo apt --fix-missing --fix-broken install -y git python3 python3-pip",
+                        "(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
+                        f"git clone --depth 1 --branch {branch} https://github.com/HomebrewNLP/HomebrewNLP-Jax/",
+                        "cd HomebrewNLP-Jax", "(bash setup.sh ; exit 0)",
+                        f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
                         f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
                         # f'sed -i "s/{OLD_PRETRAINED_PATH}/{pretrained_path}/g" src/context.py',
-                        f'screen -dmS model '
+                        'screen -dmS model '
                         f'bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent {sweep_id}"'))
 
 
@@ -43,8 +44,9 @@ def send_to_tpu(zone: str, host: str, filename: str, command: str):
     os.remove(host)
 
 
-def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str, pretrained_path: str):
-    command = exec_command(wandb_key, sweep_id, data_path, pretrained_path)
+def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str, pretrained_path: str,
+                         branch: str):
+    command = exec_command(wandb_key, sweep_id, data_path, pretrained_path, branch)
     send_to_tpu(zone, host, "setup.sh", command)
 
 
@@ -119,7 +121,7 @@ def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, servic
 
 def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
                  data_path: str, pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
-                 creation_semaphore: threading.Semaphore):
+                 branch: str, creation_semaphore: threading.Semaphore):
     host = f"{prefix}-{tpu_id}"
     time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER * timeout_multiplier)
     if host in tpu_names(zone, preempted=True, deleting=True):
@@ -131,7 +133,7 @@ def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_ve
 
     while True:
         try:
-            send_commands_to_tpu(wandb_key, sweep_id, host, zone, data_path, pretrained_path)
+            send_commands_to_tpu(wandb_key, sweep_id, host, zone, data_path, pretrained_path, branch)
             exec_tpu(host, zone, "bash setup.sh")
 
             while host in tpu_names(zone, preempted=False):
@@ -146,7 +148,8 @@ def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_ve
 
 
 def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone: str, data_path: str,
-                   pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str):
+                   pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
+                   branch: str):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
     procs = []
     creation_semaphore = threading.Semaphore(2)
@@ -154,7 +157,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
         proc = threading.Thread(target=start_single, daemon=True,
                                 args=(prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone, data_path,
                                       pretrained_path, preemptible, timeout_multiplier, service_account,
-                                      creation_semaphore))
+                                      branch, creation_semaphore))
         proc.start()
         procs.append(proc)
     while all(t.is_alive() for t in procs):
@@ -166,7 +169,7 @@ def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone
             return
 
 
-def parse_args() -> typing.Tuple[int, int, str, str, str, str, str, bool, bool, int, str]:
+def parse_args() -> typing.Tuple[int, int, str, str, str, str, str, bool, bool, int, str, str]:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tpus", type=int, default=1, help="How many TPUs should be launched")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
@@ -185,20 +188,22 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, str, str, bool, bool, 
     parser.add_argument("--timeout-multiplier", default=1, type=int,
                         help="additional timeout multiplier (for launching many script in parallel)")
     parser.add_argument("--service-account", type=str,
-                        help="Service account that controls permissions of TPU (for example, to ensure EU TPUs won't use US data)")
+                        help="Service account that controls permissions of TPU (for example, to ensure EU TPUs won't "
+                             "use US data)")
+    parser.add_argument("--branch", type=str, help="Branch on github to use")
     args = parser.parse_args()
     return (args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep, args.data_path, args.pretrained_path,
-            bool(args.cleanup), bool(args.preemptible), args.timeout_multiplier, args.service_account)
+            bool(args.cleanup), bool(args.preemptible), args.timeout_multiplier, args.service_account, args.branch)
 
 
 def main():
     (tpus, tpu_version, prefix, zone, sweep_id, data_path, pretrained_path, cleanup, preemptible, timeout_multiplier,
-     service_account) = parse_args()
+     service_account, branch) = parse_args()
     if cleanup:
         delete_all(prefix, zone)
     else:
         start_multiple(prefix, tpus, sweep_id, tpu_version, zone, data_path, pretrained_path, preemptible,
-                       timeout_multiplier, service_account)
+                       timeout_multiplier, service_account, branch)
 
 
 if __name__ == '__main__':
