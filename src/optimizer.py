@@ -93,7 +93,7 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
     return grad * grad_scale
 
 
-def graft(magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
+def graft(ctx: Context, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
     return direction / jnp.maximum(jnp.linalg.norm(direction), ctx.optimizer.epsilon) * jnp.linalg.norm(magnitude)
 
 
@@ -120,7 +120,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         if small_parameter(param_name, grad):  # Do adam update for small parameters
             grad = adam(inner_ctx, grad, step)
         else:  # Do shampoo-sm3 update for large parameters
-            grad = graft(sm3(inner_ctx, param_name, grad), shampoo(inner_ctx, param_name, grad, step))
+            grad = graft(ctx, sm3(inner_ctx, param_name, grad), shampoo(inner_ctx, param_name, grad, step))
             grad = ema(inner_ctx, grad, step, 1 - ctx.optimizer.momentum_beta, "momentum")
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         ctx.parameters[param_name] = grad * parameter_lr + ctx.parameters[param_name]
