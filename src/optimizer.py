@@ -55,7 +55,7 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
 
 def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
     ctx = ctx.add_to_prefix("square_ema", count=False)
-    return optimizer_rsqrt(ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "rms"))
+    return optimizer_rsqrt(ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "square_ema"))
 
 
 def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
@@ -93,10 +93,8 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
     return grad * grad_scale
 
 
-def graft(ctx: Context, update0: jnp.ndarray, update1: jnp.ndarray) -> jnp.ndarray:
-    if ctx.is_initializing:
-        return update0
-    return update0 / jnp.maximum(jnp.linalg.norm(update0), ctx.optimizer.epsilon) * jnp.linalg.norm(update1)
+def graft(magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
+    return direction / jnp.maximum(jnp.linalg.norm(direction), ctx.optimizer.epsilon) * jnp.linalg.norm(magnitude)
 
 
 def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
@@ -121,11 +119,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         if small_parameter(param_name, grad):
             grad = adam(inner_ctx, grad, step)  # Do adam update for small parameters
-        else:  # Do shampoo/sm3 update for large parameters
-            if ctx.optimizer.use_shampoo:
-                grad = shampoo(inner_ctx, param_name, grad, step)
-            else:
-                grad = sm3(inner_ctx, param_name, grad)
+        else:  # Do shampoo-sm3 update for large parameters
+            grad = graft(sm3(inner_ctx, param_name, grad), shampoo(inner_ctx, param_name, grad, step))
             grad = ema(inner_ctx, grad, step, 1 - ctx.optimizer.momentum_beta, "momentum", True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         grad *= parameter_lr
