@@ -42,14 +42,17 @@ def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
 
 
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: str,
-        quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
+        quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None,
+        heavyball: bool = False) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
     if quantize is None:
         quantize = not small_parameter(ctx.global_prefix, inp)
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else ctx.model.storage_dtype,
                       init_val=jnp.zeros_like(inp) if init_val is None else init_val)
-    new_state = state.astype(jnp.float32) * beta + inp * (1 - beta)
+    new_state = state.astype(jnp.float32) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
+    if heavyball:
+        return new_state
     return new_state * (1 - beta ** (step + 1))  # debias
 
 
@@ -97,8 +100,9 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray)
     return grad * grad_scale
 
 
-def graft(ctx: Context, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
-    return (jnp.linalg.norm(magnitude) / clip_norm(direction, ctx.optimizer.epsilon)) * direction
+def graft(magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
+    scale = jnp.sqrt(jnp.square(magnitude).sum() / jnp.maximum(jnp.square(direction).sum(), 1e-16))
+    return scale * direction
 
 
 def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
@@ -124,7 +128,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         if small_parameter(param_name, grad):  # Do adam update for small parameters
             grad = adam(inner_ctx, grad, step)
         else:  # Do shampoo-sm3 update for large parameters
-            grad = graft(ctx, sm3(inner_ctx, param_name, grad), shampoo(inner_ctx, param_name, grad, step))
-            grad = ema(inner_ctx, grad, step, 1 - ctx.optimizer.momentum_beta, "momentum")
+            grad = graft(sm3(inner_ctx, param_name, grad), shampoo(inner_ctx, param_name, grad, step))
+            grad = ema(inner_ctx, grad, step, 1 - ctx.optimizer.momentum_beta, "momentum", heavyball=True,
+                       quantize=False)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         ctx.parameters[param_name] = grad * parameter_lr + ctx.parameters[param_name]
