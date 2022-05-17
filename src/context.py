@@ -113,7 +113,7 @@ class WandB(DataClass):
 class Optimizer(DataClass):
     use_shampoo: bool = True
     block_size: int = 512
-    epsilon: float = 1e-6
+    epsilon: float = 1e-5
     start_preconditioning_step: int = 16
     preconditioning_compute_steps: int = 128
     statistics_compute_steps: int = 4

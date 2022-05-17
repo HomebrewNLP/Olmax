@@ -68,7 +68,9 @@ def get_optimizer_state(ctx: Context):
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
         new_ctx.parameters = parameters
-        grads = {name: jnp.zeros_like(param) for name, param in parameters.items()}
+        keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
+        grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
+                 for key, (name, param) in zip(keys, parameters.items())}
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
@@ -119,7 +121,8 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
 
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()},
                  'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': None,
-                 'current_step': None, 'loss': None, 'top_loss': None}
+                 'current_step': None, 'loss': None, 'top_loss': None
+                 }
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
 

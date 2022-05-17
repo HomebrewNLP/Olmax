@@ -86,15 +86,19 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
 
 
+def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
+    return jnp.maximum(jnp.sqrt(jnp.square(val).sum()), min_norm)
+
+
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    grd_norm = jnp.maximum(jnp.sqrt(jnp.square(grad).sum()), 1e-6)
-    wgt_norm = jnp.maximum(jnp.sqrt(jnp.square(ctx.parameters[param_name]).sum()), 1e-3)
+    grd_norm = clip_norm(grad, ctx.optimizer.epsilon)
+    wgt_norm = clip_norm(ctx.parameters[param_name], 1e-3)
     grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
     return grad * grad_scale
 
 
 def graft(ctx: Context, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
-    return direction / jnp.maximum(jnp.linalg.norm(direction), ctx.optimizer.epsilon) * jnp.linalg.norm(magnitude)
+    return (jnp.linalg.norm(magnitude) / clip_norm(direction, ctx.optimizer.epsilon)) * direction
 
 
 def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
