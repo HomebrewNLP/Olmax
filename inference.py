@@ -23,7 +23,7 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
     is_eos = jnp.logical_and(is_eos, behind_start)
     is_eos = jnp.cumsum(is_eos, axis=1)
     eos_at_seq = (is_eos > 0).sum(0) == wctx.ctx.dims.batch
-    eos = jnp.take_along_axis(eos_at_seq.reshape(-1), wctx.current_step.reshape(-1), axis=0)
+    eos = jnp.take_along_axis(eos_at_seq.reshape(-1), wctx.current_step.reshape(-1).astype(jnp.int32), axis=0)
     stop = jnp.less(wctx.current_step, wctx.stop_pos)
     return jnp.logical_or(eos, stop).reshape(())
 
