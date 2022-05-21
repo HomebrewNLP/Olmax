@@ -84,10 +84,10 @@ def deep_replace(d, value):
 def depth(param_name):
     return int(param_name.split('/reversible:')[1].split('/')[0])
 
-def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*', transfer: bool = True):
+def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*', transfer: bool = False):
     ignore = re.compile(ignore)
 
-    with open(f"{ctx.training.checkpoint_path}/structure.json", "r") as f:
+    with open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
         new_structure = f.read()
     new_structure = json.loads(new_structure)
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
@@ -95,7 +95,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*', transfer: bool = True
 
     with multiprocessing.pool.ThreadPool(ctx.dims.heads) as p:
         start = time.time()
-        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_path}/{i}_" for i in range(ctx.dims.heads)]))
+        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_load_path}/{i}_" for i in range(ctx.dims.heads)]))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
     unsharded = []

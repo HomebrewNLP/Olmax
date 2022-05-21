@@ -7,19 +7,17 @@ import warnings
 
 import jax
 import jax._src.util as util
-import numpy as np
 import wandb
 import yaml
 from jax import numpy as jnp
-from smart_open import open as sm_open
 
-from src.backend import loop, device_id
+from src.backend import device_id, loop
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
-from src.model import compute, body_ctx
+from src.model import body_ctx, compute
 from src.optimizer import get_current_lr, update
-from src.utils.checkpoint import write_ckpt
+from src.utils.checkpoint import read_ckpt, write_ckpt
 from src.utils.wandb import WandbLog
 
 
@@ -110,16 +108,13 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
     buffer_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items()) - parameter_count
 
-    if wctx.ctx.training.pretrained_embedding_path:
-        with sm_open(wctx.ctx.training.pretrained_embedding_path, 'rb') as f:
-            param = np.load(f)
-        key = [k for k in wctx.ctx.parameters.keys() if '/input_embed:0/inp_embd' in k][0]
-        wctx.ctx.parameters[key] = jnp.asarray(param)
-        del param
+    if wctx.ctx.training.checkpoint_load_path:
+        read_ckpt(wctx.ctx, transfer=True)
 
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()},
                  'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': None,
-                 'current_step': None, 'loss': None, 'top_loss': None}
+                 'current_step': None, 'loss': None, 'top_loss': None
+                 }
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
 
