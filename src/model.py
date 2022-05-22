@@ -6,7 +6,7 @@ import jax
 from jax import lax, numpy as jnp
 from jax.experimental.compilation_cache import compilation_cache
 
-from src.backend import get_param, matmul, conv as lax_conv, device_id
+from src.backend import conv as lax_conv, device_id, get_param, matmul
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -25,11 +25,13 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
 
 
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
-                   psum: bool = False, act: bool = True) -> jnp.ndarray:
+                   psum: bool = False, act: bool = True, init_mean: typing.Optional[float] = 1) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
+        if init_mean is None:
+            init_mean = float(bool(ctx.training.checkpoint_load_path))
+        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=init_mean, dtype=run_type)
 
     if ctx.is_initializing:
         return inp
@@ -80,7 +82,7 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_feat
 
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
-    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
+    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False, init_mean=None)
     inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.dims.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
@@ -93,7 +95,7 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("pointwise")
-    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
+    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False, init_mean=None)
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.pointwise_features)
     inp = activate(ctx, inp)
     return conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.pointwise_features, ctx.dims.features)
@@ -136,6 +138,7 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     # 500ms at 256 features (forward pass, backward takes slightly longer)
     # While conv 256->256 with kernel_size=5 takes ~11.3ms
     ctx = ctx.add_to_prefix("qrnn")
+    inp = scale_norm_act(ctx, inp, ctx.dims.features, init_mean=None)
     forget = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.inner_bottleneck_features)
     mid = conv(ctx, inp, ctx.dims.pointwise_kernel, 1, ctx.dims.features, ctx.dims.inner_bottleneck_features)
     out = qrnn_grad(ctx, forget, mid)

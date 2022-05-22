@@ -2,7 +2,7 @@
 Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca9370576ad9d247facf6cb8e9699300e690
 /mesh_transformer/checkpoint.py
 """
-
+import collections
 import functools
 import io
 import json
@@ -81,10 +81,10 @@ def deep_replace(d, value):
         return {k: deep_replace(v, value) for k, v in d.items()}
     return value
 
-def depth(param_name):
-    return int(param_name.split('/reversible:')[1].split('/')[0])
+def depth(param_name, name:str='reversible'):
+    return int(param_name.split(f'/{name}:')[1].split('/')[0])
 
-def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*', transfer: bool = False):
+def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     ignore = re.compile(ignore)
 
     with open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
@@ -107,8 +107,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*', transfer: bool = Fals
     params = jax.tree_unflatten(new_structure, unsharded)
 
     print(f"Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
-    if not transfer:  # TODO: Add support for weight transfer. Not important, but difficult to implement.
-        print(f"Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
+    print(f"Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
 
     if not ctx.parameters:
         for key, param in params.items():
@@ -116,12 +115,6 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*', transfer: bool = Fals
                 ctx.parameters[key] = param
         return
 
-    checkpoint_depth = 1 + max(depth(key) for key in params.keys() if '/reversible:' in key)  # starts at 0
     for key in ctx.parameters.keys():
         if key in params:
             ctx.parameters[key] = params[key]
-        elif transfer and '/reversible:' in key:
-            key_depth = depth(key)
-            mod_key = key.replace(str(key_depth), str(key_depth % checkpoint_depth))
-            if mod_key in params:
-                ctx.parameters[key] = params[mod_key]
