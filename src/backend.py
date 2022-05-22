@@ -30,12 +30,13 @@ def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
     return lax.reduce_window(inputs, 0, lax.add, dims, strides, padding)
 
 
-def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
+def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int,
+         dilation: typing.Optional[typing.Tuple[int]] = None):
     ndim = weight.ndim
     dimension_numbers = (0, ndim - 1) + tuple(range(1, ndim - 1))
     dimension_numbers = lax.ConvDimensionNumbers(dimension_numbers, tuple(range(ndim)), dimension_numbers)
     return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
-                                    dimension_numbers=dimension_numbers, precision='fastest')
+                                    rhs_dilation=dilation, dimension_numbers=dimension_numbers, precision='fastest')
 
 
 def device_id(ctx: Context):

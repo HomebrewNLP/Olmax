@@ -6,7 +6,7 @@ import jax
 from jax import lax, numpy as jnp
 from jax.experimental.compilation_cache import compilation_cache
 
-from src.backend import get_param, matmul, conv as lax_conv, device_id
+from src.backend import conv as lax_conv, device_id, get_param, matmul
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -67,7 +67,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     return _fn(inp, weight)
 
 
-def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
+def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int,
+         dilation: int = 1):
     ctx = ctx.add_to_prefix("conv")
     fan_in = in_features * conv_kernel
     weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale,
@@ -75,20 +76,19 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_feat
 
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,))
-    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
+    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1, (dilation,))
 
 
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
     inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.dims.heads,
-               ctx.dims.features, ctx.dims.inner_bottleneck_features)
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1 / ctx.dims.heads, ctx.dims.features,
+               ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
-    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1,
-               ctx.dims.inner_bottleneck_features, ctx.dims.inner_bottleneck_features)
+    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, 1, ctx.dims.inner_bottleneck_features,
+               ctx.dims.inner_bottleneck_features, ctx.dims.outer_bottleneck_kernel)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features)
-    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1,
-                ctx.dims.inner_bottleneck_features, ctx.dims.features)
+    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1, ctx.dims.inner_bottleneck_features, ctx.dims.features)
 
 
 def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
