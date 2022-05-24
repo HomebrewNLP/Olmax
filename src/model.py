@@ -281,15 +281,17 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     return _fn(*src)
 
 
-def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndarray], tgt: jnp.ndarray) -> typing.Tuple[
-    jnp.ndarray, jnp.ndarray]:
+def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndarray], tgt: jnp.ndarray
+                       ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
     src, param = src_wgt
     devices = ctx.dims.heads
 
-    def _xent_slice(inp: typing.Tuple[jnp.ndarray, ...], carry):
+    def _xent_slice(inp: typing.Tuple[
+        jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+                    carry):
         inp, i, wgt, inner_tgt, index, d_wgt, loss, accuracy = inp
         inp_slice = inp[i]
         tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.vocab)
@@ -319,10 +321,14 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1)
         index = lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
-        (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (
-                inp, jnp.zeros((), dtype=jnp.int32), wgt, inner_tgt, index,
-                jnp.zeros(wgt.shape[::-1], dtype=jnp.float32), jnp.zeros((), dtype=jnp.float32),
-                jnp.zeros((), dtype=jnp.float32)), None, inp.shape[0])
+        (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (inp, jnp.zeros((), dtype=jnp.int32),
+                                                                            wgt,
+                                                                            inner_tgt, index,
+                                                                            jnp.zeros(wgt.shape[::-1],
+                                                                                      dtype=jnp.float32),
+                                                                            jnp.zeros((), dtype=jnp.float32),
+                                                                            jnp.zeros((), dtype=jnp.float32)), None,
+                                                              inp.shape[0])
         dx = dx.transpose(1, 0, 2) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.features, -1).transpose(1, 0)
         dx = dx.reshape(original_shape)
@@ -365,9 +371,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
-    scale = 1 / ctx.dims.heads / ctx.dims.features
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, lr_scale=scale,
-                    post_variance_scale=scale)
+    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
+                    scale=(ctx.dims.heads * ctx.dims.features) ** -0.5)
     if ctx.is_initializing:
         return out
     return out, wgt
