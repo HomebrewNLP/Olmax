@@ -105,7 +105,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
                 param *= std
             if mean is not None:
                 param += mean
-        ctx.parameter_variance[prefix_name] = lr_scale * scale
+        ctx.parameter_variance[prefix_name] = lr_scale * scale ** 2
         param = param.astype(storage_dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]
