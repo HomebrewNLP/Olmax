@@ -17,14 +17,12 @@ TIMEOUT_MULTIPLIER = 10
 API = googleapiclient.discovery.build('tpu', 'v1')
 _, PROJECT = google.auth.default()
 OLD_DATA_PATH = DataContext.path.replace("/", "\\/")[:-1]  # remove * at the end
-# OLD_PRETRAINED_PATH = Training.pretrained_embedding_path.replace("/", "\\/")  # TODO: Figure out how to do the sed
 GLOBAL_DICT = {}
 CACHE_TIME = 10
 
 
 def exec_command(wandb_key: str, sweep_id: str, data_path: str, pretrained_path: str, branch: str):
     data_path = data_path.replace("/", "\\/")
-    pretrained_path = pretrained_path.replace("/", "\\/")
     # Bottom one doesn't use , on purpose
     return ' && '.join(("sudo apt --fix-missing --fix-broken install -y git python3 python3-pip",
                         "(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
@@ -32,8 +30,7 @@ def exec_command(wandb_key: str, sweep_id: str, data_path: str, pretrained_path:
                         "cd HomebrewNLP-Jax", "(bash setup.sh ; exit 0)",
                         f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
                         f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
-                        # f'sed -i "s/{OLD_PRETRAINED_PATH}/{pretrained_path}/g" src/context.py',
-                        'screen -dmS model '
+                        f'screen -dmS model '
                         f'bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent {sweep_id}"'))
 
 
