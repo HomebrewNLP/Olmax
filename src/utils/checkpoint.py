@@ -1,7 +1,8 @@
 """
-Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca9370576ad9d247facf6cb8e9699300e690/mesh_transformer/checkpoint.py
+Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca9370576ad9d247facf6cb8e9699300e690
+/mesh_transformer/checkpoint.py
 """
-
+import collections
 import functools
 import io
 import json
@@ -80,11 +81,13 @@ def deep_replace(d, value):
         return {k: deep_replace(v, value) for k, v in d.items()}
     return value
 
+def depth(param_name, name:str='reversible'):
+    return int(param_name.split(f'/{name}:')[1].split('/')[0])
 
 def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     ignore = re.compile(ignore)
 
-    with open(f"{ctx.training.checkpoint_path}/structure.json", "r") as f:
+    with open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
         new_structure = f.read()
     new_structure = json.loads(new_structure)
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
@@ -92,7 +95,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
 
     with multiprocessing.pool.ThreadPool(ctx.dims.heads) as p:
         start = time.time()
-        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_path}/{i}_" for i in range(ctx.dims.heads)]))
+        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_load_path}/{i}_" for i in range(ctx.dims.heads)]))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
     unsharded = []
@@ -102,8 +105,16 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
             x.dtype = jnp.bfloat16
         unsharded.append(x)
     params = jax.tree_unflatten(new_structure, unsharded)
-    for key, param in params.items():
-        if key in ctx.parameters:
-            ctx.parameters[key] = param
-        elif not ignore.match(key):
-            print(f"Unknown parameter {key}")
+
+    print(f"Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
+    print(f"Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
+
+    if not ctx.parameters:
+        for key, param in params.items():
+            if key in ctx.parameters:
+                ctx.parameters[key] = param
+        return
+
+    for key in ctx.parameters.keys():
+        if key in params:
+            ctx.parameters[key] = params[key]

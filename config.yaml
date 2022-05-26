@@ -1,25 +1,85 @@
+
 data:
-    datasets_used_per_step: 128
-    interleaved_datasets: 256
-    parallel_workers: 128
+    datasets_used_per_step: 1
+    interleaved_datasets: 1
+    parallel_workers: 1
+    path: gs://homebrewnlp-eu/the-char-pile/*
     prefetch_buffer: 2
+    seed: 0
+    shuffle_buffer: 0
+    vocab_size: 256
 dims:
-    sizes:
-        sequence: 65536
-        batch: 32
-        depth: 4
-        features: 256
+    batch: 512
+    depth: 16
+    features: 256
+    heads: 8
+    inner_bottleneck_features: 128
+    inner_bottleneck_kernel: 49
+    intermediate: 512
+    moe_intermediate: 4096
+    one: 1
+    outer_bottleneck_kernel: 25
+    pointwise_features: 512
+    pointwise_kernel: 5
+    sequence: 4096
+    vocab: 256
+global_prefix: ''
+model:
+    activation_std: 0.5893595616022745
+    computation_dtype: bfloat16
+    leaky_relu_slope: 0.02
+    norm_eps: 1.0e-05
+    qrnn_frequency: 8
+    rezero_lr_scale: 0.01
+    storage_dtype: float32
 optimizer:
+    adam_beta1: 0.1
+    adam_beta2: 0.01
+    block_size: 512
+    epsilon: 1.0e-06
     exponential_decay: 1.0e-05
-    gradient_clip: 0.001
-    learning_rate: 0.01
-    warmup_end: 4096
+    gradient_clip: 0.01
+    learning_rate: 1
+    momentum_beta: 0.1
+    preconditioning_compute_steps: 128
+    shampoo_beta2: 0.99
+    skip_preconditioning_dim_size_gt: 1024
+    start_preconditioning_step: 16
+    statistics_compute_steps: 4
+    use_shampoo: true
+    warmup_end: 1024
+    weight_decay: 0.001
+seed: 0
 training:
-    device_steps: 32
+    checkpoint_interval: 128
+    checkpoint_path: gs://homebrewnlp-eu/homebrewnlp-checkpoint-high-batch
+    device_steps: 1
     device_unroll: 1
+    do_checkpoint: false
+    early_stopping:
+        expected_loss:
+            exponent: -0.3642513
+            offset: 6.165868
+            scale: 39.08037
+        loss_patience: 0.875
+        maximum_spike_duration: 24
+        maximum_spike_size: 3
+        minimum_relative_loss_change: 0.003
+    print_interval: 1
+    steps: 65536
     trace:
         do_trace: false
-        start_step: 2
-        stop_step: 8
-model:
-    feed_forward_factor: 2
+        output_path: trace
+        start_step: 16
+        stop_step: 80
+    z_loss: 0.01
+wandb:
+    entity: homebrewnlp
+    log_frequency: 1
+    median_sizes:
+    - 64
+    - 256
+    - 1024
+    percentile: 25
+    project: gpt
+    use_wandb: true 
