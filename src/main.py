@@ -54,7 +54,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         return params
 
     inp = jnp.broadcast_to(inp, (len(jax.local_devices()),) + inp.shape)
-    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0,), out_axes=(0, 0), donate_argnums=(0,))
+    pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=0, out_axes=0, donate_argnums=(0,))
     ctx.parameters = pmapped(inp)
 
 
@@ -65,8 +65,8 @@ def get_optimizer_state(ctx: Context):
         new_ctx = copy.deepcopy(new_ctx)
         new_ctx.parameters = parameters
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
-        grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
-                 for key, (name, param) in zip(keys, parameters.items())}
+        grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001 for
+                 key, (name, param) in zip(keys, parameters.items())}
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
@@ -112,7 +112,8 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
         read_ckpt(wctx.ctx)
 
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()}, 'data': None, 'current_step': None,
-                 'loss': None, 'top_loss': None}
+                 'loss': None, 'top_loss': None
+                 }
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
 
@@ -153,8 +154,8 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
                 jax.profiler.start_trace(wctx.ctx.training.trace.output_path)
             if idx == wctx.ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
-        if wctx.ctx.training.do_checkpoint \
-                and (idx + 1) % (wctx.ctx.training.checkpoint_interval // wctx.ctx.training.device_steps) == 0:
+        if wctx.ctx.training.do_checkpoint and (idx + 1) % (
+                wctx.ctx.training.checkpoint_interval // wctx.ctx.training.device_steps) == 0:
             write_ckpt(wctx.ctx)
 
 
