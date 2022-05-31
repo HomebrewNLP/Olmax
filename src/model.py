@@ -71,7 +71,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
 
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
     ctx = ctx.add_to_prefix("conv")
-    fan_in = jnp.arange(2, conv_kernel * 2, 2) / (conv_kernel * (conv_kernel + 1)) / in_features
+    fan_in = jnp.arange(2, 2 + conv_kernel * 2, 2) / (conv_kernel * (conv_kernel + 1)) / in_features
     fan_in = fan_in.reshape(1, 1, -1)
     weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale,
                        lr_scale=fan_in)
