@@ -92,7 +92,6 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         computation_dtype = dtype
         storage_dtype = dtype
 
-    ctx.parameter_variance[prefix_name] = lr_scale * scale
     if prefix_name not in ctx.parameters:
         if init_val is not None:
             param = init_val * scale * post_variance_scale
@@ -105,6 +104,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
                 param *= std
             if mean is not None:
                 param += mean
+        ctx.parameter_variance[prefix_name] = lr_scale * scale
         param = param.astype(storage_dtype)
         assign(ctx, name, param)
     param = ctx.parameters[prefix_name]

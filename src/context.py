@@ -235,12 +235,13 @@ class WhileContext(DataClass):
 
         if self.config is not None:
             self.ctx.parameters = config['parameters']
+            self.ctx.parameter_variance = config['parameter_variance']
             self.current_step = config['current_step']
             self.data = config['data']
 
     def _serialize(self) -> dict:
-        return {'parameters': self.ctx.parameters, 'current_step': self.current_step,
-                'data': self.data}
+        return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'data': self.data,
+                'parameter_variance': self.ctx.parameter_variance}
 
     def __call__(self, data: jnp.ndarray):
         self.data = data
