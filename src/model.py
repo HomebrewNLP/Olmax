@@ -71,7 +71,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
 
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
     ctx = ctx.add_to_prefix("conv")
-    fan_in = jnp.arange(1, conv_kernel + 1, dtype=ctx.model.storage_dtype)
+    fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
     fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
     fan_in = fan_in / fan_in.sum()
     fan_in = fan_in / in_features
