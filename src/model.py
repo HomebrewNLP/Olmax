@@ -72,9 +72,13 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
 
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
     ctx = ctx.add_to_prefix("conv")
-    fan_in = in_features * conv_kernel
+    fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
+    fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
+    fan_in = fan_in / fan_in.sum()
+    fan_in = fan_in / in_features
+    fan_in = fan_in.reshape(1, 1, -1)
     weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale,
-                       lr_scale=1 / fan_in)
+                       lr_scale=fan_in)
 
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,))
@@ -333,8 +337,9 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         index = lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) // devices
         index = index.astype(jnp.int32)
         (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (
-        inp, jnp.zeros((), dtype=jnp.int32), wgt, inner_tgt, index, jnp.zeros(wgt.shape[::-1], dtype=jnp.float32),
-        jnp.zeros((), dtype=jnp.float32), jnp.zeros((), dtype=jnp.float32)), None, inp.shape[0])
+                inp, jnp.zeros((), dtype=jnp.int32), wgt, inner_tgt, index,
+                jnp.zeros(wgt.shape[::-1], dtype=jnp.float32), jnp.zeros((), dtype=jnp.float32),
+                jnp.zeros((), dtype=jnp.float32)), None, inp.shape[0])
         dx = dx.transpose(1, 0, 2) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.features, -1).transpose(1, 0)
         dx = dx.reshape(original_shape)

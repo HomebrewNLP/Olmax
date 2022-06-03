@@ -137,6 +137,8 @@ class Optimizer(DataClass):
 
 
 class Model(DataClass):
+    conv_scale: float = 4.
+    conv_shift: float = 8.
     norm_eps: float = 1e-5
     qrnn_frequency: int = 8
     rezero_lr_scale: float = 0.01
@@ -162,7 +164,7 @@ class EarlyStopping(DataClass):
 
 class Training(DataClass):
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
-    checkpoint_load_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
+    checkpoint_load_path: str = ""
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False
     z_loss: float = 0.01
