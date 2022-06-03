@@ -127,6 +127,13 @@ class Optimizer(DataClass):
     weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 1e-4
+    norm_scale: float = 1
+    bottleneck_scale: float = 1
+    pointwise_scale: float = 1
+    qrnn_scale: float = 1
+    moe_scale: float = 1
+    input_scale: float = 1
+    output_scale: float = 1
 
 
 class Model(DataClass):
