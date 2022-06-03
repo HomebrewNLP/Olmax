@@ -130,6 +130,8 @@ class Optimizer(DataClass):
 
 
 class Model(DataClass):
+    conv_scale: float = 4.
+    conv_shift: float = 8.
     norm_eps: float = 1e-5
     qrnn_frequency: int = 8
     rezero_lr_scale: float = 0.01
