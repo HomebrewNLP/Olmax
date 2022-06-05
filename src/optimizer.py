@@ -41,6 +41,10 @@ def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
     return "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2
 
 
+def weighted_add(x0, x1, beta, heavyball: bool = False):
+    return x0 * beta + x1 * (1 if heavyball else (1 - beta))
+
+
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: str,
         quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None,
         heavyball: bool = False) -> jnp.ndarray:
@@ -49,7 +53,7 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
         quantize = not small_parameter(ctx.global_prefix, inp)
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else ctx.model.storage_dtype,
                       init_val=jnp.zeros_like(inp) if init_val is None else init_val)
-    new_state = state.astype(jnp.float32) * beta + inp * (1 if heavyball else (1 - beta))
+    new_state = weighted_add(state.astype(jnp.float32), inp, beta, heavyball)
     assign(ctx, "momentum_buffer", new_state)
     if heavyball:
         return new_state
@@ -132,3 +136,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             grad = ema(inner_ctx, grad, step, 1 - ctx.optimizer.momentum_beta, "momentum", heavyball=True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         ctx.parameters[param_name] = grad * parameter_lr + ctx.parameters[param_name]
+        ema_name = [k for k in ctx.parameters.keys() if param_name in k and 'ema_weight' in k][0]
+        ctx.parameters[ema_name] = weighted_add(ctx.parameters[ema_name], ctx.parameters[param_name],
+                                                ctx.optimizer.ema_beta)
