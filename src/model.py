@@ -380,9 +380,9 @@ def _consistency_loss(out: jnp.ndarray, ema: jnp.ndarray) -> jnp.ndarray:
     def _fn(o: jnp.ndarray, e: jnp.ndarray):
         # forward: (o - e) ** 2
         # backward: (o - e) * 2
-        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, None]:
             grad = (o - e) * 2 / out.size
-            return grad, grad
+            return grad, None
 
         return jnp.zeros(()), _grad
 
@@ -390,11 +390,11 @@ def _consistency_loss(out: jnp.ndarray, ema: jnp.ndarray) -> jnp.ndarray:
 
 
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
-    out = body_ctx(ctx, src)
+    out = _body_ctx(ctx, src)
     name_cache = ctx.name_cache
     ema_ctx = ctx.add_to_prefix("ema_weight")
-    ctx.name_cache = {}
-    ema_out = lax.stop_gradient(body_ctx(ema_ctx, out))
+    ema_ctx.name_cache = {}
+    ema_out = _body_ctx(ema_ctx, src)
     ctx.name_cache = name_cache
 
     if not ctx.is_initializing:
