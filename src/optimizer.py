@@ -124,7 +124,9 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
-        grad = adam(inner_ctx, grad, step)
+        update = adam(inner_ctx, grad, step)
         if not small_parameter(param_name, grad):  # Do adam update for small parameters
+            update = graft(update, shampoo(inner_ctx, param_name, grad, step))
+            update = ema(inner_ctx, grad, step, 1 - ctx.optimizer.momentum_beta, "momentum", heavyball=True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
-        ctx.parameters[param_name] = grad * parameter_lr + ctx.parameters[param_name]
+        ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
