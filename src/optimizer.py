@@ -66,10 +66,10 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg") * square_ema(ctx, grad, step)
 
 
-def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("shampoo", count=False)
 
-    preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
+    preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
         new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
@@ -126,7 +126,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = adaptive_gradient_clipping(ctx, param_name, grad) * parameter_lr
         update = adam(inner_ctx, grad, step)
         if not small_parameter(param_name, grad):  # Do adam update for small parameters
-            shampoo_update = shampoo(inner_ctx, param_name, grad, step)
+            shampoo_update = shampoo(inner_ctx, grad, step)
             shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum", heavyball=True)
             update = graft(update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
