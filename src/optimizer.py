@@ -66,10 +66,10 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg") * square_ema(ctx, grad, step)
 
 
-def _shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def _shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("shampoo", count=False)
 
-    preconditioner = Preconditioner(ctx.parameters[param_name], ctx.optimizer.block_size)
+    preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
         new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
@@ -89,12 +89,12 @@ def _shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
 
 
-def shampoo(ctx: Context, param_name:str, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     last_size = grad.shape[-1]
     kernel_sizes = (ctx.dims.pointwise_kernel, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_kernel)
     if grad.ndim != 3 or last_size not in kernel_sizes:
-        return _shampoo(ctx, param_name, grad, step)
-    return jnp.stack([_shampoo(ctx, param_name, grad[:, :, i], step) for i in range(last_size)])
+        return _shampoo(ctx, grad, step)
+    return jnp.stack([_shampoo(ctx, grad[:, :, i], step) for i in range(last_size)])
 
 
 def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
@@ -134,7 +134,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         update = adam(inner_ctx, grad, step)
         if not small_parameter(param_name, grad):  # Do adam update for small parameters
-            shampoo_update = shampoo(inner_ctx, param_name, grad, step)
+            shampoo_update = shampoo(inner_ctx, grad, step)
             shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum",
                                  heavyball=True)
             update = graft(update, shampoo_update)
