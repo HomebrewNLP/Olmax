@@ -94,7 +94,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     kernel_sizes = (ctx.dims.pointwise_kernel, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_kernel)
     if grad.ndim != 3 or last_size not in kernel_sizes:
         return _shampoo(ctx, grad, step)
-    return jnp.stack([_shampoo(ctx, grad[:, :, i], step) for i in range(last_size)])
+    return jnp.stack([_shampoo(ctx, grad[:, :, i], step) for i in range(last_size)], axis=-1)
 
 
 def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
