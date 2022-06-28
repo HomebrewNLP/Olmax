@@ -270,12 +270,15 @@ class Preconditioner:
 
     def __init__(self, param, block_size):
         self._original_shape = param.shape
-        self._shape = merge_small_dims(self._original_shape, block_size)
+        self._transformed_shape = param.shape
+        self._transformed_shape = merge_small_dims(self._original_shape, block_size)
+        param = jnp.reshape(param, self._transformed_shape)
+        self._shape = param.shape
         self._splits = []
         split_sizes = []
         # We split params into smaller blocks. Here we store the metadata to make
         # that split.
-        for i, d in enumerate(self._shape):
+        for i, d in enumerate(param.shape):
             if 0 < block_size < d:
                 # d-1, otherwise split appends a 0-size array.
                 nsplit = (d - 1) // block_size
@@ -332,7 +335,7 @@ class Preconditioner:
         Returns:
           A list of gradient statistics for each partition.
         """
-        reshaped_grad = jnp.reshape(grad, self._shape)
+        reshaped_grad = jnp.reshape(grad, self._transformed_shape)
         partitioned_grads = self.partition(reshaped_grad)
         stats = []
         for g in partitioned_grads:
@@ -347,7 +350,7 @@ class Preconditioner:
 
     def exponent_for_preconditioner(self):
         """Returns exponent to use for inverse-pth root M^{-1/p}."""
-        return 2 * len(self._shape)
+        return 2 * len(self._transformed_shape)
 
     def preconditioned_grad(self, grad, preconditioners):
         """Precondition the gradient.
@@ -360,7 +363,7 @@ class Preconditioner:
           A preconditioned gradient.
         """
 
-        reshaped_grad = jnp.reshape(grad, self._shape)
+        reshaped_grad = jnp.reshape(grad, self._transformed_shape)
         partitioned_grads = self.partition(reshaped_grad)
         preconditioned_partitioned_grads = []
         num_splits = self.num_splits()
