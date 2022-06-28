@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from .backend import zero_param, assign, prefixed_name, get_param
+from .backend import assign, get_param, prefixed_name, zero_param
 from .context import Context
 from .shampoo import Preconditioner, matrix_inverse_pth_root, select_preconditioner
 
@@ -66,7 +66,7 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg") * square_ema(ctx, grad, step)
 
 
-def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def _shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("shampoo", count=False)
 
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
@@ -87,6 +87,14 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return grad
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
+
+
+def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+    last_size = grad.shape[-1]
+    kernel_sizes = (ctx.dims.pointwise_kernel, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_kernel)
+    if grad.ndim != 3 or last_size not in kernel_sizes:
+        return _shampoo(ctx, grad, step)
+    return jnp.stack([_shampoo(ctx, grad[:, :, i], step) for i in range(last_size)])
 
 
 def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
@@ -127,7 +135,8 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         update = adam(inner_ctx, grad, step)
         if not small_parameter(param_name, grad):  # Do adam update for small parameters
             shampoo_update = shampoo(inner_ctx, grad, step)
-            shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum", heavyball=True)
+            shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum",
+                                 heavyball=True)
             update = graft(update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         ctx.parameters[param_name] = update + ctx.parameters[param_name]
