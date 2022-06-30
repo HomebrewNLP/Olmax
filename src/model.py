@@ -47,7 +47,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
         var = jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), ctx.model.norm_eps)
         std = lax.rsqrt(var)
         norm_out = (src_fp32 - mean) * std
-        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,)) / (src.shape[-1] ** 0.5)  # div for l2norm
         if act:
             out = activate(ctx, out)
         out = out.astype(original_dtype)
@@ -59,6 +59,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             if act:
                 mask = out >= 0
                 dy = dy * jnp.where(mask, 1, ctx.model.leaky_relu_slope)
+            dy = dy / src.shape[-1] ** 0.5  # "undo" l2norm
             d_wgt = (dy * norm_out_fp32).sum(list(range(src.ndim - 1))).reshape((-1,))
             dy = dy * std * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy -= (dy * norm_out_fp32).mean(-1, keepdims=True) * norm_out_fp32
@@ -75,11 +76,9 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_feat
     fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
     fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
     fan_in = fan_in / fan_in.sum()
-    fan_in = fan_in / in_features
     fan_in = fan_in.reshape(1, 1, -1)
     weight = get_param(ctx, "weight", [out_features, in_features, conv_kernel], column_axes=2, scale=scale,
                        lr_scale=fan_in)
-
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,))
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
@@ -247,7 +246,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
     param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1e-5,
-                      lr_scale=ctx.optimizer.input_scale / ctx.dims.features)
+                      lr_scale=ctx.optimizer.input_scale)
     normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0, mean=1,
                                     lr_scale=ctx.optimizer.norm_scale,
                                     dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
@@ -383,7 +382,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
-                    scale=1 / ctx.dims.heads / ctx.dims.features, lr_scale=ctx.optimizer.output_scale)
+                    scale=1 / ctx.dims.heads, lr_scale=ctx.optimizer.output_scale)
     if ctx.is_initializing:
         return out
     return out, wgt
