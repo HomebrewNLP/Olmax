@@ -47,7 +47,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
         var = jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), ctx.model.norm_eps)
         std = lax.rsqrt(var)
         norm_out = (src_fp32 - mean) * std
-        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,)) * src.shape[-1] ** -0.5  # div for l2norm
         if act:
             out = activate(ctx, out)
         out = out.astype(original_dtype)
@@ -57,8 +57,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             norm_out_fp32 = promote_to(norm_out, run_type)
             dy = promote_to(dy, run_type)
             if act:
-                mask = out >= 0
-                dy = dy * jnp.where(mask, 1, ctx.model.leaky_relu_slope)
+                dy = dy * jnp.where(out >= 0, 1, ctx.model.leaky_relu_slope)
+            dy = dy * src.shape[-1] ** -0.5  # "undo" l2norm
             d_wgt = (dy * norm_out_fp32).sum(list(range(src.ndim - 1))).reshape((-1,))
             dy = dy * std * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy -= (dy * norm_out_fp32).mean(-1, keepdims=True) * norm_out_fp32
