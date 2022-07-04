@@ -264,8 +264,9 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
         waiting = 0
-        while frame_queue.empty() and waiting < 30:
+        while frame_queue.empty() and waiting < 10:
             time.sleep(20)
+            waiting += 1
     write_numpy(tokens, download_buffer_dir, save_dir, s3_bucket)
 
 
