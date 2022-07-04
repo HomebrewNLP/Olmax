@@ -220,34 +220,32 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600, "quiet": True, "verbose": False,
-             "no_warnings": True
-             })
+             "no_warnings": True})
     youtube_getter.add_default_info_extractors()
     downloader = Downloader()
     random.Random(worker_id).shuffle(work)
 
-    for chunk_idx, wor in enumerate(work):
-        for wor_idx, _wor in enumerate(wor):
-            video_urls = get_video_urls(youtube_getter, youtube_base, _wor, lock, target_image_size)
-            if not video_urls:
-                continue
+    for wor in work:
+        video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
+        if not video_urls:
+            continue
 
-            path = download_video(video_urls, downloader, worker_id, download_buffer_dir, _wor)
-            if not path or not test_video(path):
-                continue
+        path = download_video(video_urls, downloader, worker_id, download_buffer_dir, wor)
+        if not path or not test_video(path):
+            continue
 
-            frames = get_video_frames(path, target_image_size, target_fps)
-            if not frames:
-                continue
-            os.remove(path)
+        frames = get_video_frames(path, target_image_size, target_fps)
+        if not frames:
+            continue
+        os.remove(path)
 
-            frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
-            frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
-            frames = frames[:frames.shape[0] // batch_size * batch_size]
-            frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
-            frames = torch.from_numpy(frames)
+        frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
+        frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
+        frames = frames[:frames.shape[0] // batch_size * batch_size]
+        frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
+        frames = torch.from_numpy(frames)
 
-            out_queue.put((youtube_base + _wor, frames))
+        out_queue.put((youtube_base + wor, frames))
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
