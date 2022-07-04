@@ -253,7 +253,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
            frame_queue: queue.Queue):
     torch.set_default_tensor_type('torch.FloatTensor')
-    s3_bucket = boto3.resource("s3").bucket(bucket_name)
+    s3_bucket = boto3.resource("s3").Bucket(bucket_name)
     model = model.to(device)
     total_frames = 0
     waiting = 0
@@ -287,7 +287,7 @@ def main():
     model = load_vqgan(config_path, model_path)
 
     with io.BytesIO() as f:
-        boto3.resource("s3").bucket(bucket).download_fileobj(urls, f)
+        boto3.resource("s3").Bucket(bucket).download_fileobj(urls, f)
         video_ids, _ = pickle.load(f)
 
     ids = [video_ids[int(i / workers):int((i + 1) / workers)] for i in range(workers)]
