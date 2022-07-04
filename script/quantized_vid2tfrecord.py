@@ -32,6 +32,8 @@ def parse_args():
     parser.add_argument("--cpu-worker", type=int, default=multiprocessing.cpu_count(),
                         help=f"Number of workers. Default is the number of CPU cores (={multiprocessing.cpu_count()})")
     parser.add_argument("--device", type=str, default='cuda:0', help="Whether to use GPU or CPU. Default is GPU.")
+    parser.add_argument("--model-base-path", type=str, default='/fsx/lucas',
+                        help="Where model and config should be dowloaded to")
     parser.add_argument("--bucket", type=str, help="Name of the S3 bucket")
     parser.add_argument("--prefix", type=str, help="Prefix in the bucket")
     parser.add_argument("--batch", type=int, default=64, help="Number of images processed per 'computation step'")
@@ -44,7 +46,7 @@ def parse_args():
     parser.add_argument("--prefetch", type=int, default=8, help="Number of videos to prefetch (default=8)")
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
-           args.batch, args.device, args.prefetch
+           args.batch, args.device, args.prefetch,  args.model_base_path
 
 
 def division_zero(x, y):
@@ -271,9 +273,9 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, prefetch = parse_args()
-    config_path = 'vqgan.gumbelf8.config.yml'
-    model_path = 'sber.gumbelf8.ckpt'
+    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, prefetch, model_path = parse_args()
+    config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
+    model_path = f'{model_path}/sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
         gdown.download(f'https://drive.google.com/uc?id=1WP6Li2Po8xYcQPGMpmaxIlI1yPB5lF5m', model_path, quiet=True)
     if not os.path.exists(config_path):
