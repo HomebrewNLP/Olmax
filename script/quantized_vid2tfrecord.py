@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument("--prefetch", type=int, default=8, help="Number of videos to prefetch (default=8)")
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
-           args.batch, args.device, args.prefetch,  args.model_base_path
+           args.batch, args.device, args.prefetch, args.model_base_path
 
 
 def division_zero(x, y):
@@ -286,8 +286,7 @@ def main():
     resolution = conf.model.params.ddconfig.resolution
     model = load_vqgan(config_path, model_path)
 
-    with io.BytesIO() as f:
-        boto3.resource("s3").Bucket(bucket).download_fileobj(urls, f)
+    with open(urls, 'rb') as f:
         video_ids, _ = pickle.load(f)
 
     ids = [video_ids[int(i / workers):int((i + 1) / workers)] for i in range(workers)]
