@@ -1,9 +1,10 @@
 import argparse
 import datetime
 import functools
-import json
+import io
 import multiprocessing
 import os
+import pickle
 import queue
 import random
 import subprocess
@@ -12,6 +13,7 @@ import threading
 import time
 import typing
 
+import boto3
 import cv2
 import gdown
 import numpy as np
@@ -19,7 +21,6 @@ import requests
 import tensorflow as tf
 import torch
 import youtube_dl
-from google.cloud import storage
 from omegaconf import OmegaConf
 
 sys.path.append("./taming-transformers")
@@ -28,82 +29,22 @@ from taming.models.vqgan import GumbelVQ
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--cpu-worker",
-        type=int,
-        default=multiprocessing.cpu_count(),
-        help=f"Number of workers. Default is the number of CPU cores (={multiprocessing.cpu_count()})"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default='cuda:0',
-        help="Whether to use GPU or CPU. Default is GPU."
-    )
-    parser.add_argument(
-        "--service-account-json",
-        type=str,
-        default='',
-        help="Path to service account json file. default=use service acccount of machine"
-    )
-    parser.add_argument(
-        "--bucket",
-        type=str,
-        help="Name of the GCS bucket"
-    )
-    parser.add_argument(
-        "--prefix",
-        type=str,
-        help="Prefix in the bucket"
-    )
-    parser.add_argument(
-        "--batch",
-        type=int,
-        default=48,
-        help="Number of images processed per 'computation step'"
-    )
-    parser.add_argument(
-        "--tmp-dir",
-        type=str,
-        help="Local directory for temporary storage"
-    )
-    parser.add_argument(
-        "--urls",
-        type=str,
-        help="Directory filled with JSON files full of URLs"
-    )
-    parser.add_argument(
-        "--min-duration",
-        type=int,
-        default=60 * 4,
-        help="Minimum video duration in seconds (default=4 minutes)"
-    )
-    parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=512 * 1024 * 1024,
-        help="Number of tokens per tfrecord (default=512 million tokens)"
-    )
-    parser.add_argument(
-        "--fps",
-        type=int,
-        default=4,
-        help="Number of (encoded) video frames per second of raw data (default=4)"
-    )
-    parser.add_argument(
-        "--startup-delay",
-        type=int,
-        default=10,
-        help="Seconds to wait after launching one worker (to avoid crashes)"
-    )
-    parser.add_argument(
-        "--prefetch",
-        type=int,
-        default=8,
-        help="Number of videos to prefetch (default=8)"
-    )
+    parser.add_argument("--cpu-worker", type=int, default=multiprocessing.cpu_count(),
+                        help=f"Number of workers. Default is the number of CPU cores (={multiprocessing.cpu_count()})")
+    parser.add_argument("--device", type=str, default='cuda:0', help="Whether to use GPU or CPU. Default is GPU.")
+    parser.add_argument("--bucket", type=str, help="Name of the S3 bucket")
+    parser.add_argument("--prefix", type=str, help="Prefix in the bucket")
+    parser.add_argument("--batch", type=int, default=64, help="Number of images processed per 'computation step'")
+    parser.add_argument("--tmp-dir", type=str, help="Local directory for temporary storage")
+    parser.add_argument("--urls", type=str, help="Directory filled with JSON files full of URLs")
+    parser.add_argument("--fps", type=int, default=1,
+                        help="Number of (encoded) video frames per second of raw data (default=4)")
+    parser.add_argument("--startup-delay", type=int, default=10,
+                        help="Seconds to wait after launching one worker (to avoid crashes)")
+    parser.add_argument("--prefetch", type=int, default=8, help="Number of videos to prefetch (default=8)")
     args = parser.parse_args()
-    return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.min_duration, args.chunk_size, args.fps, args.startup_delay, args.batch, args.service_account_json, args.device, args.prefetch
+    return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
+           args.batch, args.device, args.prefetch
 
 
 def division_zero(x, y):
@@ -142,24 +83,6 @@ def frame_encoder(frame):
     return proto
 
 
-def split_equal(ids: list, duration: list, num: int, min_duration: int = 256):
-    sort = sorted(zip(duration, ids))[::-1]
-
-    ids_split = [[] for _ in range(num)]
-    duration_spit = [[] for _ in range(num)]
-    duration_sum = [0] * num
-
-    for d, i in sort:
-        if d > min_duration or min_duration <= 0:
-            pos = np.argmin(duration_sum)
-
-            ids_split[pos].append(i)
-            duration_spit[pos].append(d)
-            duration_sum[pos] = duration_sum[pos] + d
-
-    return ids_split, duration_spit
-
-
 def try_except(fn, default=None):
     def _fn(*args, **kwargs):
         try:
@@ -187,8 +110,8 @@ def tokenize(model: GumbelVQ, frames: torch.Tensor, device: torch.device):
 
 
 @try_except
-def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiprocessing.Lock,
-                   target_image_size: int) -> typing.List[dict]:
+def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiprocessing.Lock, target_image_size: int) -> \
+        typing.List[dict]:
     # We have to lock this part because it can lead to errors if multiple thread try to
     # scrap video Information at the same time.
     with lock:
@@ -198,8 +121,7 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
     video_urls = []
     current_width = current_height = 9999999
     for f in info['formats']:
-        if 'format_note' not in f or f['format_note'] == "tiny" or 'width' not in f or \
-                'height' not in f:
+        if 'format_note' not in f or f['format_note'] == "tiny" or 'width' not in f or 'height' not in f:
             continue
         width = f['width']
         height = f['height']
@@ -250,10 +172,8 @@ def download_video(video_urls: typing.List[dict], downloader: Downloader, worker
         # If no mp4 got downloaded use ffmpeg to converted it to mp4
         if ext != 'mp4':
             new_video_buffer_path = os.path.join(download_buffer_dir, yt_url) + '.mp4'
-            subprocess.run(['ffmpeg', '-i', video_buffer_path, '-c',
-                            'copy', new_video_buffer_path, '-y'],
-                           capture_output=False, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.STDOUT)
+            subprocess.run(['ffmpeg', '-i', video_buffer_path, '-c', 'copy', new_video_buffer_path, '-y'],
+                           capture_output=False, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
             if os.path.exists(video_buffer_path):
                 os.remove(video_buffer_path)
@@ -285,32 +205,21 @@ def get_video_frames(path: str, target_image_size: int, target_fps: int):
 
 
 @functools.partial(try_except, default=0)
-def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: str, save_dir: str, tfrecord_id: int,
-                    padding_token: int, cloud_storage_bucket):
-    path = f"{buffer_save_dir}/{save_dir.replace('/', '_')}_{tfrecord_id}.tfrecord"
-    count = len(tokens)
-    residual = count % chunk_size
-    count -= residual
-    added = 0
-
-    for i in range(0, count, chunk_size):
-        with tf.io.TFRecordWriter(path) as tf_writer:
-            tf_writer.write(frame_encoder(tokens[i:i + chunk_size]))
-        blob = cloud_storage_bucket.blob(f'{save_dir}{tfrecord_id + added:07d}.tfrecord')
-        blob.upload_from_filename(path)
-        os.remove(path)
-        added += 1
-    residual_tokens = tokens[-residual:] + [padding_token]
+def write_numpy(tokens: typing.List[int], buffer_save_dir: str, save_dir: str, s3_bucket):
+    with io.BytesIO() as f:
+        np.save(f, np.array(tokens))
+        s3_bucket.put_object(Body=f, Key=f"{buffer_save_dir}/{save_dir.replace('/', '_')}.npy")
     tokens.clear()
-    tokens.extend(residual_tokens)
-    return added
+    return len(tokens)
 
 
 def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
                  target_fps: int, batch_size: int, out_queue: queue.Queue):
     youtube_base = 'https://www.youtube.com/watch?v='
-    youtube_getter = youtube_dl.YoutubeDL({'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600,
-                                           "quiet": True, "verbose": False, "no_warnings": True})
+    youtube_getter = youtube_dl.YoutubeDL(
+            {'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600, "quiet": True, "verbose": False,
+             "no_warnings": True
+             })
     youtube_getter.add_default_info_extractors()
     downloader = Downloader()
     random.Random(worker_id).shuffle(work)
@@ -339,44 +248,29 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
             out_queue.put((youtube_base + _wor, frames))
 
 
-def worker(model: GumbelVQ,
-           chunk_size: int,
-           save_dir: str,
-           download_buffer_dir: str,
-           bucket_name: str,
-           padding_token: int,
-           service_account_json: str,
-           device: torch.device,
+def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
            frame_queue: queue.Queue):
     torch.set_default_tensor_type('torch.FloatTensor')
-
-    if service_account_json:
-        cloud_storage_bucket = storage.Client.from_service_account_json(service_account_json).get_bucket(bucket_name)
-    else:
-        cloud_storage_bucket = storage.Client().get_bucket(bucket_name)
-
+    s3_bucket = boto3.resource("s3").bucket(bucket_name)
     model = model.to(device)
-
-    tfrecord_id = 0
     total_frames = 0
+    waiting = 0
     tokens = []
     url = ""
-    while True:
-        print(f"{datetime.datetime.now().isoformat()} | TFRecord: {tfrecord_id:,d} - Tokens: {len(tokens):,d} - "
-              f"Frames: {total_frames:,d} - Previous URL: {url}")
+    while waiting < 30:
+        print(f"{datetime.datetime.now().isoformat()} | Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - Previou"
+              f"s URL: {url}")
         url, frames = frame_queue.get(timeout=600)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
-        tfrecord_id += write_tfrecords(tokens, chunk_size, download_buffer_dir, save_dir, tfrecord_id,
-                                       padding_token, cloud_storage_bucket)
-        if frame_queue.empty():
-            time.sleep(600)
-            if frame_queue.empty():
-                break
+        waiting = 0
+        while frame_queue.empty() and waiting < 30:
+            time.sleep(20)
+    write_numpy(tokens, download_buffer_dir, save_dir, s3_bucket)
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, min_duration, chunk_size, fps, startup_delay, batch_size, service_account_json, device, prefetch = parse_args()
+    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, prefetch = parse_args()
     config_path = 'vqgan.gumbelf8.config.yml'
     model_path = 'sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
@@ -386,43 +280,14 @@ def main():
     if not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir)
     conf = OmegaConf.load(config_path)
-    padding_token = conf.model.params.n_embed
     resolution = conf.model.params.ddconfig.resolution
-    video_ids = []
-    durations = []
     model = load_vqgan(config_path, model_path)
 
-    for url_path in os.listdir(urls):
-        with open(f'{urls}/{url_path}', 'r') as f:
-            json_load = json.load(f)
-        video_ids.extend(json_load['id'])
-        durations.extend(json_load['duration'])
+    with io.BytesIO() as f:
+        boto3.resource("s3").bucket(bucket).download_fileobj(urls, f)
+        video_ids, _ = pickle.load(f)
 
-    if not isinstance(video_ids[0], list):
-        video_ids = [[video_id] for video_id in video_ids]
-    else:
-        durations = [np.sum(d) for d in durations]
-
-    ids, duration = split_equal(video_ids, durations, workers, min_duration)
-
-    split_chunk_count = 0
-    split_video_count = 0
-    split_video_duration = 0
-
-    for i in range(len(ids)):
-        buffer_chunk_count = len(ids[i])
-        buffer_video_count = sum([len(__ids) for __ids in ids[i]])
-        buffer_video_duration = sum(duration[i])
-
-        print(f'Split: {i} - Chunks: {buffer_chunk_count} - Videos: {buffer_video_count} - '
-              f'Duration: {buffer_video_duration}')
-
-        split_chunk_count += buffer_chunk_count
-        split_video_count += buffer_video_count
-        split_video_duration += buffer_video_duration
-
-    print(f'\nTotal Chunks: {split_chunk_count} - Total Videos: {split_video_count} - '
-          f'Total Duration: {split_video_duration}\n')
+    ids = [video_ids[int(i / workers):int((i + 1) / workers)] for i in range(workers)]
 
     lock = multiprocessing.Lock()
     frame_queue = multiprocessing.Queue(prefetch)
@@ -432,8 +297,7 @@ def main():
     for p in procs:
         p.start()
 
-    return worker(model, chunk_size, prefix, tmp_dir, bucket, padding_token, service_account_json, torch.device(device),
-                  frame_queue)
+    return worker(model, prefix, tmp_dir, bucket, torch.device(device), frame_queue)
 
 
 if __name__ == '__main__':
