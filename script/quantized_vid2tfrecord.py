@@ -265,6 +265,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         frames = np.ndarray(shape, dtype=np.float32,  buffer=frame_mem.buf)[:]
         frame_mem.close()
         frame_mem.unlink()
+        frames = torch.as_tensor(frames)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
         waiting = 0
