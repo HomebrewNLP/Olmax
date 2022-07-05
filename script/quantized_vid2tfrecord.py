@@ -260,7 +260,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     while waiting < 30:
         print(f"{datetime.datetime.now().isoformat()} | Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - Previou"
               f"s URL: {url}")
-        url, mem_name, shape, dtype = frame_queue.get(timeout=600)
+        url, mem_name, shape = frame_queue.get(timeout=600)
         frame_mem = shared_memory.SharedMemory(name=mem_name)
         frames = np.ndarray(shape, dtype=np.float32,  buffer=frame_mem)[:]
         frame_mem.close()
