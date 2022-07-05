@@ -1,10 +1,9 @@
-  GNU nano 4.8                                                                                                                                                                          tmp/Dockerfile                                                                                                                                                                                     FROM nvidia/cuda:11.3.0-cudnn8-devel-ubuntu20.04
-
 ARG DEBIAN_FRONTEND=noninteractive
 
-ENV TORCHVER=v1.12.0
-ENV VISIONVER=v0.13.0
-ENV AUDIOVER=v0.12.0
+ENV TORCH_VERSION=v1.12.0
+ENV TORCHVISION_VERSION=v0.13.0
+ENV TORCHAUDIO_VERSION=v0.12.0
+ENV PYTHON_VERSION=3.10.5
 
 ENV TZ=Europe/Berlin
 ENV PYENV_ROOT="/root/.pyenv"
@@ -15,7 +14,7 @@ RUN apt update && \
     apt install -y autoconf automake build-essential cpio curl ffmpeg g++ gcc git gosu libbz2-dev libffi-dev libgl-dev libgl1-mesa-glx liblapack-dev liblapacke-dev liblzma-dev libncursesw5-dev libpng-dev libpq-dev libpython3-all-dev libpython3-dev libreadline-dev libsox-dev libsqlite3-dev libssl-dev libtool libxml2-dev libxmlsec1-dev llvm make nano npm pciutils pkg-config pyt>    curl https://pyenv.run | bash && \
     command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH" && \
     eval "$(pyenv init -)" && \
-    pyenv install 3.10.5  && \
+    pyenv install ${PYTHON_VERSION}  && \
     python3 -m pip install --upgrade pip &&\
     python3 -m pip uninstall tensorboard tbp-nightly tb-nightly tensorboard-plugin-profile -y &&\
     python3 -m pip install --upgrade --ignore-installed pyyaml &&\
@@ -24,9 +23,9 @@ RUN apt update && \
 
 
 # Build PyTorch (patch to bypass CUDA and CUB version checks)
-RUN git clone -b ${TORCHVER} --recursive https://github.com/pytorch/pytorch &&\
-    git clone -b ${VISIONVER} --recursive https://github.com/pytorch/vision.git &&\
-    git clone -b ${AUDIOVER} --recursive https://github.com/pytorch/audio.git
+RUN git clone -b ${TORCH_VERSION} --recursive https://github.com/pytorch/pytorch &&\
+    git clone -b ${TORCHVISION_VERSION} --recursive https://github.com/pytorch/vision.git &&\
+    git clone -b ${TORCHAUDIO_VERSION} --recursive https://github.com/pytorch/audio.git
 
 RUN cd /pytorch && \
     sed -i -e "/^#ifndef THRUST_IGNORE_CUB_VERSION_CHECK$/i #define THRUST_IGNORE_CUB_VERSION_CHECK" /usr/local/cuda/targets/x86_64-linux/include/thrust/system/cuda/config.h && \
@@ -53,6 +52,3 @@ RUN python3 -m pip install --upgrade boto3 einops fastapi gdown git+https://gith
     git clone https://github.com/CompVis/taming-transformers &&\
     mv taming-transformers HomebrewNLP-Jax/script &&\
     cd HomebrewNLP-Jax/script
-
-
-
