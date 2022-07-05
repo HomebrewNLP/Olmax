@@ -138,6 +138,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             shampoo_update = shampoo(inner_ctx, grad, step)
             shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum",
                                  heavyball=True)
-            update = graft(grad * square_ema(ctx, grad * jnp.rsqrt(jnp.square(magnitude).sum()), step), shampoo_update)
+            update = graft(grad * square_ema(ctx, grad * jax.lax.rsqrt(jnp.square(magnitude).sum()), step), shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
