@@ -245,6 +245,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
         mem = shared_memory.SharedMemory(create=True, size=frames.nbytes)
+        np.ndarray(frames.shape, dtype=frames.dtype, buffer=mem.buf)[:] = frames[:]
         out_queue.put((youtube_base + wor, mem.name, frames.shape))
 
 
