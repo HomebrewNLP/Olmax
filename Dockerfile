@@ -48,7 +48,8 @@ RUN cd /audio && \
 
 
 # Install runtime dependencies
-RUN python3 -m pip install --upgrade boto3 einops fastapi gdown git+https://github.com/ytdl-org/youtube-dl.git google-api-python-client google-cloud-storage google-cloud-tpu jsonpickle oauth2client omegaconf opencv-python Pillow psycopg2-binary pydantic pyparsing==2.4.7 pytorch-lightning pyyaml redis scipy smart-open[gcs] sqlalchemy tpunicorn transformers utils uvicorn wandb >    git clone https://github.com/HomebrewNLP/HomebrewNLP-Jax &&\
+RUN cd / && \
+    python3 -m pip install --upgrade boto3 einops fastapi gdown git+https://github.com/ytdl-org/youtube-dl.git google-api-python-client google-cloud-storage google-cloud-tpu jsonpickle oauth2client omegaconf opencv-python Pillow psycopg2-binary pydantic pyparsing==2.4.7 pytorch-lightning pyyaml redis scipy smart-open[gcs] sqlalchemy tpunicorn transformers utils uvicorn wandb >    git clone https://github.com/HomebrewNLP/HomebrewNLP-Jax &&\
     git clone https://github.com/CompVis/taming-transformers &&\
     mv taming-transformers HomebrewNLP-Jax/script &&\
     cd HomebrewNLP-Jax/script
