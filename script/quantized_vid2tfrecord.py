@@ -262,7 +262,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
               f"s URL: {url}")
         url, mem_name, shape = frame_queue.get(timeout=600)
         frame_mem = shared_memory.SharedMemory(name=mem_name)
-        frames = np.ndarray(shape, dtype=np.float32,  buffer=frame_mem)[:]
+        frames = np.ndarray(shape, dtype=np.float32,  buffer=frame_mem.buf)[:]
         frame_mem.close()
         frame_mem.unlink()
         total_frames += frames.size(0) * frames.size(1)
