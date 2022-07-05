@@ -20,7 +20,6 @@ import numpy as np
 import requests
 import tensorflow as tf
 import torch
-from multiprocessing import shared_memory
 import youtube_dl
 from omegaconf import OmegaConf
 
@@ -221,7 +220,8 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600, "quiet": True, "verbose": False,
-             "no_warnings": True})
+             "no_warnings": True
+             })
     youtube_getter.add_default_info_extractors()
     downloader = Downloader()
     random.Random(worker_id).shuffle(work)
@@ -244,9 +244,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
-        mem = shared_memory.SharedMemory(create=True, size=frames.nbytes)
-        np.ndarray(frames.shape, dtype=frames.dtype, buffer=mem.buf)[:] = frames[:]
-        out_queue.put((youtube_base + wor, mem.name, frames.shape))
+        out_queue.put((youtube_base + wor, frames))
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
@@ -261,11 +259,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     while waiting < 30:
         print(f"{datetime.datetime.now().isoformat()} | Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - Previou"
               f"s URL: {url}")
-        url, mem_name, shape = frame_queue.get(timeout=600)
-        frame_mem = shared_memory.SharedMemory(name=mem_name)
-        frames = np.ndarray(shape, dtype=np.float32,  buffer=frame_mem.buf)[:]
-        frame_mem.close()
-        frame_mem.unlink()
+        url, frames = frame_queue.get(timeout=600)
         frames = torch.as_tensor(frames)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
