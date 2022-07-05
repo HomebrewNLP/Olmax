@@ -27,6 +27,7 @@ RUN apt update && \
 RUN git clone -b ${TORCHVER} --recursive https://github.com/pytorch/pytorch &&\
     git clone -b ${VISIONVER} --recursive https://github.com/pytorch/vision.git &&\
     git clone -b ${AUDIOVER} --recursive https://github.com/pytorch/audio.git
+
 RUN cd /pytorch && \
     sed -i -e "/^#ifndef THRUST_IGNORE_CUB_VERSION_CHECK$/i #define THRUST_IGNORE_CUB_VERSION_CHECK" /usr/local/cuda/targets/x86_64-linux/include/thrust/system/cuda/config.h && \
     cat /usr/local/cuda/targets/x86_64-linux/include/thrust/system/cuda/config.h && \
@@ -45,6 +46,7 @@ RUN cd /audio && \
     git submodule update --init --recursive && \
     python3 setup.py build && \
     python3 setup.py bdist_wheel
+
 
 # Install runtime dependencies
 RUN python3 -m pip install --upgrade boto3 einops fastapi gdown git+https://github.com/ytdl-org/youtube-dl.git google-api-python-client google-cloud-storage google-cloud-tpu jsonpickle oauth2client omegaconf opencv-python Pillow psycopg2-binary pydantic pyparsing==2.4.7 pytorch-lightning pyyaml redis scipy smart-open[gcs] sqlalchemy tpunicorn transformers utils uvicorn wandb >    git clone https://github.com/HomebrewNLP/HomebrewNLP-Jax &&\
