@@ -215,7 +215,7 @@ def write_numpy(tokens: typing.List[int], buffer_save_dir: str, save_dir: str, s
     return len(tokens)
 
 
-def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
+def frame_worker(device, work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
                  target_fps: int, batch_size: int, out_queue: queue.Queue):
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
@@ -227,20 +227,20 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
     random.Random(worker_id).shuffle(work)
 
     for wor in work:
-        print("worker_id", worker_id, wor)
+        print(device, "worker_id", worker_id, wor)
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
         if not video_urls:
-            print("worker_id", worker_id, "no urls")
+            print(device, "worker_id", worker_id, "no urls")
             continue
 
         path = download_video(video_urls, downloader, worker_id, download_buffer_dir, wor)
         if not path or not test_video(path):
-            print("worker_id", worker_id, "no path")
+            print(device, "worker_id", worker_id, "no path")
             continue
 
         frames = get_video_frames(path, target_image_size, target_fps)
         if not frames:
-            print("worker_id", worker_id, "no frames")
+            print(device, "worker_id", worker_id, "no frames")
             continue
         os.remove(path)
 
@@ -248,7 +248,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
-        print("worker_id", worker_id, "put")
+        print(device, "worker_id", worker_id, "put")
         out_queue.put((youtube_base + wor, frames))
 
 
@@ -265,6 +265,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         print(f"{datetime.datetime.now().isoformat()} | Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - Previou"
               f"s URL: {url}")
         url, frames = frame_queue.get(timeout=1200)
+        print(device, "got", url)
         frames = torch.as_tensor(frames)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
@@ -296,7 +297,7 @@ def main():
     lock = multiprocessing.Lock()
     frame_queue = multiprocessing.Queue(prefetch)
 
-    procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, tmp_dir, fps, batch_size, frame_queue),
+    procs = [multiprocessing.Process(args=(device, work, worker_id, lock, resolution, tmp_dir, fps, batch_size, frame_queue),
                                      daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
     for p in procs:
         p.start()
