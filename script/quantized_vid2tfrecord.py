@@ -99,7 +99,7 @@ def try_except(fn, default=None):
 
 def suppress(fn):
     def _fn(*args, **kwargs):
-        with open(devnull, 'w') as fnull, redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
+        with open(os.devnull, 'w') as fnull, redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
             return fn(*args, **kwargs)
     return _fn
         
