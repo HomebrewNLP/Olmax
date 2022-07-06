@@ -227,16 +227,20 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
     random.Random(worker_id).shuffle(work)
 
     for wor in work:
+        print("worker_id", worker_id, wor)
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
         if not video_urls:
+            print("worker_id", worker_id, "no urls")
             continue
 
         path = download_video(video_urls, downloader, worker_id, download_buffer_dir, wor)
         if not path or not test_video(path):
+            print("worker_id", worker_id, "no path")
             continue
 
         frames = get_video_frames(path, target_image_size, target_fps)
         if not frames:
+            print("worker_id", worker_id, "no frames")
             continue
         os.remove(path)
 
@@ -244,6 +248,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
+        print("worker_id", worker_id, "put")
         out_queue.put((youtube_base + wor, frames))
 
 
