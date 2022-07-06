@@ -295,7 +295,7 @@ def main():
     with open(urls, 'rb') as f:
         video_ids, _ = pickle.load(f)
 
-    ids = [video_ids[int(i / workers):int((i + 1) / workers)] for i in range(workers)]
+    ids = [video_ids[int(len(video_ids) * i / workers):int(len(video_ids) * (i + 1) / workers)] for i in range(workers)]
 
     lock = multiprocessing.Lock()
     frame_queue = multiprocessing.Queue(prefetch)
