@@ -259,12 +259,12 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     while waiting < 30:
         print(f"{datetime.datetime.now().isoformat()} | Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - Previou"
               f"s URL: {url}")
-        url, frames = frame_queue.get(timeout=600)
+        url, frames = frame_queue.get(timeout=1200)
         frames = torch.as_tensor(frames)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
         waiting = 0
-        while frame_queue.empty() and waiting < 10:
+        while frame_queue.empty() and waiting < 30:
             time.sleep(20)
             waiting += 1
     write_numpy(tokens, download_buffer_dir, save_dir, s3_bucket)
