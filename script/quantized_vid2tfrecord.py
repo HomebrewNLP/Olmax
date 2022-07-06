@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import typing
-from contextlib import contextmanager,redirect_stderr,redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 import boto3
 import cv2
@@ -97,11 +97,12 @@ def try_except(fn, default=None):
     return _fn
 
 
-@contextmanager
-def suppress():
-    with open(devnull, 'w') as fnull:
-        with redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
-            yield (err, out)
+def suppress(fn):
+    def _fn(*args, **kwargs):
+        with open(devnull, 'w') as fnull, redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
+            return fn(*args, **kwargs)
+    return _fn
+        
 
             
 def load_vqgan(config_path: str, ckpt_path: str):
