@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import typing
+from contextlib import contextmanager,redirect_stderr,redirect_stdout
 
 import boto3
 import cv2
@@ -96,6 +97,13 @@ def try_except(fn, default=None):
     return _fn
 
 
+@contextmanager
+def suppress():
+    with open(devnull, 'w') as fnull:
+        with redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
+            yield (err, out)
+
+            
 def load_vqgan(config_path: str, ckpt_path: str):
     config = OmegaConf.load(config_path)
     model = GumbelVQ(**config.model.params)
@@ -140,6 +148,7 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
     return video_urls
 
 
+@suppress
 def test_video(video_buffer_path: str):
     video_cap = None
     try:
@@ -153,6 +162,7 @@ def test_video(video_buffer_path: str):
     return success
 
 
+@suppress
 @try_except
 def download_video(video_urls: typing.List[dict], downloader: Downloader, worker_id: int, download_buffer_dir: str,
                    yt_url: str) -> str:
@@ -190,6 +200,7 @@ def download_video(video_urls: typing.List[dict], downloader: Downloader, worker
     raise ValueError("worker: " + str(worker_id) + " failed to download video")
 
 
+@suppress
 @try_except
 def get_video_frames(path: str, target_image_size: int, target_fps: int):
     frames = []
