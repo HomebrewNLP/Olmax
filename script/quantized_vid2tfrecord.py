@@ -283,8 +283,7 @@ def main():
         gdown.download(f'https://drive.google.com/uc?id=1WP6Li2Po8xYcQPGMpmaxIlI1yPB5lF5m', model_path, quiet=True)
     if not os.path.exists(config_path):
         gdown.download(f'https://drive.google.com/uc?id=1M7RvSoiuKBwpF-98sScKng0lsZnwFebR', config_path, quiet=True)
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
+    os.makedirs(tmp_dir, exist_ok=True)
     conf = OmegaConf.load(config_path)
     resolution = conf.model.params.ddconfig.resolution
     model = load_vqgan(config_path, model_path)
