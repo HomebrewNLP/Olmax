@@ -217,7 +217,7 @@ def write_numpy(tokens: typing.List[int], buffer_save_dir: str, save_dir: str, s
 
 def frame_worker(device, work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
                  target_fps: int, batch_size: int, out_queue: queue.Queue):
-    print(device, "starting frame worker", worker_id)
+    print(os.environ["CUDA_VISIBLE_DEVICES"], "starting frame worker", worker_id)
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600, "quiet": True, "verbose": False,
@@ -228,20 +228,20 @@ def frame_worker(device, work: list, worker_id: int, lock: threading.Lock, targe
     random.Random(worker_id).shuffle(work)
 
     for wor in work:
-        print(device, "worker_id", worker_id, wor)
+        print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, wor)
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
         if not video_urls:
-            print(device, "worker_id", worker_id, "no urls")
+            print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "no urls")
             continue
 
         path = download_video(video_urls, downloader, worker_id, download_buffer_dir, wor)
         if not path or not test_video(path):
-            print(device, "worker_id", worker_id, "no path")
+            print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "no path")
             continue
 
         frames = get_video_frames(path, target_image_size, target_fps)
         if not frames:
-            print(device, "worker_id", worker_id, "no frames")
+            print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "no frames")
             continue
         os.remove(path)
 
@@ -249,14 +249,14 @@ def frame_worker(device, work: list, worker_id: int, lock: threading.Lock, targe
         frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
-        print(device, "worker_id", worker_id, "put", datetime.datetime.now())
+        print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "put", datetime.datetime.now())
         out_queue.put((youtube_base + wor, frames))
-        print(device, "worker_id", worker_id, "in the queue", datetime.datetime.now())
+        print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "in the queue", datetime.datetime.now())
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
            frame_queue: queue.Queue):
-    print(device, "starting worker")
+    print(os.environ["CUDA_VISIBLE_DEVICES"], "starting worker")
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
     model = model.to(device)
@@ -268,7 +268,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         print(f"{datetime.datetime.now().isoformat()} | Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - Previou"
               f"s URL: {url}")
         url, frames = frame_queue.get(timeout=1200)
-        print(device, "got", url, datetime.datetime.now())
+        print(os.environ["CUDA_VISIBLE_DEVICES"], "got", url, datetime.datetime.now())
         frames = torch.as_tensor(frames)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
