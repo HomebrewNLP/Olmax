@@ -278,7 +278,8 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         if not frames:
             log("no frames")
             continue
-        os.remove(path)
+        if os.path.exists(path):
+            os.remove(path)
 
         cv2_frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
         frames: np.ndarray = np.stack(cv2_frames).astype(np.uint8).transpose((0, 3, 1, 2))
