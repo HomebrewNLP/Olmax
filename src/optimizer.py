@@ -133,7 +133,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         if small_parameter(param_name, grad):        
-            update = adam(inner_ctx, grad, step)
+            update = adam(inner_ctx, grad * optimizer_rsqrt(jnp.square(grad).sum()), step)
         else:  # Do adam update for small parameters
             shampoo_update = shampoo(inner_ctx, grad, step)
             shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum",
