@@ -5,7 +5,6 @@ import multiprocessing
 import os
 import pickle
 import random
-import subprocess
 import sys
 import threading
 import time
@@ -15,10 +14,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from multiprocessing.shared_memory import SharedMemory
 
 import boto3
-import cv2
+import ffmpeg
 import gdown
 import numpy as np
-import requests
 import tensorflow as tf
 import torch
 import youtube_dl
@@ -49,34 +47,6 @@ def parse_args():
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
            args.batch, args.device, args.model_base_path, args.shared_memory, args.tokens_per_file
-
-
-def division_zero(x, y):
-    return 0 if y == 0 else (x / y)
-
-
-class Downloader:
-    def __init__(self, max_try: int = 3):
-        self.max_try = max_try
-
-    def download(self, url: str, filename: str):
-        for _ in range(self.max_try):
-            try:
-                r = requests.get(url, stream=True)
-                with open(filename, 'wb') as f:
-                    for chunk in r:
-                        f.write(chunk)
-            except:
-                pass
-            else:
-                return True
-
-        print(f'Retry exceeded for URL: {url}')
-
-        if os.path.exists(filename):
-            os.remove(filename)
-
-        return False
 
 
 def frame_encoder(frame):
@@ -146,74 +116,21 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
     return video_urls
 
 
-def test_video(video_buffer_path: str):
-    video_cap = None
-    try:
-        video_cap = cv2.VideoCapture(video_buffer_path)
-        success, frame = video_cap.read()
-        video_cap.release()
-    except:
-        success = False
-    if video_cap is not None:
-        video_cap.release()
-    return success
-
-
-@try_except
-def download_video(video_urls: typing.List[dict], downloader: Downloader, worker_id: int, download_buffer_dir: str,
-                   yt_url: str) -> str:
+@functools.partial(try_except, default=[])
+def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int):
     # Put .webm at the bottom at the list.
     for idx in range(len(video_urls)):
         if video_urls[idx]['ext'] == 'webm':
             video_urls[-1], video_urls[idx] = video_urls[idx], video_urls[-1]
 
     for video_url_idx, video_url in enumerate(video_urls):
-        url = video_url['url']
-        ext = video_url['ext']
-
-        if url is None or ext is None or url == "" or ext == "":
+        url = video_url.get('url', None)
+        if url is None or url == "":
             continue
-
-        video_buffer_path = os.path.join(download_buffer_dir, yt_url) + '.' + ext
-
-        if not downloader.download(url, video_buffer_path):
-            continue
-        # If no mp4 got downloaded use ffmpeg to converted it to mp4
-        if ext != 'mp4':
-            new_video_buffer_path = os.path.join(download_buffer_dir, yt_url) + '.mp4'
-            subprocess.run(['ffmpeg', '-i', video_buffer_path, '-c', 'copy', new_video_buffer_path, '-y'],
-                           capture_output=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            if os.path.exists(video_buffer_path):
-                os.remove(video_buffer_path)
-
-            video_buffer_path = new_video_buffer_path
-
-        # Check if the file can be opened.
-        if not test_video(video_buffer_path) and os.path.exists(video_buffer_path):
-            os.remove(video_buffer_path)
-        else:
-            return video_buffer_path
-    raise ValueError("worker: " + str(worker_id) + " failed to download video")
-
-
-@try_except
-def get_video_frames(path: str, target_image_size: int, target_fps: int):
-    frames = []
-    frame_idx = 0
-    success = True
-    video_cap = cv2.VideoCapture(path)
-    fps_split = division_zero(round(video_cap.get(cv2.CAP_PROP_FPS)), target_fps)
-    while success:
-        success, frame = video_cap.read()
-        if frame_idx % fps_split == 0:
-            try:
-                frames.append(cv2.resize(frame, (target_image_size, target_image_size)))
-            except cv2.error:
-                return
-        frame_idx += 1
-    video_cap.release()
-    return frames
+        out, _ = ffmpeg.input(url).filter("scale", w=-1, h=target_image_size) \
+            .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
+            .output("pipe:", format="rawvideo", pix_fmt="rgb48", loglevel="error").run(capture_stdout=True)
+        return np.frombuffer(out, np.uint16).reshape((-1, target_image_size, target_image_size, 3))
 
 
 @functools.partial(try_except, default=0)
@@ -245,9 +162,8 @@ def log_fn(*args, worker_id: int):
           flush=True)
 
 
-def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int,
-                 download_buffer_dir: str, target_fps: int, batch_size: int,
-                 index_mem_name: str, frame_mem_name: str, read_shared_lock: threading.Lock,
+def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, target_fps: int,
+                 batch_size: int, index_mem_name: str, frame_mem_name: str, read_shared_lock: threading.Lock,
                  write_shared_lock: threading.Lock, shape: typing.Tuple[int]):
 
     log = functools.partial(log_fn, worker_id=worker_id)
@@ -257,13 +173,12 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
              "ignoreerrors": True
              })
     youtube_getter.add_default_info_extractors()
-    downloader = Downloader()
     random.Random(worker_id).shuffle(work)
 
     shared_index_mem = SharedMemory(create=False, name=index_mem_name)
     shared_frame_mem = SharedMemory(create=False, name=frame_mem_name)
     index_mem = np.ndarray((256, 2), dtype=np.uint32, buffer=shared_index_mem.buf)
-    frame_mem = np.ndarray(shape, dtype=np.uint8, buffer=shared_frame_mem.buf)
+    frame_mem = np.ndarray(shape, dtype=np.uint16, buffer=shared_frame_mem.buf)
 
     for wor in work:
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
@@ -271,22 +186,15 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         if not video_urls:
             continue
 
-        path = download_video(video_urls, downloader, worker_id, download_buffer_dir, wor)
-        if not path or not test_video(path):
-            continue
-
-        frames = get_video_frames(path, target_image_size, target_fps)
+        frames = get_video_frames(video_urls, target_image_size, target_fps)
         if not frames:
             continue
-        if os.path.exists(path):
-            os.remove(path)
 
-        cv2_frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
-        frames: np.ndarray = np.stack(cv2_frames).astype(np.uint8).transpose((0, 3, 1, 2))
+        frames: np.ndarray = frames
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         if not frames.size:
             continue
-        frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
+        frames = frames.transpose((0, 3, 1, 2)).reshape((-1, batch_size, 3, target_image_size, target_image_size))
         batch_count = frames.shape[0]
         if batch_count >= frame_mem.shape[0]:
             log(f"dropping {wor}. too many batches in video (={batch_count}) compared to max memory size "
@@ -339,7 +247,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
             start, end = index[idx]
             frames = shared_frames[start:end].copy()  # local clone, so it shared can be safely edited
             index[idx] = [-1, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
-        frames = torch.as_tensor(frames.astype(np.float32) / 255)
+        frames = torch.as_tensor(frames.astype(np.float32) / 65535)
         total_frames += frames.size(0) * frames.size(1)
         if tokens:
             tokens.append(padding_token)
@@ -368,11 +276,11 @@ def main():
     shared_frames = shared_memory // (256 ** 2 * 3 * batch_size)
     index = np.zeros((256, 2), dtype=np.uint32)  # 256x start+end
     shape = (shared_frames, batch_size, 3, 256, 256)
-    frames = np.zeros(shape, dtype=np.uint8)
+    frames = np.zeros(shape, dtype=np.uint16)
     index_mem = SharedMemory(create=True, size=index.nbytes)
     frame_mem = SharedMemory(create=True, size=frames.nbytes)
     index = np.ndarray((256, 2), dtype=np.uint32, buffer=index_mem.buf)
-    frame = np.ndarray(shape, dtype=np.uint8, buffer=frame_mem.buf)
+    frame = np.ndarray(shape, dtype=np.uint16, buffer=frame_mem.buf)
     index[:] = 0
     frame[:] = 0
 
@@ -386,7 +294,7 @@ def main():
     write_shared_lock = multiprocessing.Lock()
 
     procs = [multiprocessing.Process(args=(
-            work, worker_id, lock, resolution, tmp_dir, fps, batch_size, index_mem.name, frame_mem.name,
+            work, worker_id, lock, resolution, fps, batch_size, index_mem.name, frame_mem.name,
             read_shared_lock, write_shared_lock, shape),
             daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
     for p in procs:
