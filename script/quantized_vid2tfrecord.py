@@ -204,7 +204,10 @@ def get_video_frames(path: str, target_image_size: int, target_fps: int):
     while success:
         success, frame = video_cap.read()
         if frame_idx % fps_split == 0:
-            frames.append(cv2.resize(frame, (target_image_size, target_image_size)))
+            try:
+                frames.append(cv2.resize(frame, (target_image_size, target_image_size)))
+            except cv2.error:
+                return
         frame_idx += 1
     video_cap.release()
     return frames
