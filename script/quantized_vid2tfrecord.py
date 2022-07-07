@@ -117,7 +117,7 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
 
 
 @functools.partial(try_except, default=[])
-def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int):
+def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int) -> np.ndarray:
     # Put .webm at the bottom at the list.
     for idx in range(len(video_urls)):
         if video_urls[idx]['ext'] == 'webm':
@@ -187,13 +187,12 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
             continue
 
         frames = get_video_frames(video_urls, target_image_size, target_fps)
-        if not frames:
+
+        if not frames.size:
             continue
 
         frames: np.ndarray = frames
         frames = frames[:frames.shape[0] // batch_size * batch_size]
-        if not frames.size:
-            continue
         frames = frames.transpose((0, 3, 1, 2)).reshape((-1, batch_size, 3, target_image_size, target_image_size))
         batch_count = frames.shape[0]
         if batch_count >= frame_mem.shape[0]:
