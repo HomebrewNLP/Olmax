@@ -231,8 +231,8 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
-            {'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600, "quiet": True, "verbose": False,
-             "no_warnings": True
+            {'writeautomaticsub': False, 'socket_timeout': 600, "quiet": True, "verbose": False, "no_warnings": True,
+             "ignoreerrors": True
              })
     youtube_getter.add_default_info_extractors()
     downloader = Downloader()
@@ -246,6 +246,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
     for wor in work:
         log(wor)
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
+
         if not video_urls:
             log("no urls")
             continue
