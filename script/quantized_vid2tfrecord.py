@@ -299,7 +299,8 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
-           index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock):
+           index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock,
+           procs: typing.List[multiprocessing.Process]):
     print(os.environ["CUDA_VISIBLE_DEVICES"], "starting worker")
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
@@ -310,10 +311,11 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     log = functools.partial(log_fn, worker_id=-1)
     while waiting < 120:
         log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d}")
-        while index[:, 1].max() == 0 and waiting < 120:  # wait until one element exists
+        # wait until one element exists or run is over
+        while index[:, 1].max() == 0 and waiting < 120 and any(p.is_alive() for p in procs):
             time.sleep(5)
             waiting += 1
-        if waiting >= 120:
+        if waiting >= 120 or not any(p.is_alive() for p in procs):
             log("done. dumping now")
             break
         with read_shared_lock:  # lock reader, so it won't move memory while we're copying
@@ -370,7 +372,7 @@ def main():
     for p in procs:
         p.start()
 
-    return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock)
+    return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock, procs)
 
 
 if __name__ == '__main__':
