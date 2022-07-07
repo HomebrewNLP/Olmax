@@ -5,7 +5,6 @@ import io
 import multiprocessing
 import os
 import pickle
-import queue
 import random
 import subprocess
 import sys
@@ -45,10 +44,9 @@ def parse_args():
     parser.add_argument("--shared-memory", type=int, default=4, help="number of GB of shared memory")
     parser.add_argument("--startup-delay", type=int, default=10,
                         help="Seconds to wait after launching one worker (to avoid crashes)")
-    parser.add_argument("--prefetch", type=int, default=8, help="Number of videos to prefetch (default=8)")
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
-           args.batch, args.device, args.prefetch, args.model_base_path, args.shared_memory
+           args.batch, args.device, args.model_base_path, args.shared_memory
 
 
 def division_zero(x, y):
@@ -218,7 +216,8 @@ def write_numpy(tokens: typing.List[int], buffer_save_dir: str, save_dir: str, s
 
 
 def log_fn(*args, worker_id: int):
-    print(f"cuda:{os.environ['CUDA_VISIBLE_DEVICES']} - worker:{worker_id:2d} - {datetime.datetime.now()}", *args)
+    print(f"cuda:{os.environ['CUDA_VISIBLE_DEVICES']} - worker:{worker_id:2d} - {datetime.datetime.now()}", *args,
+          flush=True)
 
 
 def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int,
@@ -309,13 +308,13 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     waiting = 0
     tokens = []
     log = functools.partial(log_fn, worker_id=-1)
-    while waiting < 120:
+    while True:
         log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d}")
         # wait until one element exists or run is over
-        while index[:, 1].max() == 0 and waiting < 120 and any(p.is_alive() for p in procs):
+        while index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
             time.sleep(5)
             waiting += 1
-        if waiting >= 120 or not any(p.is_alive() for p in procs):
+        if not any(p.is_alive() for p in procs):
             log("done. dumping now")
             break
         with read_shared_lock:  # lock reader, so it won't move memory while we're copying
@@ -331,7 +330,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, prefetch, model_path, \
+    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, model_path, \
     shared_memory = parse_args()
     config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
     model_path = f'{model_path}/sber.gumbelf8.ckpt'
