@@ -223,8 +223,10 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     log = functools.partial(log_fn, worker_id=-1)
     tfrecord_id = 0
     start_time = time.time()
+    token_pad = len(f'{tokens_per_file:,d}')
+    frame_pad = len(f'{tokens_per_file // 1024:,d}')
     while True:
-        log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - "
+        log(f"Tokens: {len(tokens):{token_pad},d} - Frames: {total_frames:{frame_pad},d} - "
             f"FramesPerSecond: {total_frames / (time.time() - start_time):5.2f}")
         # wait until one element exists or run is over
         while index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
