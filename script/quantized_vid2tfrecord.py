@@ -219,16 +219,16 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
     model = model.to(device)
     total_frames = 0
-    waiting = 0
     tokens = []
     log = functools.partial(log_fn, worker_id=-1)
     tfrecord_id = 0
+    start_time = time.time()
     while True:
-        log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d}")
+        log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - "
+            f"FramesPerSecond: {total_frames / (time.time() - start_time):5.2f}")
         # wait until one element exists or run is over
         while index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
             time.sleep(5)
-            waiting += 1
         if not any(p.is_alive() for p in procs):
             log("Finished")
             break
@@ -242,7 +242,6 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         if tokens:
             tokens.append(padding_token)
         tokens.extend(tokenize(model, frames, device))
-        waiting = 0
         tfrecord_id += write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, s3_bucket)
     write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, s3_bucket)
 
@@ -289,6 +288,9 @@ def main():
             daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
     for p in procs:
         p.start()
+
+    while index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
+        time.sleep(5)
 
     return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock, procs,
                   tokens_per_file, padding_token)
