@@ -118,7 +118,8 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
 def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int) -> np.ndarray:
     for video_url_idx, video_url in enumerate(video_urls):
         url = video_url["url"]
-        out, _ = ffmpeg.input(url).filter("scale", w=-1, h=target_image_size) \
+        width = round(video_url["width"] * video_url["height"] / target_image_size)
+        out, _ = ffmpeg.input(url).filter("scale", w=width, h=target_image_size) \
             .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
             .output("pipe:", format="rawvideo", pix_fmt="rgb48", loglevel="error").run(capture_stdout=True)
         return np.frombuffer(out, np.uint16).reshape((-1, target_image_size, target_image_size, 3))
