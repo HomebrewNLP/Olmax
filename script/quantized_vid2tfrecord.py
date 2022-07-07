@@ -11,6 +11,7 @@ import threading
 import time
 import traceback
 import typing
+from contextlib import redirect_stderr, redirect_stdout
 from multiprocessing.shared_memory import SharedMemory
 
 import boto3
@@ -89,7 +90,8 @@ def frame_encoder(frame):
 def try_except(fn: typing.Callable, default=None):
     def _fn(*args, **kwargs):
         try:
-            return fn(*args, **kwargs)
+            with open(os.devnull, 'w') as fnull, redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
+                return fn(*args, **kwargs)
         except Exception:
             print(r"IGNORED EXCEPTION \/\/\/")
             traceback.print_exc()
@@ -173,6 +175,7 @@ def download_video(video_urls: typing.List[dict], downloader: Downloader, worker
             continue
 
         video_buffer_path = os.path.join(download_buffer_dir, yt_url) + '.' + ext
+
         if not downloader.download(url, video_buffer_path):
             continue
         # If no mp4 got downloaded use ffmpeg to converted it to mp4
@@ -248,8 +251,6 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
                  write_shared_lock: threading.Lock, shape: typing.Tuple[int]):
 
     log = functools.partial(log_fn, worker_id=worker_id)
-    log("starting frame worker")
-
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'socket_timeout': 600, "quiet": True, "verbose": False, "no_warnings": True,
@@ -265,21 +266,17 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
     frame_mem = np.ndarray(shape, dtype=np.uint8, buffer=shared_frame_mem.buf)
 
     for wor in work:
-        log(wor)
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
 
         if not video_urls:
-            log("no urls")
             continue
 
         path = download_video(video_urls, downloader, worker_id, download_buffer_dir, wor)
         if not path or not test_video(path):
-            log("no path")
             continue
 
         frames = get_video_frames(path, target_image_size, target_fps)
         if not frames:
-            log("no frames")
             continue
         if os.path.exists(path):
             os.remove(path)
@@ -288,10 +285,8 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         frames: np.ndarray = np.stack(cv2_frames).astype(np.uint8).transpose((0, 3, 1, 2))
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         if not frames.size:
-            log("no frames")
             continue
         frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
-        log("put")
         batch_count = frames.shape[0]
         if batch_count >= frame_mem.shape[0]:
             log(f"dropping {wor}. too many batches in video (={batch_count}) compared to max memory size "
@@ -317,8 +312,6 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
                 end_idx += 1
             index_mem[end_idx] = [max_end, max_end + batch_count]
 
-        log("in the queue")
-
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
            index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock,
@@ -339,7 +332,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
             time.sleep(5)
             waiting += 1
         if not any(p.is_alive() for p in procs):
-            log("done. dumping now")
+            log("Finished")
             break
         with read_shared_lock:  # lock reader, so it won't move memory while we're copying
             idx = index[:, 1].argmax()  # pick first
