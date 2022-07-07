@@ -90,43 +90,34 @@ def tokenize(model: GumbelVQ, frames: torch.Tensor, device: torch.device):
 @try_except
 def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiprocessing.Lock, target_image_size: int) -> \
         typing.List[dict]:
-    # We have to lock this part because it can lead to errors if multiple thread try to
-    # scrap video Information at the same time.
+    # We have to lock this part because it can lead to errors if multiple thread try to scrape video Information at
+    # the same time.
     with lock:
         info = youtube_getter.extract_info(youtube_base + url, download=False)
     if info is None or 'formats' not in info:
         return []
     video_urls = []
-    current_width = current_height = 9999999
     for f in info['formats']:
-        if 'format_note' not in f or f['format_note'] == "tiny" or 'width' not in f or 'height' not in f:
+        width = f.get('width')
+        height = f.get('height')
+        url = f.get('url')
+        ext = f.get('ext')
+        format_note = f.get('format_note')
+
+        if any(x is None for x in (width, height, url, ext, format_note)):
             continue
-        width = f['width']
-        height = f['height']
-
-        if width is None or height is None or width <= target_image_size or height <= target_image_size:
+        if any(not x for x in (width, height, url, ext)):
             continue
-        if current_width > width and current_height > height:
-            video_urls = []
-            current_width = width
-            current_height = height
-        if current_width == width and current_height == height:
-            if 'ext' in f and 'url' in f:
-                video_urls.append({'width': width, 'height': height, 'ext': f['ext'], 'url': f['url']})
-    return video_urls
+        if width <= target_image_size or height <= target_image_size:
+            continue
+        video_urls.append({'width': width, 'height': height, 'ext': f['ext'], 'url': f['url']})
+    return sorted(video_urls, key=lambda x: (x['width'], x['height'], x['ext'] != 'mp4'))
 
 
-@functools.partial(try_except, default=[])
+@try_except
 def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int) -> np.ndarray:
-    # Put .webm at the bottom at the list.
-    for idx in range(len(video_urls)):
-        if video_urls[idx]['ext'] == 'webm':
-            video_urls[-1], video_urls[idx] = video_urls[idx], video_urls[-1]
-
     for video_url_idx, video_url in enumerate(video_urls):
-        url = video_url.get('url', None)
-        if url is None or url == "":
-            continue
+        url = video_url["url"]
         out, _ = ffmpeg.input(url).filter("scale", w=-1, h=target_image_size) \
             .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
             .output("pipe:", format="rawvideo", pix_fmt="rgb48", loglevel="error").run(capture_stdout=True)
@@ -188,7 +179,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 
         frames = get_video_frames(video_urls, target_image_size, target_fps)
 
-        if not frames.size:
+        if frames is None or not frames.size:
             continue
 
         frames: np.ndarray = frames
