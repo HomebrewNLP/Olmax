@@ -296,7 +296,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
-           frame_queue: queue.Queue, index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock):
+           index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock):
     print(os.environ["CUDA_VISIBLE_DEVICES"], "starting worker")
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
@@ -305,10 +305,14 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     waiting = 0
     tokens = []
     log = functools.partial(log_fn, worker_id=-1)
-    while waiting < 30:
+    while waiting < 120:
         log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d}")
-        while index[:, 1].max() == 0:  # wait until one element exists
+        while index[:, 1].max() == 0 and waiting < 120:  # wait until one element exists
             time.sleep(5)
+            waiting += 1
+        if waiting >= 120:
+            log("done. dumping now")
+            break
         with read_shared_lock:  # lock reader, so it won't move memory while we're copying
             idx = index[:, 1].argmax()  # pick first
             start, end = index[idx]
@@ -318,9 +322,6 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
         waiting = 0
-        while frame_queue.empty() and waiting < 30:
-            time.sleep(20)
-            waiting += 1
     write_numpy(tokens, download_buffer_dir, save_dir, s3_bucket)
 
 
@@ -358,7 +359,6 @@ def main():
     lock = multiprocessing.Lock()
     read_shared_lock = multiprocessing.Lock()
     write_shared_lock = multiprocessing.Lock()
-    frame_queue = multiprocessing.Queue(prefetch)
 
     procs = [multiprocessing.Process(args=(
             work, worker_id, lock, resolution, tmp_dir, fps, batch_size, index_mem.name, frame_mem.name,
@@ -367,8 +367,7 @@ def main():
     for p in procs:
         p.start()
 
-    return worker(model, prefix, tmp_dir, bucket, torch.device(device), frame_queue, index, frame,
-                  read_shared_lock)
+    return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock)
 
 
 if __name__ == '__main__':
