@@ -338,6 +338,7 @@ def main():
     resolution = conf.model.params.ddconfig.resolution
     model = load_vqgan(config_path, model_path)
 
+    shared_memory = shared_memory * 1024 ** 3  # it's in GB, we have to convert it to bytes
     shared_frames = shared_memory // (256 ** 2 * 3 * batch_size)
     index = np.zeros((256, 2), dtype=np.uint32)  # 256x start+end
     shape = (shared_frames, batch_size, 3, 256, 256)
