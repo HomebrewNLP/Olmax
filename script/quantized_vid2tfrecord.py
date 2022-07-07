@@ -238,8 +238,10 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
     downloader = Downloader()
     random.Random(worker_id).shuffle(work)
 
-    index_mem = np.ndarray((256, 2), dtype=np.uint32, buffer=SharedMemory(create=False, name=index_mem_name).buf)
-    frame_mem = np.ndarray(shape, dtype=np.uint8, buffer=SharedMemory(create=False, name=frame_mem_name).buf)
+    shared_index_mem = SharedMemory(create=False, name=index_mem_name)
+    shared_frame_mem = SharedMemory(create=False, name=frame_mem_name)
+    index_mem = np.ndarray((256, 2), dtype=np.uint32, buffer=shared_index_mem.buf)
+    frame_mem = np.ndarray(shape, dtype=np.uint8, buffer=shared_frame_mem.buf)
 
     for wor in work:
         log(wor)
