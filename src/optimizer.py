@@ -66,7 +66,7 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg") * square_ema(ctx, grad, step)
 
 
-def _shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("shampoo", count=False)
 
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
@@ -87,14 +87,6 @@ def _shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return grad
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
-
-
-def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
-    last_size = grad.shape[-1]
-    kernel_sizes = (ctx.dims.pointwise_kernel, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_kernel)
-    if grad.ndim != 3 or last_size not in kernel_sizes:
-        return _shampoo(ctx, grad, step)
-    return jnp.stack([_shampoo(ctx, grad[:, :, i], step) for i in range(last_size)], axis=-1)
 
 
 def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
