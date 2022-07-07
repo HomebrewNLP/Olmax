@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import typing
+from multiprocessing.shared_memory import SharedMemory
 
 import boto3
 import cv2
@@ -41,12 +42,13 @@ def parse_args():
     parser.add_argument("--urls", type=str, help="Directory filled with JSON files full of URLs")
     parser.add_argument("--fps", type=int, default=1,
                         help="Number of (encoded) video frames per second of raw data (default=4)")
+    parser.add_argument("--shared-memory", type=int, default=4, help="number of GB of shared memory")
     parser.add_argument("--startup-delay", type=int, default=10,
                         help="Seconds to wait after launching one worker (to avoid crashes)")
     parser.add_argument("--prefetch", type=int, default=8, help="Number of videos to prefetch (default=8)")
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
-           args.batch, args.device, args.prefetch, args.model_base_path
+           args.batch, args.device, args.prefetch, args.model_base_path, args.shared_memory
 
 
 def division_zero(x, y):
@@ -215,9 +217,18 @@ def write_numpy(tokens: typing.List[int], buffer_save_dir: str, save_dir: str, s
     return len(tokens)
 
 
-def frame_worker(device, work: list, worker_id: int, lock: threading.Lock, target_image_size: int, download_buffer_dir: str,
-                 target_fps: int, batch_size: int, out_queue: queue.Queue):
-    print(os.environ["CUDA_VISIBLE_DEVICES"], "starting frame worker", worker_id)
+def log_fn(*args, worker_id: int):
+    print(f"cuda:{os.environ['CUDA_VISIBLE_DEVICES']} - worker:{worker_id:2d} - {datetime.datetime.now()}", *args)
+
+
+def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int,
+                 download_buffer_dir: str, target_fps: int, batch_size: int, out_queue: queue.Queue,
+                 index_mem_name: str, frame_mem_name: str, read_shared_lock: threading.Lock,
+                 write_shared_lock: threading.Lock, shape: typing.Tuple[int]):
+
+    log = functools.partial(log_fn, worker_id=worker_id)
+    log("starting frame worker")
+
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'ignore-errors': True, 'socket-timeout': 600, "quiet": True, "verbose": False,
@@ -227,35 +238,65 @@ def frame_worker(device, work: list, worker_id: int, lock: threading.Lock, targe
     downloader = Downloader()
     random.Random(worker_id).shuffle(work)
 
+    index_mem = np.ndarray((256, 2), dtype=np.uint32, buffer=SharedMemory(create=False, name=index_mem_name).buf)
+    frame_mem = np.ndarray(shape, dtype=np.uint8, buffer=SharedMemory(create=False, name=frame_mem_name).buf)
+
     for wor in work:
-        print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, wor)
+        log(wor)
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
         if not video_urls:
-            print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "no urls")
+            log("no urls")
             continue
 
         path = download_video(video_urls, downloader, worker_id, download_buffer_dir, wor)
         if not path or not test_video(path):
-            print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "no path")
+            log("no path")
             continue
 
         frames = get_video_frames(path, target_image_size, target_fps)
         if not frames:
-            print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "no frames")
+            log("no frames")
             continue
         os.remove(path)
 
-        frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
-        frames = np.stack(frames).astype(np.float32).transpose((0, 3, 1, 2)) / 255
+        cv2_frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
+        frames: np.ndarray = np.stack(cv2_frames).astype(np.uint8).transpose((0, 3, 1, 2))
         frames = frames[:frames.shape[0] // batch_size * batch_size]
+        if not frames.size:
+            log("no frames")
+            continue
         frames = frames.reshape((-1, batch_size, 3, target_image_size, target_image_size))
-        print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "put", datetime.datetime.now())
-        out_queue.put((youtube_base + wor, frames))
-        print(os.environ["CUDA_VISIBLE_DEVICES"], "worker_id", worker_id, "in the queue", datetime.datetime.now())
+        log("put")
+        batch_count = frames.shape[0]
+        if batch_count >= frame_mem.shape[0]:
+            log(f"dropping {wor}. too many batches in video (={batch_count}) compared to max memory size "
+                f"(={frame_mem.shape[0]})")
+
+        with write_shared_lock:
+            while index_mem[:, 1].max() + batch_count >= frame_mem.shape[0]:  # until new frames fit into memory
+                while index_mem[:, 0].min() == 0:  # wait for anything to be read
+                    time.sleep(5)
+                with read_shared_lock:  # move everything to the left  (old=left, new=right)
+                    min_start = index_mem[:, 0].min()
+                    max_end = index_mem[:, 1].max()
+                    dist = max_end - min_start
+                    frame_mem[:dist] = frame_mem[min_start:max_end]
+                    start_idx = index_mem[:, 0].argmin()
+                    end_idx = index_mem[:, 1].argmax()
+                    index_mem[:end_idx - start_idx] = index_mem[start_idx:end_idx] - min_start
+                    index_mem[end_idx - start_idx:] = 0
+            max_end = index_mem[:, 1].max()
+            end_idx = index_mem[:, 1].argmax()
+            frame_mem[max_end:max_end + batch_count] = frames[:]
+            if max_end != 0:  # if array is empty, make sure to use the first (0th) spot
+                end_idx += 1
+            index_mem[end_idx] = [max_end, max_end + batch_count]
+
+        log("in the queue")
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
-           frame_queue: queue.Queue):
+           frame_queue: queue.Queue, index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock):
     print(os.environ["CUDA_VISIBLE_DEVICES"], "starting worker")
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
@@ -263,13 +304,17 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     total_frames = 0
     waiting = 0
     tokens = []
-    url = ""
+    log = functools.partial(log_fn, worker_id=-1)
     while waiting < 30:
-        print(f"{datetime.datetime.now().isoformat()} | Tokens: {len(tokens):,d} - Frames: {total_frames:,d} - Previou"
-              f"s URL: {url}")
-        url, frames = frame_queue.get(timeout=1200)
-        print(os.environ["CUDA_VISIBLE_DEVICES"], "got", url, datetime.datetime.now())
-        frames = torch.as_tensor(frames)
+        log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d}")
+        while index[:, 1].max() == 0:  # wait until one element exists
+            time.sleep(5)
+        with read_shared_lock:  # lock reader, so it won't move memory while we're copying
+            idx = index[:, 1].argmax()  # pick first
+            start, end = index[idx]
+            frames = shared_frames[start:end].copy()  # local clone, so it shared can be safely edited
+            index[idx] = [-1, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+        frames = torch.as_tensor(frames.astype(np.float32) / 255)
         total_frames += frames.size(0) * frames.size(1)
         tokens.extend(tokenize(model, frames, device))
         waiting = 0
@@ -280,7 +325,8 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, prefetch, model_path = parse_args()
+    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, prefetch, model_path, \
+    shared_memory = parse_args()
     config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
     model_path = f'{model_path}/sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
@@ -292,20 +338,37 @@ def main():
     resolution = conf.model.params.ddconfig.resolution
     model = load_vqgan(config_path, model_path)
 
+    shared_frames = shared_memory // (256 ** 2 * 3 * batch_size)
+    index = np.zeros((256, 2), dtype=np.uint32)  # 256x start+end
+    shape = (shared_frames, batch_size, 3, 256, 256)
+    frames = np.zeros(shape, dtype=np.uint8)
+    index_mem = SharedMemory(create=True, size=index.nbytes)
+    frame_mem = SharedMemory(create=True, size=frames.nbytes)
+    del index, frames
+    index = np.ndarray((256, 2), dtype=np.uint32, buffer=SharedMemory(create=False, name=index_mem.name).buf)
+    frame = np.ndarray(shape, dtype=np.uint8, buffer=SharedMemory(create=False, name=frame_mem.name).buf)
+    index[:] = 0
+    frame[:] = 0
+
     with open(urls, 'rb') as f:
         video_ids, _ = pickle.load(f)
 
     ids = [video_ids[int(i / workers):int((i + 1) / workers)] for i in range(workers)]
 
     lock = multiprocessing.Lock()
+    read_shared_lock = multiprocessing.Lock()
+    write_shared_lock = multiprocessing.Lock()
     frame_queue = multiprocessing.Queue(prefetch)
 
-    procs = [multiprocessing.Process(args=(device, work, worker_id, lock, resolution, tmp_dir, fps, batch_size, frame_queue),
-                                     daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
+    procs = [multiprocessing.Process(args=(
+            work, worker_id, lock, resolution, tmp_dir, fps, batch_size, index_mem.name, frame_mem.name,
+            read_shared_lock, write_shared_lock, shape),
+            daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
     for p in procs:
         p.start()
 
-    return worker(model, prefix, tmp_dir, bucket, torch.device(device), frame_queue)
+    return worker(model, prefix, tmp_dir, bucket, torch.device(device), frame_queue, index, frame,
+                  read_shared_lock)
 
 
 if __name__ == '__main__':
