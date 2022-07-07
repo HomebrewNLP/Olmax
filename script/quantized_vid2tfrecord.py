@@ -124,7 +124,7 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
     # scrap video Information at the same time.
     with lock:
         info = youtube_getter.extract_info(youtube_base + url, download=False)
-    if 'formats' not in info:
+    if info is None or 'formats' not in info:
         return []
     video_urls = []
     current_width = current_height = 9999999
