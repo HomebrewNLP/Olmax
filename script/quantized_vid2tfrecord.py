@@ -177,7 +177,7 @@ def download_video(video_urls: typing.List[dict], downloader: Downloader, worker
         if ext != 'mp4':
             new_video_buffer_path = os.path.join(download_buffer_dir, yt_url) + '.mp4'
             subprocess.run(['ffmpeg', '-i', video_buffer_path, '-c', 'copy', new_video_buffer_path, '-y'],
-                           capture_output=False, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                           capture_output=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             if os.path.exists(video_buffer_path):
                 os.remove(video_buffer_path)
