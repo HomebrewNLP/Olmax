@@ -9,7 +9,7 @@ from .shampoo import Preconditioner, matrix_inverse_pth_root, select_preconditio
 
 
 def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
-    return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
+    return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-8))
 
 
 def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
