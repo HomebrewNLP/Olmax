@@ -345,9 +345,8 @@ def main():
     frames = np.zeros(shape, dtype=np.uint8)
     index_mem = SharedMemory(create=True, size=index.nbytes)
     frame_mem = SharedMemory(create=True, size=frames.nbytes)
-    del index, frames
-    index = np.ndarray((256, 2), dtype=np.uint32, buffer=SharedMemory(create=False, name=index_mem.name).buf)
-    frame = np.ndarray(shape, dtype=np.uint8, buffer=SharedMemory(create=False, name=frame_mem.name).buf)
+    index = np.ndarray((256, 2), dtype=np.uint32, buffer=index_mem.buf)
+    frame = np.ndarray(shape, dtype=np.uint8, buffer=frame_mem.buf)
     index[:] = 0
     frame[:] = 0
 
