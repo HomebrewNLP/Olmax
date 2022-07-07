@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import typing
 from multiprocessing.shared_memory import SharedMemory
 
@@ -85,12 +86,15 @@ def frame_encoder(frame):
     return proto
 
 
-def try_except(fn, default=None):
+def try_except(fn: typing.Callable, default=None):
     def _fn(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except Exception as e:
-            print(e)
+        except Exception:
+            print(r"IGNORED EXCEPTION \/\/\/")
+            traceback.print_exc()
+            print("IGNORED EXCEPTION /\\/\\/\\")
+
         return default
 
     return _fn
