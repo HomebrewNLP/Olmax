@@ -1,7 +1,6 @@
 import argparse
 import datetime
 import functools
-import io
 import multiprocessing
 import os
 import pickle
@@ -43,11 +42,12 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=1,
                         help="Number of (encoded) video frames per second of raw data (default=4)")
     parser.add_argument("--shared-memory", type=int, default=4, help="number of GB of shared memory")
+    parser.add_argument("--tokens-per-file", type=int, default=2 ** 29, help="how big each file should roughly be")
     parser.add_argument("--startup-delay", type=int, default=10,
                         help="Seconds to wait after launching one worker (to avoid crashes)")
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
-           args.batch, args.device, args.model_base_path, args.shared_memory
+           args.batch, args.device, args.model_base_path, args.shared_memory, args.tokens_per_file
 
 
 def division_zero(x, y):
@@ -211,12 +211,27 @@ def get_video_frames(path: str, target_image_size: int, target_fps: int):
 
 
 @functools.partial(try_except, default=0)
-def write_numpy(tokens: typing.List[int], buffer_save_dir: str, save_dir: str, s3_bucket):
-    with io.BytesIO() as f:
-        np.save(f, np.array(tokens))
-        s3_bucket.put_object(Body=f, Key=f"{buffer_save_dir}/{save_dir.replace('/', '_')}.npy")
+def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: str, save_dir: str, tfrecord_id: int,
+                    s3_bucket):
+    path = f"{buffer_save_dir}/{save_dir.replace('/', '_')}_{tfrecord_id}.tfrecord"
+    count = len(tokens)
+    residual = count % chunk_size
+    count -= residual
+    if not count:
+        return 0
+
+    added = 0
+
+    for i in range(0, count, chunk_size):
+        with tf.io.TFRecordWriter(path) as tf_writer:
+            tf_writer.write(frame_encoder(tokens[i:i + chunk_size]))
+        s3_bucket.upload_file(path, f"{save_dir.rstrip('/')}/{tfrecord_id + added:07d}.tfrecord")
+        os.remove(path)
+        added += 1
+    residual_tokens = tokens[-residual:]
     tokens.clear()
-    return len(tokens)
+    tokens.extend(residual_tokens)
+    return added
 
 
 def log_fn(*args, worker_id: int):
@@ -303,7 +318,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
            index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock,
-           procs: typing.List[multiprocessing.Process]):
+           procs: typing.List[multiprocessing.Process], tokens_per_file: int, padding_token: int):
     print(os.environ["CUDA_VISIBLE_DEVICES"], "starting worker")
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
@@ -312,6 +327,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     waiting = 0
     tokens = []
     log = functools.partial(log_fn, worker_id=-1)
+    tfrecord_id = 0
     while True:
         log(f"Tokens: {len(tokens):,d} - Frames: {total_frames:,d}")
         # wait until one element exists or run is over
@@ -328,14 +344,17 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
             index[idx] = [-1, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
         frames = torch.as_tensor(frames.astype(np.float32) / 255)
         total_frames += frames.size(0) * frames.size(1)
+        if tokens:
+            tokens.append(padding_token)
         tokens.extend(tokenize(model, frames, device))
         waiting = 0
-    write_numpy(tokens, download_buffer_dir, save_dir, s3_bucket)
+        tfrecord_id += write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, s3_bucket)
+    write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, s3_bucket)
 
 
 def main():
     workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, model_path, \
-    shared_memory = parse_args()
+    shared_memory, tokens_per_file = parse_args()
     config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
     model_path = f'{model_path}/sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
@@ -344,6 +363,7 @@ def main():
         gdown.download(f'https://drive.google.com/uc?id=1M7RvSoiuKBwpF-98sScKng0lsZnwFebR', config_path, quiet=True)
     os.makedirs(tmp_dir, exist_ok=True)
     conf = OmegaConf.load(config_path)
+    padding_token = conf.model.params.n_embed
     resolution = conf.model.params.ddconfig.resolution
     model = load_vqgan(config_path, model_path)
 
@@ -375,7 +395,8 @@ def main():
     for p in procs:
         p.start()
 
-    return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock, procs)
+    return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock, procs,
+                  tokens_per_file, padding_token)
 
 
 if __name__ == '__main__':
