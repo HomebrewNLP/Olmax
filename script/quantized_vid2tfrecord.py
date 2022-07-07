@@ -222,7 +222,7 @@ def log_fn(*args, worker_id: int):
 
 
 def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int,
-                 download_buffer_dir: str, target_fps: int, batch_size: int, out_queue: queue.Queue,
+                 download_buffer_dir: str, target_fps: int, batch_size: int,
                  index_mem_name: str, frame_mem_name: str, read_shared_lock: threading.Lock,
                  write_shared_lock: threading.Lock, shape: typing.Tuple[int]):
 
