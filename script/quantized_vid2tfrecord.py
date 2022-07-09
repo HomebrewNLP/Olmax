@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import pickle
 import random
+import shutil
 import sys
 import threading
 import time
@@ -18,6 +19,7 @@ import boto3
 import ffmpeg
 import gdown
 import numpy as np
+import requests
 import tensorflow as tf
 import torch
 import youtube_dl
@@ -117,12 +119,26 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
 
 @try_except
 def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int) -> np.ndarray:
+    filename = uuid.uuid4()
     for video_url_idx, video_url in enumerate(video_urls):
         url = video_url["url"]
+
+        path = f"{filename}.{video_url['ext']}"
+        try:
+            with requests.get(url, stream=True) as r, open(path, 'wb') as f:
+                shutil.copyfileobj(r.raw, f)
+        except Exception:  # Broken URL, next might work
+            continue
+
         width = round(video_url["width"] * video_url["height"] / target_image_size)
-        out, _ = ffmpeg.input(url).filter("scale", w=width, h=target_image_size) \
-            .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
-            .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error").run(capture_stdout=True)
+        try:
+            out, _ = ffmpeg.input(path).filter("scale", w=width, h=target_image_size) \
+                .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
+                .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error").run(capture_stdout=True)
+        except ffmpeg.Error:  # Broken Video, next might work
+            continue
+        if os.path.exists(path):
+            os.remove(path)
         return np.frombuffer(out, np.uint8).reshape((-1, target_image_size, target_image_size, 3))
 
 
