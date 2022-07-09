@@ -1,4 +1,5 @@
 import argparse
+import copy
 import datetime
 import functools
 import multiprocessing
@@ -330,6 +331,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
     device = torch.device(dev_str)
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
+    model = copy.deepcopy(model)
     model = model.to(device)
     total_frames = 0
     tokens = []
