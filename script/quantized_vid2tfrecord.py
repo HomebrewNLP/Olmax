@@ -189,6 +189,7 @@ class SharedQueue:
         self.read_lock = read_lock
         self.write_lock = write_lock
         self.exclusive = exclusive
+        return self
 
     def export(self):
         return self.index_mem.name, self.index.shape, self.frame_mem.name, self.frame.shape, self.read_lock, \
