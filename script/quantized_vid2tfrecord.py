@@ -323,14 +323,13 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         queue.put(frames)
 
 
-def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: int,
+def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, device: int,
            queue: SharedQueue, procs: typing.List[multiprocessing.Process], tokens_per_file: int,
            padding_token: int):
     save_dir = f'{save_dir.rstrip("/")}/{device}'
     dev_str = f'cuda:{device}'
     device = torch.device(dev_str)
     torch.set_default_tensor_type('torch.FloatTensor')
-    s3_bucket = boto3.resource("s3").Bucket(bucket_name)
     model = copy.deepcopy(model)
     model = model.to(device)
     total_frames = 0
@@ -397,6 +396,7 @@ def main():
     while queue.index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
         time.sleep(1)
 
+    bucket = boto3.resource("s3").Bucket(bucket)
     threads = [threading.Thread(target=worker,
                                 args=(model, prefix, tmp_dir, bucket, i, queue, procs, chunk_size, padding_token),
                                 daemon=True)
