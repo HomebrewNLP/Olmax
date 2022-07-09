@@ -356,8 +356,8 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, dev
         if tokens:
             tokens.append(padding_token)
         tokens.extend(tokenize(model, frames, device))
-        tfrecord_id += write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, s3_bucket)
-    write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, s3_bucket)
+        tfrecord_id += write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, bucket)
+    write_tfrecords(tokens, tokens_per_file, download_buffer_dir, save_dir, tfrecord_id, bucket)
 
 
 def main():
