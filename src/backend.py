@@ -10,6 +10,10 @@ from .context import Context
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 
 
+def stable_rsqrt(inp: jnp.ndarray, eps: float) -> jnp.ndarray:
+    return jnp.reciprocal(jnp.maximum(jnp.sqrt(jnp.maximum(inp, 0)), eps))
+
+
 def pos_dim(inp: jnp.ndarray, dims: typing.Sequence[int]) -> typing.Sequence[int]:
     return tuple([d % inp.ndim for d in dims])
 
