@@ -246,7 +246,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
                 time.sleep(1)
             start, end, _ = index[idx]
             frames = shared_frames[start:end].copy()  # local clone, so it shared can be safely edited
-            index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+            index[idx] = [-1, 0, 1]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
         frames = torch.as_tensor(frames.astype(np.float32) / 255)
         total_frames += frames.size(0) * frames.size(1)
         if tokens:
