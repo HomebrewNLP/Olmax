@@ -35,13 +35,13 @@ def parse_args():
                         help="Where model and config should be dowloaded to")
     parser.add_argument("--bucket", type=str, help="Name of the S3 bucket")
     parser.add_argument("--prefix", type=str, help="Prefix in the bucket")
-    parser.add_argument("--batch", type=int, default=64, help="Number of images processed per 'computation step'")
+    parser.add_argument("--batch", type=int, default=128, help="Number of images processed per 'computation step'")
     parser.add_argument("--tmp-dir", type=str, help="Local directory for temporary storage")
     parser.add_argument("--urls", type=str, help="Directory filled with JSON files full of URLs")
     parser.add_argument("--fps", type=int, default=1,
                         help="Number of (encoded) video frames per second of raw data (default=4)")
     parser.add_argument("--shared-memory", type=int, default=4, help="number of GB of shared memory")
-    parser.add_argument("--tokens-per-file", type=int, default=2 ** 29, help="how big each file should roughly be")
+    parser.add_argument("--tokens-per-file", type=int, default=2 ** 28, help="how big each file should roughly be")
     parser.add_argument("--startup-delay", type=int, default=10,
                         help="Seconds to wait after launching one worker (to avoid crashes)")
     args = parser.parse_args()
@@ -121,8 +121,8 @@ def get_video_frames(video_urls: typing.List[dict], target_image_size: int, targ
         width = round(video_url["width"] * video_url["height"] / target_image_size)
         out, _ = ffmpeg.input(url).filter("scale", w=width, h=target_image_size) \
             .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
-            .output("pipe:", format="rawvideo", pix_fmt="rgb48", loglevel="error").run(capture_stdout=True)
-        return np.frombuffer(out, np.uint16).reshape((-1, target_image_size, target_image_size, 3))
+            .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error").run(capture_stdout=True)
+        return np.frombuffer(out, np.uint8).reshape((-1, target_image_size, target_image_size, 3))
 
 
 @functools.partial(try_except, default=0)
@@ -169,8 +169,8 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 
     shared_index_mem = SharedMemory(create=False, name=index_mem_name)
     shared_frame_mem = SharedMemory(create=False, name=frame_mem_name)
-    index_mem = np.ndarray((256, 2), dtype=np.uint32, buffer=shared_index_mem.buf)
-    frame_mem = np.ndarray(shape, dtype=np.uint16, buffer=shared_frame_mem.buf)
+    index_mem = np.ndarray((256, 3), dtype=np.uint32, buffer=shared_index_mem.buf)
+    frame_mem = np.ndarray(shape, dtype=np.uint8, buffer=shared_frame_mem.buf)
 
     for wor in work:
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
@@ -191,25 +191,30 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
             log(f"dropping {wor}. too many batches in video (={batch_count}) compared to max memory size "
                 f"(={frame_mem.shape[0]})")
 
+        while index_mem[:, 1].max() + batch_count >= frame_mem.shape[0]:  # until new frames fit into memory
+            while index_mem[:, 0].min() == 0:  # wait for anything to be read
+                time.sleep(2)
+            with write_shared_lock, read_shared_lock:  # move everything to the left  (old=left, new=right)
+                min_start = index_mem[:, 0].min()
+                max_end = index_mem[:, 1].max()
+                dist = max_end - min_start
+                frame_mem[:dist] = frame_mem[min_start:max_end]
+                start_idx = index_mem[:, 0].argmin()
+                end_idx = index_mem[:, 1].argmax()
+                while not np.all(np.equal(index_mem[start_idx:end_idx, 2], 1)):
+                    time.sleep(1)
+                index_mem[:end_idx - start_idx, :2] = index_mem[start_idx:end_idx, :2] - min_start
+                index_mem[:end_idx - start_idx, 2] = index_mem[start_idx:end_idx, 2]
+                index_mem[end_idx - start_idx:, 1:] = 0
+                index_mem[end_idx - start_idx:, 0] = -1
         with write_shared_lock:
-            while index_mem[:, 1].max() + batch_count >= frame_mem.shape[0]:  # until new frames fit into memory
-                while index_mem[:, 0].min() == 0:  # wait for anything to be read
-                    time.sleep(5)
-                with read_shared_lock:  # move everything to the left  (old=left, new=right)
-                    min_start = index_mem[:, 0].min()
-                    max_end = index_mem[:, 1].max()
-                    dist = max_end - min_start
-                    frame_mem[:dist] = frame_mem[min_start:max_end]
-                    start_idx = index_mem[:, 0].argmin()
-                    end_idx = index_mem[:, 1].argmax()
-                    index_mem[:end_idx - start_idx] = index_mem[start_idx:end_idx] - min_start
-                    index_mem[end_idx - start_idx:] = 0
             max_end = index_mem[:, 1].max()
             end_idx = index_mem[:, 1].argmax()
-            frame_mem[max_end:max_end + batch_count] = frames[:]
-            if max_end != 0:  # if array is empty, make sure to use the first (0th) spot
-                end_idx += 1
-            index_mem[end_idx] = [max_end, max_end + batch_count]
+            index_mem[end_idx] = [max_end, max_end + batch_count, 0]
+        frame_mem[max_end:max_end + batch_count] = frames[:]
+        if max_end != 0:  # if array is empty, make sure to use the first (0th) spot
+            end_idx += 1
+        index_mem[end_idx][2] = 1
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
@@ -231,16 +236,18 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
             f"FramesPerSecond: {total_frames / (time.time() - start_time):5.2f}")
         # wait until one element exists or run is over
         while index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
-            time.sleep(5)
+            time.sleep(1)
         if not any(p.is_alive() for p in procs):
             log("Finished")
             break
         with read_shared_lock:  # lock reader, so it won't move memory while we're copying
             idx = index[:, 1].argmax()  # pick first
-            start, end = index[idx]
+            while index[idx][2] == 0:
+                time.sleep(1)
+            start, end, _ = index[idx]
             frames = shared_frames[start:end].copy()  # local clone, so it shared can be safely edited
-            index[idx] = [-1, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
-        frames = torch.as_tensor(frames.astype(np.float32) / 65535)
+            index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+        frames = torch.as_tensor(frames.astype(np.float32) / 255)
         total_frames += frames.size(0) * frames.size(1)
         if tokens:
             tokens.append(padding_token)
@@ -266,13 +273,15 @@ def main():
 
     shared_memory = shared_memory * 1024 ** 3  # it's in GB, we have to convert it to bytes
     shared_frames = shared_memory // (256 ** 2 * 3 * batch_size)
-    index = np.zeros((256, 2), dtype=np.uint32)  # 256x start+end
+    index = np.zeros((256, 3), dtype=np.uint32)  # 256x start+end
     shape = (shared_frames, batch_size, 3, 256, 256)
-    frames = np.zeros(shape, dtype=np.uint16)
+    print(shape)
+    frames = np.zeros(shape, dtype=np.uint8)
+    print(frames.nbytes)
     index_mem = SharedMemory(create=True, size=index.nbytes)
     frame_mem = SharedMemory(create=True, size=frames.nbytes)
-    index = np.ndarray((256, 2), dtype=np.uint32, buffer=index_mem.buf)
-    frame = np.ndarray(shape, dtype=np.uint16, buffer=frame_mem.buf)
+    index = np.ndarray((256, 3), dtype=np.uint32, buffer=index_mem.buf)
+    frame = np.ndarray(shape, dtype=np.uint8, buffer=frame_mem.buf)
     index[:] = 0
     frame[:] = 0
 
@@ -293,7 +302,7 @@ def main():
         p.start()
 
     while index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
-        time.sleep(5)
+        time.sleep(1)
 
     return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock, procs,
                   tokens_per_file, padding_token)
