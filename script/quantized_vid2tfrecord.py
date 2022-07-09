@@ -164,9 +164,9 @@ class QueuedSemaphore:
 
     def acquire(self, val: int = 1):
         job_id = uuid.uuid4()
-        self._queue.append((job_id, val))
+        self._queue.append(job_id)
         with self._cond:
-            while self._queue[0][0] != job_id or self._value[0] < val:
+            while self._queue[0] != job_id or self._value[0] < val:
                 self._cond.wait()
             del self._queue[0]
             self._value[0] -= val
