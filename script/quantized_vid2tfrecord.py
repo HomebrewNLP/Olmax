@@ -325,6 +325,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: int,
            queue: SharedQueue, procs: typing.List[multiprocessing.Process], tokens_per_file: int,
            padding_token: int):
+    save_dir = f'{save_dir.rstrip("/")}/{device}'
     dev_str = f'cuda:{device}'
     device = torch.device(dev_str)
     torch.set_default_tensor_type('torch.FloatTensor')
@@ -347,7 +348,6 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         while queue.index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
             time.sleep(1)
         if not any(p.is_alive() for p in procs):
-            log("Finished")
             break
         frames = queue.get()
         frames = torch.as_tensor(frames.astype(np.float32) / 255)
@@ -378,10 +378,14 @@ def main():
     shared_frames = shared_memory // (256 ** 2 * 3 * batch_size)
     queue = SharedQueue.from_shape([shared_frames, batch_size, 3, 256, 256])
 
-    with open(urls, 'rb') as f:
-        video_ids, _ = pickle.load(f)
+    ids = []
+    for path in os.listdir(urls):
+        with open(f'{urls}/{path}', 'rb') as f:
+            video_ids, _ = pickle.load(f)
+            ids.extend(video_ids)
+    del video_ids
 
-    ids = [video_ids[int(len(video_ids) * i / workers):int(len(video_ids) * (i + 1) / workers)] for i in range(workers)]
+    ids = [ids[int(len(video_ids) * i / workers):int(len(video_ids) * (i + 1) / workers)] for i in range(workers)]
     lock = multiprocessing.Lock()
     procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, fps, batch_size, queue.export()),
                                      daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
@@ -391,13 +395,17 @@ def main():
     while queue.index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
         time.sleep(1)
 
-    procs.extend([threading.Thread(target=worker,
-                                   args=(model, prefix, tmp_dir, bucket, i, queue, procs, chunk_size, padding_token),
-                                   daemon=True)
-                  for i in range(gpus)])
+    threads = [threading.Thread(target=worker,
+                                args=(model, prefix, tmp_dir, bucket, i, queue, procs, chunk_size, padding_token),
+                                daemon=True)
+               for i in range(gpus)]
 
-    for p in procs:
+    for t in threads:
+        t.start()
+
+    for p in procs + threads:
         p.join()
+
     queue.frame_mem.unlink()
     queue.frame_mem.close()
     queue.index_mem.unlink()
