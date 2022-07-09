@@ -195,9 +195,13 @@ class SharedQueue:
         return self.index_mem.name, self.index.shape, self.frame_mem.name, self.frame.shape, self.read_lock, \
                self.write_lock, self.exclusive
 
-    def exclusive_acquire(self, lock: multiprocessing.Semaphore):
+    def exclusive_acquire(self, lock: threading.Semaphore):
         for i in range(self.exclusive):
             lock.acquire()
+
+    def multi_release(self, lock: threading.Semaphore, count: int = 0):
+        for _ in range((self.exclusive - count) if count < 1 else count):
+            lock.release()
 
     def get(self):
         self.exclusive_acquire(self.read_lock)
@@ -207,7 +211,7 @@ class SharedQueue:
         start, end, _ = self.index[idx]
         mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
         self.index[idx] = [-1, 0, 1]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
-        self.read_lock.release(self.exclusive)
+        self.multi_release(self.read_lock)
         return mem
 
     def put(self, obj: np.ndarray):
@@ -241,13 +245,13 @@ class SharedQueue:
             self.index[end_idx - start_idx:, 1:] = 0
             self.index[end_idx - start_idx:, 0] = -1
 
-            self.read_lock.release(self.exclusive)
-            self.write_lock.release(self.exclusive)
+            self.multi_release(self.read_lock)
+            self.multi_release(self.write_lock)
 
         self.exclusive_acquire(self.write_lock)
         max_end = self.index[:, 1].max()
         end_idx = self.index[:, 1].argmax()
-        self.write_lock.release(self.exclusive - 1)
+        self.multi_release(self.write_lock, -1)
 
         self.index[end_idx] = [max_end, max_end + batches, 0]
         self.frame[max_end:max_end + batches] = self.frame[:]
