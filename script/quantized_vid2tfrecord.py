@@ -114,7 +114,7 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiproce
         if width <= target_image_size or height <= target_image_size:
             continue
         video_urls.append({'width': width, 'height': height, 'ext': f['ext'], 'url': f['url']})
-    return sorted(video_urls, key=lambda x: (x['width'], x['height'], x['ext'] != 'mp4'))
+    return sorted(video_urls, key=lambda x: (x['ext'] != 'mp4', x['width'], x['height']))
 
 
 @try_except
