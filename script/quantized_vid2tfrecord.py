@@ -33,7 +33,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpu-worker", type=int, default=multiprocessing.cpu_count(),
                         help=f"Number of workers. Default is the number of CPU cores (={multiprocessing.cpu_count()})")
-    parser.add_argument("--device", type=str, default='cuda:0', help="Whether to use GPU or CPU. Default is GPU.")
+    parser.add_argument("--gpus", type=int, default=1, help="Number of GPUs to use")
     parser.add_argument("--model-base-path", type=str, default='/fsx/lucas',
                         help="Where model and config should be dowloaded to")
     parser.add_argument("--bucket", type=str, help="Name of the S3 bucket")
@@ -49,7 +49,7 @@ def parse_args():
                         help="Seconds to wait after launching one worker (to avoid crashes)")
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
-           args.batch, args.device, args.model_base_path, args.shared_memory, args.tokens_per_file
+           args.batch, args.gpus, args.model_base_path, args.shared_memory, args.tokens_per_file
 
 
 def frame_encoder(frame):
@@ -164,11 +164,6 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     tokens.clear()
     tokens.extend(residual_tokens)
     return added
-
-
-def log_fn(*args, worker_id: int):
-    print(f"cuda:{os.environ['CUDA_VISIBLE_DEVICES']} - worker:{worker_id:2d} - {datetime.datetime.now()}", *args,
-          flush=True)
 
 
 class QueuedSemaphore:
@@ -327,23 +322,27 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         queue.put(frames)
 
 
-def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
+def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: int,
            queue: SharedQueue, procs: typing.List[multiprocessing.Process], tokens_per_file: int,
            padding_token: int):
-    print(os.environ["CUDA_VISIBLE_DEVICES"], "starting worker")
+    dev_str = f'cuda:{device}'
+    device = torch.device(dev_str)
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
     model = model.to(device)
     total_frames = 0
     tokens = []
-    log = functools.partial(log_fn, worker_id=-1)
     tfrecord_id = 0
     start_time = time.time()
+    start = datetime.datetime.now()
     token_pad = len(f'{tokens_per_file:,d}')
     frame_pad = len(f'{tokens_per_file // 1024:,d}')
     while True:
-        log(f"Tokens: {len(tokens):{token_pad},d} - Frames: {total_frames:{frame_pad},d} - "
-            f"FramesPerSecond: {total_frames / (time.time() - start_time):5.2f}")
+        print(f"{dev_str} | {datetime.datetime.now()} | Tokens: {len(tokens):{token_pad},d} - "
+              f"Frames: {total_frames:{frame_pad},d} | "
+              f"FramesPerSecond: {total_frames / (time.time() - start_time):5.2f} - "
+              f"Elapsed: {datetime.datetime.now() - start}", flush=True)
+
         # wait until one element exists or run is over
         while queue.index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
             time.sleep(1)
@@ -361,8 +360,8 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, device, model_path, \
-    shared_memory, tokens_per_file = parse_args()
+    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, gpus, model_path, \
+    shared_memory, chunk_size = parse_args()
     config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
     model_path = f'{model_path}/sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
@@ -392,7 +391,17 @@ def main():
     while queue.index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
         time.sleep(1)
 
-    return worker(model, prefix, tmp_dir, bucket, torch.device(device), queue, procs, tokens_per_file, padding_token)
+    procs.extend([threading.Thread(target=worker,
+                                   args=(model, prefix, tmp_dir, bucket, i, queue, procs, chunk_size, padding_token),
+                                   daemon=True)
+                  for i in range(gpus)])
+
+    for p in procs:
+        p.join()
+    queue.frame_mem.unlink()
+    queue.frame_mem.close()
+    queue.index_mem.unlink()
+    queue.index_mem.close()
 
 
 if __name__ == '__main__':
