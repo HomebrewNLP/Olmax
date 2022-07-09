@@ -254,7 +254,7 @@ class SharedQueue:
         self.multi_release(self.write_lock, -1)
 
         self.index[end_idx] = [max_end, max_end + batches, 0]
-        self.frame[max_end:max_end + batches] = self.frame[:]
+        self.frame[max_end:max_end + batches] = obj[:]
         if max_end != 0:  # if array is empty, make sure to use the first (0th) spot
             end_idx += 1
         self.index[end_idx][2] = 1
