@@ -258,7 +258,7 @@ class SharedQueue:
 
 def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, target_fps: int,
                  batch_size: int, queue_export):
-    queue = SharedQueue.from_shape(queue_export)
+    queue = SharedQueue.from_export(queue_export)
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'socket_timeout': 600, "quiet": True, "verbose": False, "no_warnings": True,
