@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import typing
+import uuid
 from contextlib import redirect_stderr, redirect_stdout
 from multiprocessing.shared_memory import SharedMemory
 
@@ -154,13 +155,36 @@ def log_fn(*args, worker_id: int):
           flush=True)
 
 
+class QueuedSemaphore:
+    def __init__(self, value: int = 1):
+        manager = multiprocessing.Manager()
+        self._cond = multiprocessing.Condition(multiprocessing.Lock())
+        self._value = manager.list([value])
+        self._queue = manager.list([])
+
+    def acquire(self, val: int = 1):
+        job_id = uuid.uuid4()
+        self._queue.append((job_id, val))
+        with self._cond:
+            while self._queue[0][0] != job_id or self._value[0] < val:
+                self._cond.wait()
+            del self._queue[0]
+            self._value[0] -= val
+        return True
+
+    def release(self, val: int = 1):
+        with self._cond:
+            self._value[0] += val
+            self._cond.notify()
+
+
 class SharedQueue:
     index_mem: SharedMemory
     frame_mem: SharedMemory
     index: np.ndarray
     frame: np.ndarray
-    read_lock: threading.Semaphore
-    write_lock: threading.Semaphore
+    read_lock: QueuedSemaphore
+    write_lock: QueuedSemaphore
     exclusive: int
 
     @classmethod
@@ -174,8 +198,8 @@ class SharedQueue:
         self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
         self.index[:] = [-1, 0, 1]
         self.frame[:] = 0
-        self.read_lock = multiprocessing.Semaphore(exclusive)
-        self.write_lock = multiprocessing.Semaphore(exclusive)
+        self.read_lock = QueuedSemaphore(exclusive)
+        self.write_lock = QueuedSemaphore(exclusive)
         self.exclusive = exclusive
         return self
 
@@ -195,11 +219,11 @@ class SharedQueue:
         return self.index_mem.name, self.index.shape, self.frame_mem.name, self.frame.shape, self.read_lock, \
                self.write_lock, self.exclusive
 
-    def exclusive_acquire(self, lock: threading.Semaphore):
+    def exclusive_acquire(self, lock: QueuedSemaphore):
         for i in range(self.exclusive):
             lock.acquire()
 
-    def multi_release(self, lock: threading.Semaphore, count: int = 0):
+    def multi_release(self, lock: QueuedSemaphore, count: int = 0):
         for _ in range((self.exclusive - count) if count < 1 else count):
             lock.release()
 
@@ -238,8 +262,6 @@ class SharedQueue:
             self.frame[:dist] = self.frame[min_start:max_end]
             start_idx = self.index[:, 0].argmin()
             end_idx = self.index[:, 1].argmax()
-            while not np.all(np.equal(self.index[start_idx:end_idx, 2], 1)):
-                time.sleep(1)
             self.index[:end_idx - start_idx, :2] = self.index[start_idx:end_idx, :2] - min_start
             self.index[:end_idx - start_idx, 2] = self.index[start_idx:end_idx, 2]
             self.index[end_idx - start_idx:, 1:] = 0
