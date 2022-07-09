@@ -218,7 +218,7 @@ class SharedQueue:
         batches = obj.shape[0]
 
         max_size = self.frame.shape[0] // 4  # unrealistic that it'll fit if it takes up 25% of the memory
-        if batches >= max_size:
+        if batches > max_size:
             for idx in range(0, batches, max_size):  # ... so we slice it up and feed in many smaller videos
                 self.put(obj[idx:idx + max_size])
             return
