@@ -385,7 +385,7 @@ def main():
             ids.extend(video_ids)
     del video_ids
 
-    ids = [ids[int(len(video_ids) * i / workers):int(len(video_ids) * (i + 1) / workers)] for i in range(workers)]
+    ids = [ids[int(len(ids) * i / workers):int(len(ids) * (i + 1) / workers)] for i in range(workers)]
     lock = multiprocessing.Lock()
     procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, fps, batch_size, queue.export()),
                                      daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
