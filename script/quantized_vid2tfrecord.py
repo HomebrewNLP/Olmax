@@ -154,11 +154,111 @@ def log_fn(*args, worker_id: int):
           flush=True)
 
 
-def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, target_fps: int,
-                 batch_size: int, index_mem_name: str, frame_mem_name: str, read_shared_lock: threading.Lock,
-                 write_shared_lock: threading.Lock, shape: typing.Tuple[int]):
+class SharedQueue:
+    index_mem: SharedMemory
+    frame_mem: SharedMemory
+    index: np.ndarray
+    frame: np.ndarray
+    read_lock: threading.Semaphore
+    write_lock: threading.Semaphore
+    exclusive: int
 
-    log = functools.partial(log_fn, worker_id=worker_id)
+    @classmethod
+    def from_shape(cls, shape: typing.List[int], indices: int = 256, exclusive: int = 128):
+        self = cls()
+        frames = np.zeros(shape, dtype=np.uint8)
+        index = np.zeros((indices, 3), dtype=np.uint32)  # start, end, locked
+        self.index_mem = SharedMemory(create=True, size=index.nbytes)
+        self.frame_mem = SharedMemory(create=True, size=frames.nbytes)
+        self.index = np.ndarray((indices, 3), dtype=np.uint32, buffer=self.index_mem.buf)
+        self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
+        self.index[:] = [-1, 0, 1]
+        self.frame[:] = 0
+        self.read_lock = multiprocessing.Semaphore(exclusive)
+        self.write_lock = multiprocessing.Semaphore(exclusive)
+        self.exclusive = exclusive
+        return self
+
+    @classmethod
+    def from_export(cls, index_name, index_shape, frame_name, frame_shape, read_lock, write_lock, exclusive):
+        self = cls()
+        self.index_mem = SharedMemory(create=False, name=index_name)
+        self.frame_mem = SharedMemory(create=False, name=frame_name)
+        self.index = np.ndarray(index_shape, dtype=np.uint32, buffer=self.index_mem.buf)
+        self.frame = np.ndarray(frame_shape, dtype=np.uint8, buffer=self.frame_mem.buf)
+        self.read_lock = read_lock
+        self.write_lock = write_lock
+        self.exclusive = exclusive
+
+    def export(self):
+        return self.index_mem.name, self.index.shape, self.frame_mem.name, self.frame.shape, self.read_lock, \
+               self.write_lock, self.exclusive
+
+    def exclusive_acquire(self, lock: multiprocessing.Semaphore):
+        for i in range(self.exclusive):
+            lock.acquire()
+
+    def get(self):
+        self.exclusive_acquire(self.read_lock)
+        idx = self.index[:, 1].argmax()  # pick first
+        while self.index[idx][2] == 0:
+            time.sleep(1)
+        start, end, _ = self.index[idx]
+        mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
+        self.index[idx] = [-1, 0, 1]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+        self.read_lock.release(self.exclusive)
+        return mem
+
+    def put(self, obj: np.ndarray):
+        batches = obj.shape[0]
+
+        max_size = self.frame.shape[0] // 4  # unrealistic that it'll fit if it takes up 25% of the memory
+        if batches >= max_size:
+            for idx in range(0, batches, max_size):  # ... so we slice it up and feed in many smaller videos
+                self.put(obj[idx:idx + max_size])
+            return
+
+        while self.index[:, 1].max() + batches >= self.frame.shape[0]:  # until new frames fit into memory
+            while self.index[:, 0].min() == 0:  # wait for anything to be read
+                time.sleep(2)
+
+            # ensure _nothing_ else is reading or writing
+            self.exclusive_acquire(self.read_lock)
+            self.exclusive_acquire(self.write_lock)
+
+            # shift everything to the left
+            min_start = self.index[:, 0].min()
+            max_end = self.index[:, 1].max()
+            dist = max_end - min_start
+            self.frame[:dist] = self.frame[min_start:max_end]
+            start_idx = self.index[:, 0].argmin()
+            end_idx = self.index[:, 1].argmax()
+            while not np.all(np.equal(self.index[start_idx:end_idx, 2], 1)):
+                time.sleep(1)
+            self.index[:end_idx - start_idx, :2] = self.index[start_idx:end_idx, :2] - min_start
+            self.index[:end_idx - start_idx, 2] = self.index[start_idx:end_idx, 2]
+            self.index[end_idx - start_idx:, 1:] = 0
+            self.index[end_idx - start_idx:, 0] = -1
+
+            self.read_lock.release(self.exclusive)
+            self.write_lock.release(self.exclusive)
+
+        self.exclusive_acquire(self.write_lock)
+        max_end = self.index[:, 1].max()
+        end_idx = self.index[:, 1].argmax()
+        self.write_lock.release(self.exclusive - 1)
+
+        self.index[end_idx] = [max_end, max_end + batches, 0]
+        self.frame[max_end:max_end + batches] = self.frame[:]
+        if max_end != 0:  # if array is empty, make sure to use the first (0th) spot
+            end_idx += 1
+        self.index[end_idx][2] = 1
+        self.write_lock.release()
+
+
+def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, target_fps: int,
+                 batch_size: int, queue_export):
+    queue = SharedQueue.from_shape(queue_export)
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'socket_timeout': 600, "quiet": True, "verbose": False, "no_warnings": True,
@@ -166,11 +266,6 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
              })
     youtube_getter.add_default_info_extractors()
     random.Random(worker_id).shuffle(work)
-
-    shared_index_mem = SharedMemory(create=False, name=index_mem_name)
-    shared_frame_mem = SharedMemory(create=False, name=frame_mem_name)
-    index_mem = np.ndarray((256, 3), dtype=np.uint32, buffer=shared_index_mem.buf)
-    frame_mem = np.ndarray(shape, dtype=np.uint8, buffer=shared_frame_mem.buf)
 
     for wor in work:
         video_urls = get_video_urls(youtube_getter, youtube_base, wor, lock, target_image_size)
@@ -186,40 +281,12 @@ def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_
         frames: np.ndarray = frames
         frames = frames[:frames.shape[0] // batch_size * batch_size]
         frames = frames.transpose((0, 3, 1, 2)).reshape((-1, batch_size, 3, target_image_size, target_image_size))
-        batch_count = frames.shape[0]
-        if batch_count >= frame_mem.shape[0]:
-            log(f"dropping {wor}. too many batches in video (={batch_count}) compared to max memory size "
-                f"(={frame_mem.shape[0]})")
-
-        while index_mem[:, 1].max() + batch_count >= frame_mem.shape[0]:  # until new frames fit into memory
-            while index_mem[:, 0].min() == 0:  # wait for anything to be read
-                time.sleep(2)
-            with write_shared_lock, read_shared_lock:  # move everything to the left  (old=left, new=right)
-                min_start = index_mem[:, 0].min()
-                max_end = index_mem[:, 1].max()
-                dist = max_end - min_start
-                frame_mem[:dist] = frame_mem[min_start:max_end]
-                start_idx = index_mem[:, 0].argmin()
-                end_idx = index_mem[:, 1].argmax()
-                while not np.all(np.equal(index_mem[start_idx:end_idx, 2], 1)):
-                    time.sleep(1)
-                index_mem[:end_idx - start_idx, :2] = index_mem[start_idx:end_idx, :2] - min_start
-                index_mem[:end_idx - start_idx, 2] = index_mem[start_idx:end_idx, 2]
-                index_mem[end_idx - start_idx:, 1:] = 0
-                index_mem[end_idx - start_idx:, 0] = -1
-        with write_shared_lock:
-            max_end = index_mem[:, 1].max()
-            end_idx = index_mem[:, 1].argmax()
-            index_mem[end_idx] = [max_end, max_end + batch_count, 0]
-        frame_mem[max_end:max_end + batch_count] = frames[:]
-        if max_end != 0:  # if array is empty, make sure to use the first (0th) spot
-            end_idx += 1
-        index_mem[end_idx][2] = 1
+        queue.put(frames)
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name: str, device: torch.device,
-           index: np.ndarray, shared_frames: np.ndarray, read_shared_lock: threading.Lock,
-           procs: typing.List[multiprocessing.Process], tokens_per_file: int, padding_token: int):
+           queue: SharedQueue, procs: typing.List[multiprocessing.Process], tokens_per_file: int,
+           padding_token: int):
     print(os.environ["CUDA_VISIBLE_DEVICES"], "starting worker")
     torch.set_default_tensor_type('torch.FloatTensor')
     s3_bucket = boto3.resource("s3").Bucket(bucket_name)
@@ -235,18 +302,12 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket_name
         log(f"Tokens: {len(tokens):{token_pad},d} - Frames: {total_frames:{frame_pad},d} - "
             f"FramesPerSecond: {total_frames / (time.time() - start_time):5.2f}")
         # wait until one element exists or run is over
-        while index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
+        while queue.index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
             time.sleep(1)
         if not any(p.is_alive() for p in procs):
             log("Finished")
             break
-        with read_shared_lock:  # lock reader, so it won't move memory while we're copying
-            idx = index[:, 1].argmax()  # pick first
-            while index[idx][2] == 0:
-                time.sleep(1)
-            start, end, _ = index[idx]
-            frames = shared_frames[start:end].copy()  # local clone, so it shared can be safely edited
-            index[idx] = [-1, 0, 1]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+        frames = queue.get()
         frames = torch.as_tensor(frames.astype(np.float32) / 255)
         total_frames += frames.size(0) * frames.size(1)
         if tokens:
@@ -273,39 +334,22 @@ def main():
 
     shared_memory = shared_memory * 1024 ** 3  # it's in GB, we have to convert it to bytes
     shared_frames = shared_memory // (256 ** 2 * 3 * batch_size)
-    index = np.zeros((256, 3), dtype=np.uint32)  # 256x start+end
-    shape = (shared_frames, batch_size, 3, 256, 256)
-    print(shape)
-    frames = np.zeros(shape, dtype=np.uint8)
-    print(frames.nbytes)
-    index_mem = SharedMemory(create=True, size=index.nbytes)
-    frame_mem = SharedMemory(create=True, size=frames.nbytes)
-    index = np.ndarray((256, 3), dtype=np.uint32, buffer=index_mem.buf)
-    frame = np.ndarray(shape, dtype=np.uint8, buffer=frame_mem.buf)
-    index[:] = 0
-    frame[:] = 0
+    queue = SharedQueue.from_shape([shared_frames, batch_size, 3, 256, 256])
 
     with open(urls, 'rb') as f:
         video_ids, _ = pickle.load(f)
 
     ids = [video_ids[int(len(video_ids) * i / workers):int(len(video_ids) * (i + 1) / workers)] for i in range(workers)]
-
     lock = multiprocessing.Lock()
-    read_shared_lock = multiprocessing.Lock()
-    write_shared_lock = multiprocessing.Lock()
-
-    procs = [multiprocessing.Process(args=(
-            work, worker_id, lock, resolution, fps, batch_size, index_mem.name, frame_mem.name,
-            read_shared_lock, write_shared_lock, shape),
-            daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
+    procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, fps, batch_size, queue.export()),
+                                     daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
     for p in procs:
         p.start()
 
-    while index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
+    while queue.index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
         time.sleep(1)
 
-    return worker(model, prefix, tmp_dir, bucket, torch.device(device), index, frame, read_shared_lock, procs,
-                  tokens_per_file, padding_token)
+    return worker(model, prefix, tmp_dir, bucket, torch.device(device), queue, procs, tokens_per_file, padding_token)
 
 
 if __name__ == '__main__':
