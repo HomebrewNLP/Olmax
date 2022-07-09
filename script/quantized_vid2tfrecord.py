@@ -46,11 +46,15 @@ def parse_args():
                         help="Number of (encoded) video frames per second of raw data (default=4)")
     parser.add_argument("--shared-memory", type=int, default=4, help="number of GB of shared memory")
     parser.add_argument("--tokens-per-file", type=int, default=2 ** 28, help="how big each file should roughly be")
+    parser.add_argument("--video-downloaders", type=int, default=4,
+                        help="Number of parallel video _information_ downloaders. Videos are always downloaded in "
+                             "parallel, but downloading information about too many videos in parallel can lead to "
+                             "errors and slow things down.")
     parser.add_argument("--startup-delay", type=int, default=10,
                         help="Seconds to wait after launching one worker (to avoid crashes)")
     args = parser.parse_args()
     return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
-           args.batch, args.gpus, args.model_base_path, args.shared_memory, args.tokens_per_file
+           args.batch, args.gpus, args.model_base_path, args.shared_memory, args.tokens_per_file, args.video_downloaders
 
 
 def frame_encoder(frame):
@@ -92,7 +96,7 @@ def tokenize(model: GumbelVQ, frames: torch.Tensor, device: torch.device):
 
 
 @try_except
-def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: multiprocessing.Lock, target_image_size: int) -> \
+def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: threading.Semaphore, target_image_size: int) -> \
         typing.List[dict]:
     # We have to lock this part because it can lead to errors if multiple thread try to scrape video Information at
     # the same time.
@@ -295,7 +299,7 @@ class SharedQueue:
         self.write_lock.release()
 
 
-def frame_worker(work: list, worker_id: int, lock: threading.Lock, target_image_size: int, target_fps: int,
+def frame_worker(work: list, worker_id: int, lock: threading.Semaphore, target_image_size: int, target_fps: int,
                  batch_size: int, queue_export):
     queue = SharedQueue.from_export(*queue_export)
     youtube_base = 'https://www.youtube.com/watch?v='
@@ -362,7 +366,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, dev
 
 def main():
     workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, gpus, model_path, \
-    shared_memory, chunk_size = parse_args()
+    shared_memory, chunk_size, video_downloaders = parse_args()
     config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
     model_path = f'{model_path}/sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
@@ -387,7 +391,7 @@ def main():
     del video_ids
 
     ids = [ids[int(len(ids) * i / workers):int(len(ids) * (i + 1) / workers)] for i in range(workers)]
-    lock = multiprocessing.Lock()
+    lock = multiprocessing.Semaphore(video_downloaders)
     procs = [multiprocessing.Process(args=(work, worker_id, lock, resolution, fps, batch_size, queue.export()),
                                      daemon=True, target=frame_worker) for worker_id, work in enumerate(ids)]
     for p in procs:
