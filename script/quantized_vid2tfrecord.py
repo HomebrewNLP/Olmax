@@ -121,13 +121,16 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: threading.
     return sorted(video_urls, key=lambda x: (x['ext'] != 'mp4', x['width'], x['height']))
 
 
-@try_except
 def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int) -> np.ndarray:
     filename = uuid.uuid4()
+    path = filename
     for video_url_idx, video_url in enumerate(video_urls):
-        url = video_url["url"]
+        if os.path.exists(path):
+            os.remove(path)
 
+        url = video_url["url"]
         path = f"{filename}.{video_url['ext']}"
+
         try:
             with requests.get(url, stream=True) as r, open(path, 'wb') as f:
                 shutil.copyfileobj(r.raw, f)
@@ -141,6 +144,7 @@ def get_video_frames(video_urls: typing.List[dict], target_image_size: int, targ
                 .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error").run(capture_stdout=True)
         except ffmpeg.Error:  # Broken Video, next might work
             continue
+
         if os.path.exists(path):
             os.remove(path)
         return np.frombuffer(out, np.uint8).reshape((-1, target_image_size, target_image_size, 3))
