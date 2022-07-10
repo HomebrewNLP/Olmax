@@ -222,7 +222,7 @@ class SharedQueue:
     exclusive: int
 
     @classmethod
-    def from_shape(cls, shape: typing.List[int], indices: int = 256, exclusive: int = 128):
+    def from_shape(cls, shape: typing.List[int], indices: int = 2 ** 20, exclusive: int = 128):
         self = cls()
         frames = np.zeros(shape, dtype=np.uint8)
         index = np.zeros((indices, 3), dtype=np.uint32)  # start, end, locked
