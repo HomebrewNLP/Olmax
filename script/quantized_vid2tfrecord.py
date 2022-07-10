@@ -13,7 +13,6 @@ import time
 import traceback
 import typing
 import uuid
-from contextlib import redirect_stderr, redirect_stdout
 from multiprocessing.shared_memory import SharedMemory
 
 import boto3
@@ -245,7 +244,7 @@ class SharedQueue:
 
     def get(self):
         self.exclusive_acquire(self.read_lock)
-        idx = self.index[:, 1].argmax()  # pick first
+        idx = (self.index[:, 1] * (self.index[:, 1] < 2 ** 30)).argmax()  # pick first
         while self.index[idx][2] == 0:
             time.sleep(1)
         start, end, _ = self.index[idx]
@@ -264,12 +263,11 @@ class SharedQueue:
             return
 
         while self.index[:, 1].max() + batches >= self.frame.shape[0]:  # until new frames fit into memory
-            while self.index[:, 0].min() == 0:  # wait for anything to be read
-                time.sleep(2)
-
             # ensure _nothing_ else is reading or writing
-            self.exclusive_acquire(self.read_lock)
             self.exclusive_acquire(self.write_lock)
+
+            while self.index[0, 0].min() == 0:  # wait for anything to be read
+                time.sleep(2)
 
             # shift everything to the left
             min_start = self.index[:, 0].min()
@@ -278,12 +276,12 @@ class SharedQueue:
             self.frame[:dist] = self.frame[min_start:max_end]
             start_idx = self.index[:, 0].argmin()
             end_idx = self.index[:, 1].argmax()
-            self.index[:end_idx - start_idx, :2] = self.index[start_idx:end_idx, :2] - min_start
-            self.index[:end_idx - start_idx, 2] = self.index[start_idx:end_idx, 2]
-            self.index[end_idx - start_idx:, 1:] = 0
-            self.index[end_idx - start_idx:, 0] = -1
+            dist = end_idx - start_idx
+            self.index[:dist, :2] = self.index[start_idx:end_idx, :2] - min_start
+            self.index[:dist, 2] = self.index[start_idx:end_idx, 2]
+            self.index[dist:, 1:] = 0
+            self.index[dist:, 0] = -1
 
-            self.multi_release(self.read_lock)
             self.multi_release(self.write_lock)
 
         self.exclusive_acquire(self.write_lock)
@@ -291,10 +289,10 @@ class SharedQueue:
         end_idx = self.index[:, 1].argmax()
         self.multi_release(self.write_lock, -1)
 
+        if self.index[end_idx][1] != 0:
+            end_idx += 1
         self.index[end_idx] = [max_end, max_end + batches, 0]
         self.frame[max_end:max_end + batches] = obj[:]
-        if max_end != 0:  # if array is empty, make sure to use the first (0th) spot
-            end_idx += 1
         self.index[end_idx][2] = 1
         self.write_lock.release()
 
