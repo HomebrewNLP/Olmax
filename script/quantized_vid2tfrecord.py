@@ -70,6 +70,7 @@ def try_except(fn: typing.Callable, default=None):
             return fn(*args, **kwargs)
         except Exception as exc:
             print(r"IGNORED EXCEPTION \/\/\/")
+            print(fn, exc)
             traceback.print_exc()
             print("IGNORED EXCEPTION /\\/\\/\\")
 
@@ -255,18 +256,21 @@ class SharedQueue:
 
     def get(self):
         while True:
-            with self.read_lock():
-                idx = 0
-                waiting = 30
-                while self.index[idx][2] == 0 and waiting:
-                    time.sleep(1)
-                    idx = (self.index[:, 0] + 2 ** 30 * (self.index[:, 2] == 0)).argmin()
-                    waiting -= 1
-                if not waiting:  # put reader to end of queue if it can't read
-                    continue
-                start, end, _ = self.index[idx]
-                mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
-                self.index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+            self.read_lock.acquire(0)
+            idx = 0
+            start_time = time.time()
+            while self.index[idx][2] == 0 and time.time() - start_time < 30:
+                valid, = np.where(np.logical_and(self.index[:, 2] == 1, self.index[:, 0] < 2 ** 30))
+                if valid.size:
+                    idx = valid[self.index[valid, 0].argmin()]
+            if time.time() - start_time > 30:  # put reader to end of queue if it can't read
+                self.read_lock.release(0)
+                continue
+            self.read_lock.release(-1)
+            start, end, _ = self.index[idx]
+            mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
+            self.index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+            self.read_lock.release()
             return mem
 
     def _shift_left(self):
@@ -376,6 +380,8 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, dev
         if not any(p.is_alive() for p in procs):
             break
         frames = queue.get()
+        if not frames.size:
+            continue
         frames = torch.as_tensor(frames.astype(np.float32) / 255)
         total_frames += frames.size(0) * frames.size(1)
         if tokens:
