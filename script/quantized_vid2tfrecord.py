@@ -261,27 +261,22 @@ class SharedQueue:
                self.write_lock, self.exclusive
 
     def get(self):
-        a = uuid.uuid4()
         while True:
-            self.read_lock.acquire(0)
+            with self.read_lock(0):
+                start_time = time.time()
+                idx = 0
+                while self.index[idx][2] == 0 and time.time() - start_time < 30:
+                    valid, = np.where(np.logical_and(self.index[:, 2] == 1, self.index[:, 0] < 2 ** 30))
+                    if valid.size:
+                        idx = valid[self.index[valid, 0].argmin()]
+                if time.time() - start_time > 30:  # put reader to end of queue if it can't read
+                    self.read_lock.release(0)
+                    continue
 
-            start_time = time.time()
-            idx = 0
-            valid = None
-            while self.index[idx][2] == 0 and time.time() - start_time < 30:
-                valid, = np.where(np.logical_and(self.index[:, 2] == 1, self.index[:, 0] < 2 ** 30))
-                if valid.size:
-                    idx = valid[self.index[valid, 0].argmin()]
-            if time.time() - start_time > 30:  # put reader to end of queue if it can't read
-                self.read_lock.release(0)
-                continue
-
-            self.read_lock.release(-1)
-            start, end, _ = self.index[idx]
-            mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
-            self.index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
-            self.read_lock.release()
-            return mem
+                start, end, _ = self.index[idx]
+                mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
+                self.index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+                return mem
 
     def _shift_left(self):
         min_start = self.index[:, 0].min()
@@ -319,7 +314,6 @@ class SharedQueue:
                 self.put(obj[idx:idx + max_size])
             return
 
-        a = uuid.uuid4()
         while self.index[:, 1].max() + batches >= self.frame.shape[0]:  # until new frames fit into memory
             while self.index[0, 2] == 0:  # wait for anything to be read
                 time.sleep(2)
