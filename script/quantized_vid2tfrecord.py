@@ -243,15 +243,22 @@ class SharedQueue:
             lock.release()
 
     def get(self):
-        self.exclusive_acquire(self.read_lock)
-        idx = (self.index[:, 1] * (self.index[:, 1] < 2 ** 30)).argmax()  # pick first
-        while self.index[idx][2] == 0:
-            time.sleep(1)
-        start, end, _ = self.index[idx]
-        mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
-        self.index[idx] = [-1, 0, 1]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
-        self.multi_release(self.read_lock)
-        return mem
+        while True:
+            self.exclusive_acquire(self.read_lock)
+            idx = 0
+            waiting = 30
+            while self.index[idx][2] == 0 and waiting:
+                time.sleep(1)
+                idx = (self.index[:, 1] * (self.index[:, 1] < 2 ** 30) * self.index[:, 2] == 0).argmax()
+                waiting -= 1
+            if not waiting:  # put reader to end of queue if it can't read
+                self.multi_release(self.read_lock)
+                continue
+            start, end, _ = self.index[idx]
+            mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
+            self.index[idx] = [-1, 0, 1]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
+            self.multi_release(self.read_lock)
+            return mem
 
     def put(self, obj: np.ndarray):
         batches = obj.shape[0]
@@ -263,11 +270,12 @@ class SharedQueue:
             return
 
         while self.index[:, 1].max() + batches >= self.frame.shape[0]:  # until new frames fit into memory
+            while self.index[0, 2] == 0:  # wait for anything to be read
+                time.sleep(2)
+
             # ensure _nothing_ else is reading or writing
             self.exclusive_acquire(self.write_lock)
-
-            while self.index[0, 0].min() == 0:  # wait for anything to be read
-                time.sleep(2)
+            self.exclusive_acquire(self.read_lock)
 
             # shift everything to the left
             min_start = self.index[:, 0].min()
@@ -282,6 +290,7 @@ class SharedQueue:
             self.index[dist:, 1:] = 0
             self.index[dist:, 0] = -1
 
+            self.multi_release(self.read_lock)
             self.multi_release(self.write_lock)
 
         self.exclusive_acquire(self.write_lock)
