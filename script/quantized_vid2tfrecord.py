@@ -243,7 +243,7 @@ class SharedQueue:
         self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
         self.index[:] = [-1, 0, 1]
         self.frame[:] = 0
-        self.read_lock = QueuedSemaphore(exclusive * 2)
+        self.read_lock = QueuedSemaphore(exclusive)
         self.write_lock = QueuedSemaphore(exclusive)
         self.exclusive = exclusive
         return self
