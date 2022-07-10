@@ -176,6 +176,8 @@ class QueuedSemaphore:
         self._cond = multiprocessing.Condition(multiprocessing.Lock())
         self._value = manager.list([value])
         self._queue = manager.list([])
+        self._value_lock = multiprocessing.Lock()
+        self._queue_lock = multiprocessing.Lock()
         self.max_value = value
 
     def __call__(self, val: int = 0):
@@ -183,21 +185,25 @@ class QueuedSemaphore:
 
     def acquire(self, val: int = 1):
         job_id = uuid.uuid4()
-        self._queue.append(job_id)
+        with self._queue_lock:
+            self._queue.append(job_id)
         if val < 1:
             val = self.max_value + val
         with self._cond:
             while self._queue[0] != job_id or self._value[0] < val:
                 self._cond.wait()
-            del self._queue[0]
-            self._value[0] -= val
+            with self._value_lock:
+                self._value[0] -= val
+            with self._queue_lock:
+                del self._queue[0]
         return True
 
     def release(self, val: int = 1):
         if val < 1:
             val = self.max_value + val
         with self._cond:
-            self._value[0] += val
+            with self._value_lock:
+                self._value[0] += val
             self._cond.notify()
 
 
@@ -233,7 +239,7 @@ class SharedQueue:
         self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
         self.index[:] = [-1, 0, 1]
         self.frame[:] = 0
-        self.read_lock = QueuedSemaphore(exclusive)
+        self.read_lock = QueuedSemaphore(exclusive * 2)
         self.write_lock = QueuedSemaphore(exclusive)
         self.exclusive = exclusive
         return self
@@ -255,10 +261,13 @@ class SharedQueue:
                self.write_lock, self.exclusive
 
     def get(self):
+        a = uuid.uuid4()
         while True:
             self.read_lock.acquire(0)
-            idx = 0
+
             start_time = time.time()
+            idx = 0
+            valid = None
             while self.index[idx][2] == 0 and time.time() - start_time < 30:
                 valid, = np.where(np.logical_and(self.index[:, 2] == 1, self.index[:, 0] < 2 ** 30))
                 if valid.size:
@@ -266,6 +275,7 @@ class SharedQueue:
             if time.time() - start_time > 30:  # put reader to end of queue if it can't read
                 self.read_lock.release(0)
                 continue
+
             self.read_lock.release(-1)
             start, end, _ = self.index[idx]
             mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
@@ -309,6 +319,7 @@ class SharedQueue:
                 self.put(obj[idx:idx + max_size])
             return
 
+        a = uuid.uuid4()
         while self.index[:, 1].max() + batches >= self.frame.shape[0]:  # until new frames fit into memory
             while self.index[0, 2] == 0:  # wait for anything to be read
                 time.sleep(2)
@@ -380,8 +391,6 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, dev
         if not any(p.is_alive() for p in procs):
             break
         frames = queue.get()
-        if not frames.size:
-            continue
         frames = torch.as_tensor(frames.astype(np.float32) / 255)
         total_frames += frames.size(0) * frames.size(1)
         if tokens:
