@@ -67,9 +67,8 @@ def frame_encoder(frame):
 def try_except(fn: typing.Callable, default=None):
     def _fn(*args, **kwargs):
         try:
-            with open(os.devnull, 'w') as fnull, redirect_stderr(fnull) as err, redirect_stdout(fnull) as out:
-                return fn(*args, **kwargs)
-        except Exception:
+            return fn(*args, **kwargs)
+        except Exception as exc:
             print(r"IGNORED EXCEPTION \/\/\/")
             traceback.print_exc()
             print("IGNORED EXCEPTION /\\/\\/\\")
@@ -176,10 +175,16 @@ class QueuedSemaphore:
         self._cond = multiprocessing.Condition(multiprocessing.Lock())
         self._value = manager.list([value])
         self._queue = manager.list([])
+        self.max_value = value
+
+    def __call__(self, val: int = 0):
+        return QueuedSemaphoreContext(self, val)
 
     def acquire(self, val: int = 1):
         job_id = uuid.uuid4()
         self._queue.append(job_id)
+        if val < 1:
+            val = self.max_value + val
         with self._cond:
             while self._queue[0] != job_id or self._value[0] < val:
                 self._cond.wait()
@@ -188,9 +193,23 @@ class QueuedSemaphore:
         return True
 
     def release(self, val: int = 1):
+        if val < 1:
+            val = self.max_value + val
         with self._cond:
             self._value[0] += val
             self._cond.notify()
+
+
+class QueuedSemaphoreContext:
+    def __init__(self, semaphore: QueuedSemaphore, val: int):
+        self.semaphore = semaphore
+        self.val = val
+
+    def __enter__(self):
+        self.semaphore.acquire(self.val)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.semaphore.release(self.val)
 
 
 class SharedQueue:
@@ -234,35 +253,52 @@ class SharedQueue:
         return self.index_mem.name, self.index.shape, self.frame_mem.name, self.frame.shape, self.read_lock, \
                self.write_lock, self.exclusive
 
-    def exclusive_acquire(self, lock: QueuedSemaphore):
-        for i in range(self.exclusive):
-            lock.acquire()
-
-    def multi_release(self, lock: QueuedSemaphore, count: int = 0):
-        for _ in range((self.exclusive - count) if count < 1 else count):
-            lock.release()
-
     def get(self):
         while True:
-            self.exclusive_acquire(self.read_lock)
-            idx = 0
-            waiting = 30
-            while self.index[idx][2] == 0 and waiting:
-                time.sleep(1)
-                idx = (self.index[:, 1] * (self.index[:, 1] < 2 ** 30) * self.index[:, 2] == 0).argmax()
-                waiting -= 1
-            if not waiting:  # put reader to end of queue if it can't read
-                self.multi_release(self.read_lock)
-                continue
-            start, end, _ = self.index[idx]
-            mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
-            self.index[idx] = [-1, 0, 1]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
-            self.multi_release(self.read_lock)
+            with self.read_lock():
+                idx = 0
+                waiting = 30
+                while self.index[idx][2] == 0 and waiting:
+                    time.sleep(1)
+                    idx = (self.index[:, 0] + 2 ** 30 * (self.index[:, 2] == 0)).argmin()
+                    waiting -= 1
+                if not waiting:  # put reader to end of queue if it can't read
+                    continue
+                start, end, _ = self.index[idx]
+                mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
+                self.index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
             return mem
+
+    def _shift_left(self):
+        min_start = self.index[:, 0].min()
+        max_end = self.index[:, 1].max()
+        dist = max_end - min_start
+        self.frame[:dist] = self.frame[min_start:max_end]
+        start_idx = self.index[:, 0].argmin()
+        end_idx = self.index[:, 1].argmax()
+        dist = end_idx - start_idx
+        self.index[:dist, :2] = self.index[start_idx:end_idx, :2] - min_start
+        self.index[:dist, 2] = self.index[start_idx:end_idx, 2]
+        self.index[dist:, 1:] = 0
+        self.index[dist:, 0] = -1
+
+    def _put_item(self, obj: np.ndarray):
+        batches = obj.shape[0]
+
+        self.write_lock.acquire(0)
+        max_end = self.index[:, 1].max()
+        end_idx = self.index[:, 1].argmax()
+        self.write_lock.release(-1)
+
+        if self.index[end_idx][1] != 0:
+            end_idx += 1
+        self.index[end_idx] = [max_end, max_end + batches, 0]
+        self.frame[max_end:max_end + batches] = obj[:]
+        self.index[end_idx][2] = 1
+        self.write_lock.release()
 
     def put(self, obj: np.ndarray):
         batches = obj.shape[0]
-
         max_size = self.frame.shape[0] // 4  # unrealistic that it'll fit if it takes up 25% of the memory
         if batches > max_size:
             for idx in range(0, batches, max_size):  # ... so we slice it up and feed in many smaller videos
@@ -272,38 +308,16 @@ class SharedQueue:
         while self.index[:, 1].max() + batches >= self.frame.shape[0]:  # until new frames fit into memory
             while self.index[0, 2] == 0:  # wait for anything to be read
                 time.sleep(2)
-
             # ensure _nothing_ else is reading or writing
-            self.exclusive_acquire(self.write_lock)
-            self.exclusive_acquire(self.read_lock)
+            with self.write_lock():
+                if self.index[:, 1].max() + batches < self.frame.shape[0] or self.index[0, 2] == 1:
+                    continue
+                with self.read_lock():
+                    if self.index[:, 1].max() + batches < self.frame.shape[0] or self.index[0, 2] == 1:
+                        continue
+                    self._shift_left()
 
-            # shift everything to the left
-            min_start = self.index[:, 0].min()
-            max_end = self.index[:, 1].max()
-            dist = max_end - min_start
-            self.frame[:dist] = self.frame[min_start:max_end]
-            start_idx = self.index[:, 0].argmin()
-            end_idx = self.index[:, 1].argmax()
-            dist = end_idx - start_idx
-            self.index[:dist, :2] = self.index[start_idx:end_idx, :2] - min_start
-            self.index[:dist, 2] = self.index[start_idx:end_idx, 2]
-            self.index[dist:, 1:] = 0
-            self.index[dist:, 0] = -1
-
-            self.multi_release(self.read_lock)
-            self.multi_release(self.write_lock)
-
-        self.exclusive_acquire(self.write_lock)
-        max_end = self.index[:, 1].max()
-        end_idx = self.index[:, 1].argmax()
-        self.multi_release(self.write_lock, -1)
-
-        if self.index[end_idx][1] != 0:
-            end_idx += 1
-        self.index[end_idx] = [max_end, max_end + batches, 0]
-        self.frame[max_end:max_end + batches] = obj[:]
-        self.index[end_idx][2] = 1
-        self.write_lock.release()
+        self._put_item(obj)
 
 
 def frame_worker(work: list, worker_id: int, lock: threading.Semaphore, target_image_size: int, target_fps: int,
