@@ -123,7 +123,7 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: threading.
 
 def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int) -> np.ndarray:
     filename = uuid.uuid4()
-    path = filename
+    path = str(filename)
     for video_url_idx, video_url in enumerate(video_urls):
         if os.path.exists(path):
             os.remove(path)
