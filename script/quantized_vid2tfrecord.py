@@ -174,88 +174,147 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     return added
 
 
+class QueuedSemaphore:
+    def __init__(self, value: int = 1):
+        manager = multiprocessing.Manager()
+        self._cond = multiprocessing.Condition(multiprocessing.Lock())
+        self._value = manager.list([value])
+        self._queue = manager.list([])
+        self._value_lock = multiprocessing.Lock()
+        self._queue_lock = multiprocessing.Lock()
+        self.max_value = value
+
+    def __call__(self, val: int = 0):
+        return QueuedSemaphoreContext(self, val)
+
+    def acquire(self, val: int = 0):
+        job_id = uuid.uuid4()
+        with self._queue_lock:
+            self._queue.append(job_id)
+        if val < 1:
+            val = self.max_value + val
+        with self._cond:
+            while self._queue[0] != job_id or self._value[0] < val:
+                self._cond.wait()
+            with self._value_lock:
+                self._value[0] -= val
+            with self._queue_lock:
+                del self._queue[0]
+        return True
+
+    def release(self, val: int = 0):
+        if val < 1:
+            val = self.max_value + val
+        with self._cond:
+            with self._value_lock:
+                self._value[0] += val
+            self._cond.notify_all()
+
+
+class QueuedSemaphoreContext:
+    def __init__(self, semaphore: QueuedSemaphore, val: int):
+        self.semaphore = semaphore
+        self.val = val
+
+    def __enter__(self):
+        self.semaphore.acquire(self.val)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.semaphore.release(self.val)
+
+
+class ListQueue:
+    def __init__(self):
+        manager = multiprocessing.Manager()
+        self.list = manager.list()
+        self.write_lock = manager.RLock()
+        self.read_lock = manager.RLock()
+        self.cond = manager.Condition(manager.Lock())
+
+    def get(self):
+        with self.read_lock:
+            if not self.list:
+                with self.cond:
+                    self.cond.wait()
+            return self.list.pop(0)
+
+    def put(self, obj):
+        with self.write_lock:
+            self.list.append(obj)
+            with self.cond:
+                self.cond.notify_all()
+
+
+def call_with(contexts: list, fn: typing.Callable[[], None], cond_fn: typing.Callable[[], bool]):
+    if not contexts:
+        return fn()
+    if cond_fn():
+        return
+    with contexts.pop(0):
+        return call_with(contexts, fn, cond_fn)
+
+
 class SharedQueue:
-    index_mem: SharedMemory
     frame_mem: SharedMemory
-    index: np.ndarray
     frame: np.ndarray
-    read_lock: threading.Semaphore
-    write_lock: threading.Semaphore
-    exclusive: int
+    index_queue: ListQueue
+    read_memory: QueuedSemaphore
+    write_memory: QueuedSemaphore
+    read_timeout: int
 
     @classmethod
-    def from_shape(cls, shape: typing.List[int], indices: int = 2 ** 20, exclusive: int = 128):
+    def from_shape(cls, shape: typing.List[int], exclusive: int = 128, read_timeout: int = 3):
         self = cls()
         frames = np.zeros(shape, dtype=np.uint8)
-        index = np.zeros((indices, 3), dtype=np.uint32)  # start, end, locked
-        self.index_mem = SharedMemory(create=True, size=index.nbytes)
         self.frame_mem = SharedMemory(create=True, size=frames.nbytes)
-        self.index = np.ndarray((indices, 3), dtype=np.uint32, buffer=self.index_mem.buf)
         self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
-        self.index[:] = [-1, 0, 1]
+        self.index_queue = ListQueue()
         self.frame[:] = 0
-        self.read_lock = multiprocessing.Lock()
-        self.write_lock = multiprocessing.Lock()
-        self.exclusive = exclusive
+        self.read_memory = QueuedSemaphore(exclusive)
+        self.write_memory = QueuedSemaphore(exclusive)
+        self.read_timeout = read_timeout
         return self
 
     @classmethod
-    def from_export(cls, index_name, index_shape, frame_name, frame_shape, read_lock, write_lock, exclusive):
+    def from_export(cls, frame_name, frame_shape, index_queue, read_from_memory, write_to_memory, read_timeout):
         self = cls()
-        self.index_mem = SharedMemory(create=False, name=index_name)
         self.frame_mem = SharedMemory(create=False, name=frame_name)
-        self.index = np.ndarray(index_shape, dtype=np.uint32, buffer=self.index_mem.buf)
         self.frame = np.ndarray(frame_shape, dtype=np.uint8, buffer=self.frame_mem.buf)
-        self.read_lock = read_lock
-        self.write_lock = write_lock
-        self.exclusive = exclusive
+        self.index_queue = index_queue
+        self.read_memory = read_from_memory
+        self.write_memory = write_to_memory
+        self.read_timeout = read_timeout
         return self
 
     def export(self):
-        return self.index_mem.name, self.index.shape, self.frame_mem.name, self.frame.shape, self.read_lock, \
-               self.write_lock, self.exclusive
+        return self.frame_mem.name, self.frame.shape, self.index_queue, self.read_memory, self.write_memory, \
+               self.read_timeout
 
     def get(self):
         while True:
-            with self.read_lock:
-                start_time = time.time()
-                idx = 0
-                while self.index[idx][2] == 0 and time.time() - start_time < 3:
-                    valid, = np.where(np.logical_and(self.index[:, 2] == 1, self.index[:, 0] < 2 ** 30))
-                    if valid.size:
-                        idx = valid[self.index[valid, 0].argmin()]
-                if time.time() - start_time > 3:  # put reader to end of queue if it can't read
-                    continue
-
-                start, end, _ = self.index[idx]
-                mem = self.frame[start:end].copy()  # local clone, so it shared can be safely edited
-                self.index[idx] = [-1, 0, 0]  # reset indices (-1 -> 2^32-1, so it won't map to "min" in frame_worker)
-                return mem
+            with self.read_memory(1):
+                start, end = self.index_queue.get()
+                return self.frame[start:end].copy()  # local clone, so share can be safely edited
 
     def _shift_left(self):
-        min_start = self.index[:, 0].min()
-        max_end = self.index[:, 1].max()
-        dist = max_end - min_start
-        self.frame[:dist] = self.frame[min_start:max_end]
-        start_idx = self.index[:, 0].argmin()
-        end_idx = self.index[:, 1].argmax()
-        dist = end_idx - start_idx
-        self.index[:dist, :2] = self.index[start_idx:end_idx, :2] - min_start
-        self.index[:dist, 2] = self.index[start_idx:end_idx, 2]
-        self.index[dist:, 1:] = 0
-        self.index[dist:, 0] = -1
+        local_list = list(self.index_queue.list)
+        min_start = local_list[0][0]
+        max_end = local_list[-1][1]
+        self.frame[:max_end - min_start] = self.frame[min_start:max_end]
+        self.index_queue.list[:] = [(start - min_start, end - min_start) for start, end in local_list]
 
     def _put_item(self, obj: np.ndarray):
         batches = obj.shape[0]
-        with self.write_lock:
-            max_end = self.index[:, 1].max()
-            end_idx = self.index[:, 1].argmax()
-
-            if self.index[end_idx][1] != 0:
-                end_idx += 1
-            self.index[end_idx] = [max_end, max_end + batches, 0]
-            self.frame[max_end:max_end + batches] = obj[:]
-            self.index[end_idx][2] = 1
+        with self.index_queue.write_lock:
+            if self.index_queue.list:
+                _, start = self.index_queue.list[-1]
+                start += 1
+            else:
+                start = 0
+            end = start + batches
+            self.index_queue.put((start, end))
+        with self.write_memory(1):
+            self.frame[start:end] = obj[:]  # we simply assume that the synchronisation overheads make the reader slower
 
     def put(self, obj: np.ndarray):
         batches = obj.shape[0]
@@ -265,20 +324,16 @@ class SharedQueue:
                 self.put(obj[idx:idx + max_size])
             return
 
-        while self.index[:, 1].max() + batches >= self.frame.shape[0]:  # until new frames fit into memory
-            while self.index[0, 2] == 0:  # wait for anything to be read
+        def _fits():
+            return not self.index_queue.list or self.index_queue.list[-1][1] + batches < self.frame.shape[0]
+
+        # until new frames fit into memory
+        while not _fits():
+            while self.index_queue.list[0][0] == 0:  # wait for anything to be read
                 time.sleep(2)
             # ensure _nothing_ else is reading or writing
-            with self.write_lock:
-                if self.index[:, 1].max() + batches < self.frame.shape[0] or self.index[0, 2] == 1:
-                    continue
-                print(datetime.datetime.now(), "WRITER: acquiring read lock", flush=True)
-                with self.read_lock:
-                    print(datetime.datetime.now(), "WRITER: GOT read lock", flush=True)
-                    if self.index[:, 1].max() + batches < self.frame.shape[0] or self.index[0, 2] == 1:
-                        continue
-                    self._shift_left()
-
+            call_with([self.write_memory(), self.read_memory(), self.index_queue.read_lock,
+                       self.index_queue.write_lock], self._shift_left, _fits)
         self._put_item(obj)
 
 
