@@ -299,7 +299,7 @@ class SharedQueue:
         if not self:
             return 0, 0, size
         local_indices = list(self.indices)
-        itr = zip([None, 0] + local_indices, local_indices + [None, self.frame.shape[0]])
+        itr = zip([[None, 0]] + local_indices, local_indices + [[None, self.frame.shape[0]]])
         for i, ((_, prev_end), (start, _)) in enumerate(itr):
             if start - prev_end > size:
                 return i, prev_end, prev_end + size
