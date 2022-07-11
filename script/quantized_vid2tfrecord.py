@@ -257,64 +257,59 @@ def call_with(contexts: list, fn: typing.Callable[[], None], cond_fn: typing.Cal
 class SharedQueue:
     frame_mem: SharedMemory
     frame: np.ndarray
-    index_queue: ListQueue
-    read_memory: QueuedSemaphore
-    write_memory: QueuedSemaphore
-    read_timeout: int
+    indices: list
+    write_index_lock: threading.Lock
+    read_index_lock: threading.Lock
 
     @classmethod
-    def from_shape(cls, shape: typing.List[int], exclusive: int = 128, read_timeout: int = 3):
+    def from_shape(cls, shape: typing.List[int]):
         self = cls()
         frames = np.zeros(shape, dtype=np.uint8)
         self.frame_mem = SharedMemory(create=True, size=frames.nbytes)
         self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
-        self.index_queue = ListQueue()
+        manager = multiprocessing.Manager()
+        self.indices = manager.list()
         self.frame[:] = 0
-        self.read_memory = QueuedSemaphore(exclusive)
-        self.write_memory = QueuedSemaphore(exclusive)
-        self.read_timeout = read_timeout
+        self.write_index_lock = manager.Lock()
+        self.read_index_lock = manager.Lock()
         return self
 
     @classmethod
-    def from_export(cls, frame_name, frame_shape, index_queue, read_from_memory, write_to_memory, read_timeout):
+    def from_export(cls, frame_name, frame_shape, indices, write_index_lock, read_index_lock):
         self = cls()
         self.frame_mem = SharedMemory(create=False, name=frame_name)
         self.frame = np.ndarray(frame_shape, dtype=np.uint8, buffer=self.frame_mem.buf)
-        self.index_queue = index_queue
-        self.read_memory = read_from_memory
-        self.write_memory = write_to_memory
-        self.read_timeout = read_timeout
+        self.indices = indices
+        self.write_index_lock = write_index_lock
+        self.read_index_lock = read_index_lock
         return self
 
     def export(self):
-        return self.frame_mem.name, self.frame.shape, self.index_queue, self.read_memory, self.write_memory, \
-               self.read_timeout
+        return self.frame_mem.name, self.frame.shape, self.indices, self.write_index_lock, self.read_index_lock
 
     def get(self):
         while True:
-            with self.read_memory(1):
-                start, end = self.index_queue.get()
-                return self.frame[start:end].copy()  # local clone, so share can be safely edited
+            with self.read_index_lock:
+                start, end = self.indices.pop(0)
+            return self.frame[start:end].copy()  # local clone, so share can be safely edited
 
-    def _shift_left(self):
-        local_list = list(self.index_queue.list)
-        min_start = local_list[0][0]
-        max_end = local_list[-1][1]
-        self.frame[:max_end - min_start] = self.frame[min_start:max_end]
-        self.index_queue.list[:] = [(start - min_start, end - min_start) for start, end in local_list]
+    def _free_memory(self, size: int) -> typing.Optional[typing.Tuple[int, int, int]]:
+        if not self:
+            return 0, 0, size
+        itr = zip([None, 0] + self.indices, self.indices + [None, self.frame.shape[0]])
+        for i, ((_, prev_end), (start, _)) in enumerate(itr):
+            if start - prev_end > size:
+                return i, prev_end, prev_end + size
 
     def _put_item(self, obj: np.ndarray):
         batches = obj.shape[0]
-        with self.index_queue.write_lock:
-            if self.index_queue.list:
-                _, start = self.index_queue.list[-1]
-                start += 1
-            else:
-                start = 0
-            end = start + batches
-            self.index_queue.put((start, end))
-        with self.write_memory(1):
-            self.frame[start:end] = obj[:]  # we simply assume that the synchronisation overheads make the reader slower
+        with self.write_index_lock:
+            indices = self._free_memory(batches)
+            if indices is None:
+                return
+            idx, start, end = indices
+            self.indices.insert(idx, (start, end))
+        self.frame[start:end] = obj[:]  # we simply assume that the synchronisation overheads make the reader slower
 
     def put(self, obj: np.ndarray):
         batches = obj.shape[0]
@@ -325,19 +320,22 @@ class SharedQueue:
             return
 
         def _fits():
-            return not self or self.index_queue.list[-1][1] + batches < self.frame.shape[0]
+            return bool(self._free_memory(batches))
 
         # until new frames fit into memory
+        waiting = 12
         while not _fits():
-            while self and self.index_queue.list[0][0] == 0:  # wait for anything to be read
-                time.sleep(2)
-            # ensure _nothing_ else is reading or writing
-            call_with([self.write_memory(), self.read_memory(), self.index_queue.read_lock,
-                       self.index_queue.write_lock], self._shift_left, _fits)
+            time.sleep(5)
+            waiting -= 1
+        if not waiting:
+            print("Warning: waited for one minute for space to free up, but none found. Increase memory size to avoid "
+                  "fragmentation or implement defragmentation. Timestamp:", datetime.datetime.now(), flush=True)
+            return
+
         self._put_item(obj)
 
     def __bool__(self):
-        return bool(self.index_queue.list)
+        return bool(self.indices)
 
 
 def frame_worker(work: list, worker_id: int, lock: threading.Semaphore, target_image_size: int, target_fps: int,
