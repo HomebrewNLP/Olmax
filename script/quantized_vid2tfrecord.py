@@ -325,16 +325,19 @@ class SharedQueue:
             return
 
         def _fits():
-            return not self.index_queue.list or self.index_queue.list[-1][1] + batches < self.frame.shape[0]
+            return not self or self.index_queue.list[-1][1] + batches < self.frame.shape[0]
 
         # until new frames fit into memory
         while not _fits():
-            while self.index_queue.list[0][0] == 0:  # wait for anything to be read
+            while self and self.index_queue.list[0][0] == 0:  # wait for anything to be read
                 time.sleep(2)
             # ensure _nothing_ else is reading or writing
             call_with([self.write_memory(), self.read_memory(), self.index_queue.read_lock,
                        self.index_queue.write_lock], self._shift_left, _fits)
         self._put_item(obj)
+
+    def __bool__(self):
+        return bool(self.index_queue.list)
 
 
 def frame_worker(work: list, worker_id: int, lock: threading.Semaphore, target_image_size: int, target_fps: int,
@@ -388,7 +391,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, dev
               f"Elapsed: {datetime.datetime.now() - start}", flush=True)
 
         # wait until one element exists or run is over
-        while queue.index[:, 1].max() == 0 and any(p.is_alive() for p in procs):
+        while not queue and any(p.is_alive() for p in procs):
             time.sleep(1)
         if not any(p.is_alive() for p in procs):
             break
@@ -435,7 +438,7 @@ def main():
     for p in procs:
         p.start()
 
-    while not queue.index_queue.list:  # "pre-wait" to get more accurate FPS counters
+    while not queue:  # "pre-wait" to get more accurate FPS counters
         time.sleep(1)
 
     bucket = boto3.resource("s3").Bucket(bucket)
