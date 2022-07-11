@@ -174,62 +174,13 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     return added
 
 
-class QueuedSemaphore:
-    def __init__(self, value: int = 1):
-        manager = multiprocessing.Manager()
-        self._cond = multiprocessing.Condition(multiprocessing.Lock())
-        self._value = manager.list([value])
-        self._queue = manager.list([])
-        self._value_lock = multiprocessing.Lock()
-        self._queue_lock = multiprocessing.Lock()
-        self.max_value = value
-
-    def __call__(self, val: int = 0):
-        return QueuedSemaphoreContext(self, val)
-
-    def acquire(self, val: int = 1):
-        job_id = uuid.uuid4()
-        with self._queue_lock:
-            self._queue.append(job_id)
-        if val < 1:
-            val = self.max_value + val
-        with self._cond:
-            while self._queue[0] != job_id or self._value[0] < val:
-                self._cond.wait()
-            with self._value_lock:
-                self._value[0] -= val
-            with self._queue_lock:
-                del self._queue[0]
-        return True
-
-    def release(self, val: int = 1):
-        if val < 1:
-            val = self.max_value + val
-        with self._cond:
-            with self._value_lock:
-                self._value[0] += val
-            self._cond.notify()
-
-
-class QueuedSemaphoreContext:
-    def __init__(self, semaphore: QueuedSemaphore, val: int):
-        self.semaphore = semaphore
-        self.val = val
-
-    def __enter__(self):
-        self.semaphore.acquire(self.val)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.semaphore.release(self.val)
-
-
 class SharedQueue:
     index_mem: SharedMemory
     frame_mem: SharedMemory
     index: np.ndarray
     frame: np.ndarray
-    read_lock: QueuedSemaphore
-    write_lock: QueuedSemaphore
+    read_lock: threading.Semaphore
+    write_lock: threading.Semaphore
     exclusive: int
 
     @classmethod
@@ -243,8 +194,8 @@ class SharedQueue:
         self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
         self.index[:] = [-1, 0, 1]
         self.frame[:] = 0
-        self.read_lock = QueuedSemaphore(exclusive)
-        self.write_lock = QueuedSemaphore(exclusive)
+        self.read_lock = multiprocessing.Lock()
+        self.write_lock = multiprocessing.Lock()
         self.exclusive = exclusive
         return self
 
@@ -266,15 +217,14 @@ class SharedQueue:
 
     def get(self):
         while True:
-            with self.read_lock(0):
+            with self.read_lock:
                 start_time = time.time()
                 idx = 0
-                while self.index[idx][2] == 0 and time.time() - start_time < 30:
+                while self.index[idx][2] == 0 and time.time() - start_time < 3:
                     valid, = np.where(np.logical_and(self.index[:, 2] == 1, self.index[:, 0] < 2 ** 30))
                     if valid.size:
                         idx = valid[self.index[valid, 0].argmin()]
-                if time.time() - start_time > 30:  # put reader to end of queue if it can't read
-                    self.read_lock.release(0)
+                if time.time() - start_time > 3:  # put reader to end of queue if it can't read
                     continue
 
                 start, end, _ = self.index[idx]
@@ -297,18 +247,15 @@ class SharedQueue:
 
     def _put_item(self, obj: np.ndarray):
         batches = obj.shape[0]
+        with self.write_lock:
+            max_end = self.index[:, 1].max()
+            end_idx = self.index[:, 1].argmax()
 
-        self.write_lock.acquire(0)
-        max_end = self.index[:, 1].max()
-        end_idx = self.index[:, 1].argmax()
-        self.write_lock.release(-1)
-
-        if self.index[end_idx][1] != 0:
-            end_idx += 1
-        self.index[end_idx] = [max_end, max_end + batches, 0]
-        self.frame[max_end:max_end + batches] = obj[:]
-        self.index[end_idx][2] = 1
-        self.write_lock.release()
+            if self.index[end_idx][1] != 0:
+                end_idx += 1
+            self.index[end_idx] = [max_end, max_end + batches, 0]
+            self.frame[max_end:max_end + batches] = obj[:]
+            self.index[end_idx][2] = 1
 
     def put(self, obj: np.ndarray):
         batches = obj.shape[0]
@@ -322,10 +269,12 @@ class SharedQueue:
             while self.index[0, 2] == 0:  # wait for anything to be read
                 time.sleep(2)
             # ensure _nothing_ else is reading or writing
-            with self.write_lock():
+            with self.write_lock:
                 if self.index[:, 1].max() + batches < self.frame.shape[0] or self.index[0, 2] == 1:
                     continue
-                with self.read_lock():
+                print(datetime.datetime.now(), "WRITER: acquiring read lock", flush=True)
+                with self.read_lock:
+                    print(datetime.datetime.now(), "WRITER: GOT read lock", flush=True)
                     if self.index[:, 1].max() + batches < self.frame.shape[0] or self.index[0, 2] == 1:
                         continue
                     self._shift_left()
