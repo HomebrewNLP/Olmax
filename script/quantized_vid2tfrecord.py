@@ -290,6 +290,8 @@ class SharedQueue:
     def get(self):
         while True:
             with self.read_index_lock:
+                while not self:
+                    time.sleep(1)
                 start, end = self.indices.pop(0)
             return self.frame[start:end].copy()  # local clone, so share can be safely edited
 
