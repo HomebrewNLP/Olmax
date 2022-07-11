@@ -49,10 +49,8 @@ def parse_args():
                         help="Number of parallel video _information_ downloaders. Videos are always downloaded in "
                              "parallel, but downloading information about too many videos in parallel can lead to "
                              "errors and slow things down.")
-    parser.add_argument("--startup-delay", type=int, default=10,
-                        help="Seconds to wait after launching one worker (to avoid crashes)")
     args = parser.parse_args()
-    return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.startup_delay, \
+    return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, \
            args.batch, args.gpus, args.model_base_path, args.shared_memory, args.tokens_per_file, args.video_downloaders
 
 
@@ -139,7 +137,8 @@ def get_video_frames(video_urls: typing.List[dict], target_image_size: int, targ
 
         width = round(video_url["width"] * video_url["height"] / target_image_size)
         try:
-            out, _ = ffmpeg.input(path).filter("scale", w=width, h=target_image_size) \
+            out, _ = ffmpeg.input(path, preset="ultrafast", threads=target_image_size // 40) \
+                .filter("scale", w=width, h=target_image_size) \
                 .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
                 .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error").run(capture_stdout=True)
         except ffmpeg.Error:  # Broken Video, next might work
@@ -172,86 +171,6 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     tokens.clear()
     tokens.extend(residual_tokens)
     return added
-
-
-class QueuedSemaphore:
-    def __init__(self, value: int = 1):
-        manager = multiprocessing.Manager()
-        self._cond = multiprocessing.Condition(multiprocessing.Lock())
-        self._value = manager.list([value])
-        self._queue = manager.list([])
-        self._value_lock = multiprocessing.Lock()
-        self._queue_lock = multiprocessing.Lock()
-        self.max_value = value
-
-    def __call__(self, val: int = 0):
-        return QueuedSemaphoreContext(self, val)
-
-    def acquire(self, val: int = 0):
-        job_id = uuid.uuid4()
-        with self._queue_lock:
-            self._queue.append(job_id)
-        if val < 1:
-            val = self.max_value + val
-        with self._cond:
-            while self._queue[0] != job_id or self._value[0] < val:
-                self._cond.wait()
-            with self._value_lock:
-                self._value[0] -= val
-            with self._queue_lock:
-                del self._queue[0]
-        return True
-
-    def release(self, val: int = 0):
-        if val < 1:
-            val = self.max_value + val
-        with self._cond:
-            with self._value_lock:
-                self._value[0] += val
-            self._cond.notify_all()
-
-
-class QueuedSemaphoreContext:
-    def __init__(self, semaphore: QueuedSemaphore, val: int):
-        self.semaphore = semaphore
-        self.val = val
-
-    def __enter__(self):
-        self.semaphore.acquire(self.val)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.semaphore.release(self.val)
-
-
-class ListQueue:
-    def __init__(self):
-        manager = multiprocessing.Manager()
-        self.list = manager.list()
-        self.write_lock = manager.RLock()
-        self.read_lock = manager.RLock()
-        self.cond = manager.Condition(manager.Lock())
-
-    def get(self):
-        with self.read_lock:
-            if not self.list:
-                with self.cond:
-                    self.cond.wait()
-            return self.list.pop(0)
-
-    def put(self, obj):
-        with self.write_lock:
-            self.list.append(obj)
-            with self.cond:
-                self.cond.notify_all()
-
-
-def call_with(contexts: list, fn: typing.Callable[[], None], cond_fn: typing.Callable[[], bool]):
-    if not contexts:
-        return fn()
-    if cond_fn():
-        return
-    with contexts.pop(0):
-        return call_with(contexts, fn, cond_fn)
 
 
 class SharedQueue:
@@ -407,7 +326,7 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, dev
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, fps, startup_delay, batch_size, gpus, model_path, \
+    workers, bucket, prefix, tmp_dir, urls, fps, batch_size, gpus, model_path, \
     shared_memory, chunk_size, video_downloaders = parse_args()
     config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
     model_path = f'{model_path}/sber.gumbelf8.ckpt'
