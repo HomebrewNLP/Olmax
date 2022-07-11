@@ -14,13 +14,12 @@ def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
     return base
 
 
-def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("sm3", count=False)
-    dims = ctx.parameters[param_name].shape if param_name in ctx.parameters else ["one"] * grad.ndim
-    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0), ctx.model.storage_dtype)
+    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, grad.shape[0], 0), ctx.model.storage_dtype)
     buffer = [weight_update]
 
-    for i, d in enumerate(dims[1:], 1):
+    for i, d in enumerate(grad.shape[1:], 1):
         buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i), ctx.model.storage_dtype))
         weight_update = jnp.minimum(weight_update, buffer[-1])
 
@@ -121,11 +120,13 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(ctx.model.storage_dtype)
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
-        update = adam(inner_ctx, grad, step)
-        if not small_parameter(param_name, grad):  # Do adam update for small parameters
+        if small_parameter(param_name, grad):  # Do adam update for small parameters
+            update = adam(inner_ctx, grad, step)
+        else:
+            update = sm3(ctx, grad)
             shampoo_update = shampoo(inner_ctx, grad, step)
-            shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum",
-                                 heavyball=True)
             update = graft(update, shampoo_update)
+            update = ema(inner_ctx, update, step, 1 - ctx.optimizer.momentum_beta, "momentum",
+                         heavyball=True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
