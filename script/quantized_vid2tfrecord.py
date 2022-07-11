@@ -435,7 +435,7 @@ def main():
     for p in procs:
         p.start()
 
-    while queue.index[:, 1].max() == 0:  # "pre-wait" to get more accurate FPS counters
+    while not queue.index_queue.list:  # "pre-wait" to get more accurate FPS counters
         time.sleep(1)
 
     bucket = boto3.resource("s3").Bucket(bucket)
@@ -452,8 +452,6 @@ def main():
 
     queue.frame_mem.unlink()
     queue.frame_mem.close()
-    queue.index_mem.unlink()
-    queue.index_mem.close()
 
 
 if __name__ == '__main__':
