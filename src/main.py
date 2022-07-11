@@ -143,7 +143,7 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
             return wblog.loss_medians[-1]
         if wctx.ctx.wandb.use_wandb and idx % wctx.ctx.wandb.log_frequency == 0:
             if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
-                return wblog.loss_medians[-1]
+                pass  # return wblog.loss_medians[-1]
         log_step = math.log2((idx + 1) * wctx.ctx.training.device_steps + 1)
         el = wctx.ctx.training.early_stopping.expected_loss
         expected_loss = el.offset + el.scale * math.exp(el.exponent * log_step)

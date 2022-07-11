@@ -3,13 +3,9 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from .backend import assign, get_param, prefixed_name, zero_param
+from .backend import assign, get_param, prefixed_name, stable_rsqrt, zero_param
 from .context import Context
 from .shampoo import Preconditioner, matrix_inverse_pth_root, select_preconditioner
-
-
-def optimizer_rsqrt(inp: jnp.ndarray) -> jnp.ndarray:
-    return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), 1e-5))
 
 
 def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
@@ -34,7 +30,7 @@ def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
         new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
         ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
 
-    return grad * optimizer_rsqrt(weight_update)
+    return grad * stable_rsqrt(weight_update, ctx.optimizer.epsilon)
 
 
 def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
@@ -58,7 +54,8 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
 
 def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
     ctx = ctx.add_to_prefix("square_ema", count=False)
-    return optimizer_rsqrt(ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "square_ema"))
+    buffer = ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "square_ema")
+    return stable_rsqrt(buffer, ctx.optimizer.epsilon)
 
 
 def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:

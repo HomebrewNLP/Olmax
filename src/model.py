@@ -6,7 +6,7 @@ import jax
 from jax import lax, numpy as jnp
 from jax.experimental.compilation_cache import compilation_cache
 
-from src.backend import conv as lax_conv, device_id, get_param, matmul
+from src.backend import conv as lax_conv, device_id, get_param, matmul, stable_rsqrt
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -44,10 +44,10 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
         if psum:
             src_fp32 = lax.psum(src_fp32, axis_name=ParallelAxes.model)
         mean = src_fp32.mean(-1, keepdims=True)
-        var = jnp.maximum(jnp.square(src_fp32).mean(-1, keepdims=True) - jnp.square(mean), ctx.model.norm_eps)
-        std = lax.rsqrt(var)
+        std = stable_rsqrt(jnp.square(src_fp32).sum(-1, keepdims=True) - src.shape[-1] * jnp.square(mean),
+                           ctx.model.norm_eps)
         norm_out = (src_fp32 - mean) * std
-        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,)) * src.shape[-1] ** -0.5  # div for l2norm
+        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
         if act:
             out = activate(ctx, out)
         out = out.astype(original_dtype)
@@ -58,10 +58,9 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             dy = promote_to(dy, run_type)
             if act:
                 dy = dy * jnp.where(out >= 0, 1, ctx.model.leaky_relu_slope)
-            dy = dy * src.shape[-1] ** -0.5  # "undo" l2norm
             d_wgt = (dy * norm_out_fp32).sum(list(range(src.ndim - 1))).reshape((-1,))
             dy = dy * std * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
-            dy -= (dy * norm_out_fp32).mean(-1, keepdims=True) * norm_out_fp32
+            dy -= (dy * norm_out_fp32).mean(-1, keepdims=True) * norm_out_fp32 * src.shape[-1]  # "undo" l2norm
             dy -= dy.mean(-1, keepdims=True)
             return dy.astype(original_dtype), d_wgt
 

@@ -113,20 +113,20 @@ class WandB(DataClass):
 class Optimizer(DataClass):
     use_shampoo: bool = True
     block_size: int = 512
-    epsilon: float = 1e-5
+    epsilon: float = 1e-8
     start_preconditioning_step: int = 16
     preconditioning_compute_steps: int = 128
     statistics_compute_steps: int = 4
     skip_preconditioning_dim_size_gt: int = 1024
     momentum_beta: float = 0.1
-    learning_rate: float = 1
+    learning_rate: float = 0.01
     gradient_clip: float = 0.001
-    adam_beta1: float = 0.1
-    adam_beta2: float = 0.01
+    adam_beta1: float = 0.03
+    adam_beta2: float = 0.003
     shampoo_beta2: float = 0.01
     weight_decay: float = 0.01
     warmup_end: int = 16384
-    exponential_decay: float = 1e-4
+    exponential_decay: float = 3e-6
     norm_scale: float = 1
     bottleneck_scale: float = 1
     pointwise_scale: float = 1
@@ -139,7 +139,7 @@ class Optimizer(DataClass):
 class Model(DataClass):
     conv_scale: float = 4.
     conv_shift: float = 8.
-    norm_eps: float = 1e-5
+    norm_eps: float = 1e-8
     qrnn_frequency: int = 8
     rezero_lr_scale: float = 0.01
     leaky_relu_slope: float = 0.01
