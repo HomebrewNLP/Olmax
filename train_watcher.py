@@ -29,16 +29,16 @@ def recreate(host: str, zone: str, tpu_version: int, preemptible: bool, service_
     if host in tpu_names(zone, preempted=True, deleting=True):
         if host not in tpu_names(zone, preempted=False, deleting=False):
             synchronous_deletion("", host, zone)
-            create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext, slices)
+            create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext(), slices)
     else:
-        create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext, slices)
+        create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext(), slices)
 
 
 def start_single(host: str, tpu_version: int, zone: str, data_path: str, preemptible: bool,
-                 service_account: str, branch: str, slices: int, run_prefix: str):
+                 service_account: str, branch: str, slices: int, run_prefix: str, config_path: str):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
 
-    with open("config.yaml", 'r') as f:
+    with open(config_path, 'r') as f:
         txt = f.read()
     config = yaml.safe_load(txt)
     idx = 0
@@ -88,6 +88,7 @@ def main():
     parser.add_argument("--slices", default=1, type=int,
                         help="How many TPU slices each TPU should have (1=>vX-8, 4=>vX-32)")
     parser.add_argument("--run-prefix", type=str, help="Prefix to use for all runs on WandB")
+    parser.add_argument("--config-path", type=str, help="Path to config.yaml")
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     args = parser.parse_args()
@@ -96,7 +97,7 @@ def main():
         return
 
     return start_single(args.host, args.tpu_version, args.zone, args.data_path, args.preemptible, args.service_account,
-                        args.branch, args.slices, args.run_prefix)
+                        args.branch, args.slices, args.run_prefix, args.config_path)
 
 
 if __name__ == '__main__':
