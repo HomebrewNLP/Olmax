@@ -1,16 +1,15 @@
-
 data:
-    datasets_used_per_step: 1
-    interleaved_datasets: 1
-    parallel_workers: 1
+    datasets_used_per_step: 2
+    interleaved_datasets: 2
+    parallel_workers: 2
     path: gs://homebrewnlp-eu/the-char-pile/*
     prefetch_buffer: 2
     seed: 0
     shuffle_buffer: 0
     vocab_size: 256
 dims:
-    batch: 512
-    depth: 16
+    batch: 16
+    depth: 64
     features: 256
     heads: 8
     inner_bottleneck_features: 128
@@ -27,22 +26,31 @@ global_prefix: ''
 model:
     activation_std: 0.5893595616022745
     computation_dtype: bfloat16
+    conv_scale: 4.0
+    conv_shift: 8.0
     leaky_relu_slope: 0.02
-    norm_eps: 1.0e-05
+    norm_eps: 1.0e-12
     qrnn_frequency: 8
     rezero_lr_scale: 0.01
     storage_dtype: float32
 optimizer:
-    adam_beta1: 0.1
-    adam_beta2: 0.01
+    adam_beta1: 0.03
+    adam_beta2: 0.003
     block_size: 512
-    epsilon: 1.0e-06
-    exponential_decay: 1.0e-05
-    gradient_clip: 0.01
-    learning_rate: 1
+    bottleneck_scale: 1
+    epsilon: 1.0e-12
+    exponential_decay: 3.0e-06
+    gradient_clip: 0.001
+    input_scale: 1
+    learning_rate: 0.01
+    moe_scale: 1
     momentum_beta: 0.1
+    norm_scale: 1
+    output_scale: 1
+    pointwise_scale: 1
     preconditioning_compute_steps: 128
-    shampoo_beta2: 0.99
+    qrnn_scale: 1
+    shampoo_beta2: 0.01
     skip_preconditioning_dim_size_gt: 1024
     start_preconditioning_step: 16
     statistics_compute_steps: 4
@@ -51,11 +59,12 @@ optimizer:
     weight_decay: 0.001
 seed: 0
 training:
-    checkpoint_interval: 128
-    checkpoint_path: gs://homebrewnlp-eu/homebrewnlp-checkpoint-high-batch
+    checkpoint_interval: 2048
+    checkpoint_load_path: ""
+    checkpoint_path: gs://homebrewnlp-eu/homebrewnlp-checkpoint-deep
     device_steps: 1
     device_unroll: 1
-    do_checkpoint: false
+    do_checkpoint: true
     early_stopping:
         expected_loss:
             exponent: -0.3642513
@@ -82,4 +91,4 @@ wandb:
     - 1024
     percentile: 25
     project: gpt
-    use_wandb: true 
+    use_wandb: true

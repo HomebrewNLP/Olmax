@@ -109,10 +109,10 @@ def delete_all(prefix: str, zone: str):
 
 
 def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, service_account: str,
-               semaphore: threading.Semaphore):
+               semaphore: threading.Semaphore, slices: int = 1):
     with semaphore:
         os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} --service-account {service_account} '
-                  f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha '
+                  f'--zone {zone} --accelerator-type v{tpu_version}-{slices * 8} --version v2-alpha '
                   f'{"--preemptible" * preemptible}; do echo; done')
 
 
