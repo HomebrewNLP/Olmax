@@ -34,10 +34,10 @@ def exec_command(wandb_key: str, sweep_id: str, data_path: str, pretrained_path:
                         f'bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent {sweep_id}"'))
 
 
-def send_to_tpu(zone: str, host: str, filename: str, command: str):
+def send_to_tpu(zone: str, host: str, filename: str, command: str, worker: int = 0):
     with open(host, 'w') as f:
         f.write(command)
-    os.system(f"gcloud alpha compute tpus tpu-vm scp {host} ubuntu@{host}:~/{filename} --zone {zone}")
+    os.system(f"gcloud alpha compute tpus tpu-vm scp {host} ubuntu@{host}:~/{filename} --zone {zone} --worker {worker}")
     os.remove(host)
 
 
@@ -47,11 +47,11 @@ def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, da
     send_to_tpu(zone, host, "setup.sh", command)
 
 
-def exec_tpu(host: str, zone: str, command: str):
+def exec_tpu(host: str, zone: str, command: str, worker: int = 0):
     print(f"running '{command}' ...", end='')
     start_time = time.time()
     ret = subprocess.call(["gcloud", "alpha", "compute", "tpus", "tpu-vm", "ssh", f"ubuntu@{host}",
-                           f"--zone", zone, "--command", command])
+                           f"--zone", zone, "--command", command, "--worker", str(worker)])
     if not ret:
         print(f"done after {time.time() - start_time:.1f}s")
         return

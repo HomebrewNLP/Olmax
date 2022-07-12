@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import netrc
+import threading
 import time
 from contextlib import nullcontext
 
@@ -46,6 +47,12 @@ def start_single(host: str, tpu_version: int, zone: str, data_path: str, preempt
     wandb_api = wandb.Api()
     config["training"]["do_checkpoint"] = True
     base_checkpoint_path = config["training"]["checkpoint_path"]
+
+    def _start(worker: int):
+        send_to_tpu(zone, host, "config.yaml", yaml.dump(config), worker)
+        send_to_tpu(zone, host, "setup.sh", exec_command(wandb_key, data_path, branch), worker)
+        exec_tpu(host, zone, "bash setup.sh", worker)
+
     while True:
         try:
             config["wandb"]["name"] = f"{run_prefix}-{idx}"
@@ -53,9 +60,11 @@ def start_single(host: str, tpu_version: int, zone: str, data_path: str, preempt
             config["training"]["checkpoint_path"] = f"{base_checkpoint_path}-{idx}"
 
             recreate(host, zone, tpu_version, preemptible, service_account, slices)
-            send_to_tpu(zone, host, "config.yaml", yaml.dump(config))
-            send_to_tpu(zone, host, "setup.sh", exec_command(wandb_key, data_path, branch))
-            exec_tpu(host, zone, "bash setup.sh")
+            threads = [threading.Thread(target=_start, args=(i,)) for i in range(slices)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
             while host in tpu_names(zone, preempted=False):
                 time.sleep(60)
