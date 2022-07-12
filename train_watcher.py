@@ -20,7 +20,7 @@ def exec_command(wandb_key: str, data_path: str, branch: str):
                         "cd HomebrewNLP-Jax", "(bash setup.sh ; exit 0)",
                         f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
                         f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
-                        f"mv config.yaml HomebrewNLP-Jax/config.yaml"
+                        f"mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml",
                         f'screen -dmS model '
                         f'bash -c "cd HomebrewNLP-Jax ; CONFIG=config.yaml bash run.sh"'))
 
