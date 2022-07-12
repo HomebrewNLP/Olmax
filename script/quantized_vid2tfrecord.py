@@ -137,10 +137,12 @@ def get_video_frames(video_urls: typing.List[dict], target_image_size: int, targ
 
         width = round(video_url["width"] * video_url["height"] / target_image_size)
         try:
-            out, _ = ffmpeg.input(path, preset="ultrafast", threads=target_image_size // 40) \
+            out, _ = ffmpeg.input(path) \
                 .filter("scale", w=width, h=target_image_size) \
                 .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
-                .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error").run(capture_stdout=True)
+                .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error", preset="ultrafast",
+                        threads=target_image_size // 40)\
+                .run(capture_stdout=True)
         except ffmpeg.Error:  # Broken Video, next might work
             continue
 
