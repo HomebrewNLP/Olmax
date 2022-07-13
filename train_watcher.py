@@ -71,7 +71,7 @@ def start_single(host: str, tpu_version: int, zone: str, data_path: str, preempt
 
             idx += 1
             for run in wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}"):
-                if wandb_api.name == config['wandb']['name']:
+                if run.name == config['wandb']['name']:
                     start_step = run.summary["_step"]
                     break
             start_step -= start_step % config["training"]["checkpoint_interval"]
