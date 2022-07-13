@@ -70,8 +70,10 @@ def start_single(host: str, tpu_version: int, zone: str, data_path: str, preempt
                 time.sleep(60)
 
             idx += 1
-            run = wandb_api.run(f"{config['wandb']['entity']}/{config['wandb']['project']}/{config['wandb']['name']}")
-            start_step = run.summary["_step"]
+            for run in wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}"):
+                if wandb_api.name == config['wandb']['name']:
+                    start_step = run.summary["_step"]
+                    break
             start_step -= start_step % config["training"]["checkpoint_interval"]
             config["training"]["checkpoint_load_path"] = config["training"]["checkpoint_path"]
 
