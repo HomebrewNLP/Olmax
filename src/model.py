@@ -144,10 +144,9 @@ def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     # While conv 256->256 with kernel_size=5 takes ~11.3ms
     ctx = ctx.add_to_prefix("qrnn")
     inp = scale_norm_act(ctx, inp, ctx.dims.features, init_mean=None)
-    forget = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.qrnn_scale, ctx.dims.features,
-                  ctx.dims.inner_bottleneck_features)
     mid = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.qrnn_scale, ctx.dims.features,
-               ctx.dims.inner_bottleneck_features)
+               ctx.dims.inner_bottleneck_features * 2)
+    mid, forget = jnp.split(mid, 2, -1)
     out = qrnn_grad(ctx, forget, mid)
     out = scale_norm_act(ctx, out, ctx.dims.inner_bottleneck_features)
     return conv(ctx, out, ctx.dims.pointwise_kernel, ctx.optimizer.qrnn_scale, ctx.dims.inner_bottleneck_features,
