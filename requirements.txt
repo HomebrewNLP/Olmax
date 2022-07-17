@@ -1,0 +1,7 @@
+# as installation is sensitive to its order, it's recommended to install via the provided shell scripts
+jax[tpu]>=0.3.10
+wandb
+smart-open[gcs]
+jsonpickle
+tensorflow==2.8.0
+protobuf==3.20.1
