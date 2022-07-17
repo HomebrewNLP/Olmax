@@ -1,5 +1,6 @@
 import typing
 
+import jax
 import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
@@ -8,6 +9,10 @@ from .constants import ParallelAxes
 from .context import Context
 
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
+
+
+def is_main():
+    return jax.process_index() == 0
 
 
 def stable_rsqrt(inp: jnp.ndarray, eps: float) -> jnp.ndarray:

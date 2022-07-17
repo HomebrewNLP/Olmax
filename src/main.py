@@ -11,14 +11,14 @@ import wandb
 import yaml
 from jax import numpy as jnp
 
-from src.backend import device_id, loop
+from src.backend import device_id, loop, is_main
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
 from src.model import body_ctx, compute
 from src.optimizer import get_current_lr, update
 from src.utils.checkpoint import read_ckpt, write_ckpt
-from src.utils.wandb import WandbLog
+from src.utils.wandblog import WandbLog
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -180,7 +180,10 @@ def main():
     wctx = WhileTrainContext()
     ctx = wctx.ctx
 
-    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
+    if is_main():
+        run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
+    else:
+        run = None
     wblog = WandbLog(run)
 
     cfg = {}
