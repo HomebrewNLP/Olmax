@@ -180,10 +180,7 @@ def main():
     wctx = WhileTrainContext()
     ctx = wctx.ctx
 
-    if is_main():
-        run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
-    else:
-        run = None
+    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
     wblog = WandbLog(run)
 
     cfg = {}
