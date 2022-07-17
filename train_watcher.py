@@ -1,9 +1,5 @@
 import argparse
 import dataclasses
-import datetime
-import netrc
-import threading
-import time
 import typing
 from contextlib import nullcontext
 from netrc import netrc
@@ -91,15 +87,20 @@ def main():
             return Context(zone=args.zone, host=host, config=config)
 
         start_step = 0
-        for ridx, run in enumerate(wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}")):
-            if run.name == config['wandb']['name']:
-                start_step = run.summary["_step"]
-                break
-            if ridx > args.run_threshold:
-                break
+        while idx > 0 and start_step == 0:  # check if _any_ run made it
+            for ridx, run in enumerate(wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}")):
+                if run.name == f"{args.host}-{idx}":
+                    start_step = run.summary["_step"]
+                    break
+                if ridx > args.run_threshold:
+                    idx -= 1
+                    break
+        if idx > 0 or start_step > 0:
+            config["training"]["checkpoint_load_path"] = f"{base_checkpoint_path}-{idx - 1}"
+        else:
+            config["training"]["checkpoint_load_path"] = ""
         start_step -= start_step % config["training"]["checkpoint_interval"]
         config["training"]["start_step"] = start_step
-        config["training"]["checkpoint_load_path"] = f"{base_checkpoint_path}-{idx - 1}"
 
         return Context(zone=args.zone, host=host, config=config)
 
