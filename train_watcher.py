@@ -1,29 +1,34 @@
 import argparse
+import dataclasses
 import datetime
 import netrc
 import threading
 import time
+import typing
 from contextlib import nullcontext
+from netrc import netrc
 
 import wandb
 import yaml
+from tpucare import create_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single, synchronous_deletion, tpu_names
 
-from script.launch_multiple_runs import (OLD_DATA_PATH, create_tpu, exec_tpu, send_to_tpu,
-                                         synchronous_deletion, tpu_names)
+_, _, wandb_key = netrc().authenticators("api.wandb.ai")
 
 
-def exec_command(wandb_key: str, data_path: str, branch: str):
-    data_path = data_path.replace("/", "\\/")
-    # Bottom one doesn't use , on purpose
-    return ' && '.join(("sudo apt --fix-missing --fix-broken install -y git python3 python3-pip",
-                        "(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
-                        f"git clone --depth 1 --branch {branch} https://github.com/HomebrewNLP/HomebrewNLP-Jax/",
-                        "cd HomebrewNLP-Jax", "(bash setup.sh ; exit 0)",
-                        f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
-                        f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
-                        f"mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml",
-                        f'screen -dmS model '
-                        f'bash -c "cd HomebrewNLP-Jax ; CONFIG=config.yaml bash run.sh"'))
+@dataclasses.dataclass
+class Context:
+    zone: str
+    host: str
+    config: dict
+
+
+def start_fn(ctx: Context, worker: int):
+    setup = f'(bash setup.sh ; exit 0)'
+    send_to_tpu(ctx.zone, ctx.host, "config.yaml", yaml.dump(ctx.config), worker)
+    cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
+                       setup_command=setup, run_command=f"CONFIG=config.yaml bash run.sh")
+    send_to_tpu(ctx.zone, ctx.host, "setup.sh", cmd, worker)
+    exec_on_tpu(ctx.zone, ctx.host, "bash setup.sh", worker)
 
 
 def recreate(host: str, zone: str, tpu_version: int, preemptible: bool, service_account: str, slices: int):
@@ -35,29 +40,17 @@ def recreate(host: str, zone: str, tpu_version: int, preemptible: bool, service_
         create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext(), slices)
 
 
-def start_single(host: str, tpu_version: int, zone: str, data_path: str, preemptible: bool,
-                 service_account: str, branch: str, slices: int, run_prefix: str, config_path: str):
+def start_single2(host: str, tpu_version: int, zone: str, data_path: str, preemptible: bool,
+                  service_account: str, branch: str, slices: int, run_prefix: str, config_path: str):
     _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
-
-    with open(config_path, 'r') as f:
-        txt = f.read()
-    config = yaml.safe_load(txt)
-    idx = 0
-    start_step = 0
-    wandb_api = wandb.Api()
-    config["training"]["do_checkpoint"] = True
-    base_checkpoint_path = config["training"]["checkpoint_path"]
 
     def _start(worker: int):
         send_to_tpu(zone, host, "config.yaml", yaml.dump(config), worker)
-        send_to_tpu(zone, host, "setup.sh", exec_command(wandb_key, data_path, branch), worker)
-        exec_tpu(host, zone, "bash setup.sh", worker)
+        send_to_tpu(zone, host, "setup.sh", exec_command(wandb_key, branch), worker)
+        exec_on_tpu(host, zone, "bash setup.sh", worker)
 
     while True:
         try:
-            config["wandb"]["name"] = f"{run_prefix}-{idx}"
-            config["training"]["start_step"] = start_step
-            config["training"]["checkpoint_path"] = f"{base_checkpoint_path}-{idx}"
 
             recreate(host, zone, tpu_version, preemptible, service_account, slices)
             threads = [threading.Thread(target=_start, args=(i,)) for i in range(slices)]
@@ -69,21 +62,13 @@ def start_single(host: str, tpu_version: int, zone: str, data_path: str, preempt
             while host in tpu_names(zone, preempted=False):
                 time.sleep(60)
 
-            idx += 1
-            for run in wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}"):
-                if run.name == config['wandb']['name']:
-                    start_step = run.summary["_step"]
-                    break
-            start_step -= start_step % config["training"]["checkpoint_interval"]
-            config["training"]["checkpoint_load_path"] = config["training"]["checkpoint_path"]
-
         except KeyboardInterrupt:
             print(f"{host} - {datetime.datetime.now()}: KeyboardInterrupt received. Killing TPU, then self.")
             synchronous_deletion("", host, zone)
             return
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, help="Name of the TPU")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
@@ -103,12 +88,45 @@ def main():
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     args = parser.parse_args()
-    if args.cleanup:
-        synchronous_deletion("", args.host, args.zone)
-        return
+    return args
 
-    return start_single(args.host, args.tpu_version, args.zone, args.data_path, args.preemptible, args.service_account,
-                        args.branch, args.slices, args.run_prefix, args.config_path)
+
+def main():
+    args = parse_args()
+    if args.cleanup:
+        return synchronous_deletion("", args.host, args.zone)
+
+    idx = 0
+
+    with open(args.config_path, 'r') as f:
+        txt = f.read()
+    config = yaml.safe_load(txt)
+    config["training"]["do_checkpoint"] = True
+    config["data"]["path"] = args.data_path
+    base_checkpoint_path = config["training"]["checkpoint_path"]
+    wandb_api = wandb.Api()
+
+    def creation_callback(host: str, ctx: typing.Optional[Context]) -> Context:
+        nonlocal idx
+        idx += 1
+        config["wandb"]["name"] = f"{args.host}-{idx}"
+        config["training"]["checkpoint_path"] = f"{base_checkpoint_path}-{idx}"
+
+        if ctx is None:
+            return Context(zone=args.zone, host=host, config=config)
+
+        for run in wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}"):
+            if run.name == config['wandb']['name']:
+                start_step = run.summary["_step"]
+                break
+        start_step -= start_step % config["training"]["checkpoint_interval"]
+        config["training"]["start_step"] = start_step
+        config["training"]["checkpoint_load_path"] = f"{base_checkpoint_path}-{idx - 1}"
+
+        return Context(zone=args.zone, host=host, config=config)
+
+    start_single(args.host, args.tpu_version, args.zone, args.preemptible, args.service_account, args.slices, start_fn,
+                 creation_callback)
 
 
 if __name__ == '__main__':
