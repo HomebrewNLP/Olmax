@@ -13,7 +13,6 @@ import time
 import traceback
 import typing
 import uuid
-from multiprocessing.shared_memory import SharedMemory
 
 import boto3
 import ffmpeg
@@ -24,6 +23,7 @@ import tensorflow as tf
 import torch
 import youtube_dl
 from omegaconf import OmegaConf
+from sharedutils import SharedEXTQueue
 
 sys.path.append("./taming-transformers")
 from taming.models.vqgan import GumbelVQ
@@ -141,7 +141,7 @@ def get_video_frames(video_urls: typing.List[dict], target_image_size: int, targ
                 .filter("scale", w=width, h=target_image_size) \
                 .filter("crop", w=target_image_size, h=target_image_size).filter("fps", target_fps) \
                 .output("pipe:", format="rawvideo", pix_fmt="rgb24", loglevel="error", preset="ultrafast",
-                        threads=target_image_size // 40)\
+                        threads=target_image_size // 40) \
                 .run(capture_stdout=True)
         except ffmpeg.Error:  # Broken Video, next might work
             continue
@@ -175,96 +175,9 @@ def write_tfrecords(tokens: typing.List[int], chunk_size: int, buffer_save_dir: 
     return added
 
 
-class SharedQueue:
-    frame_mem: SharedMemory
-    frame: np.ndarray
-    indices: list
-    write_index_lock: threading.Lock
-    read_index_lock: threading.Lock
-
-    @classmethod
-    def from_shape(cls, shape: typing.List[int]):
-        self = cls()
-        frames = np.zeros(shape, dtype=np.uint8)
-        self.frame_mem = SharedMemory(create=True, size=frames.nbytes)
-        self.frame = np.ndarray(shape, dtype=np.uint8, buffer=self.frame_mem.buf)
-        manager = multiprocessing.Manager()
-        self.indices = manager.list()
-        self.frame[:] = 0
-        self.write_index_lock = manager.Lock()
-        self.read_index_lock = manager.Lock()
-        return self
-
-    @classmethod
-    def from_export(cls, frame_name, frame_shape, indices, write_index_lock, read_index_lock):
-        self = cls()
-        self.frame_mem = SharedMemory(create=False, name=frame_name)
-        self.frame = np.ndarray(frame_shape, dtype=np.uint8, buffer=self.frame_mem.buf)
-        self.indices = indices
-        self.write_index_lock = write_index_lock
-        self.read_index_lock = read_index_lock
-        return self
-
-    def export(self):
-        return self.frame_mem.name, self.frame.shape, self.indices, self.write_index_lock, self.read_index_lock
-
-    def get(self):
-        while True:
-            with self.read_index_lock:
-                while not self:
-                    time.sleep(1)
-                start, end = self.indices.pop(0)
-            return self.frame[start:end].copy()  # local clone, so share can be safely edited
-
-    def _free_memory(self, size: int) -> typing.Optional[typing.Tuple[int, int, int]]:
-        if not self:
-            return 0, 0, size
-        local_indices = list(self.indices)
-        itr = zip([[None, 0]] + local_indices, local_indices + [[self.frame.shape[0], None]])
-        for i, ((_, prev_end), (start, _)) in enumerate(itr):
-            if start - prev_end > size:
-                return i, prev_end, prev_end + size
-
-    def _put_item(self, obj: np.ndarray):
-        batches = obj.shape[0]
-        with self.write_index_lock:
-            indices = self._free_memory(batches)
-            if indices is None:
-                return
-            idx, start, end = indices
-            self.indices.insert(idx, (start, end))
-        self.frame[start:end] = obj[:]  # we simply assume that the synchronisation overheads make the reader slower
-
-    def put(self, obj: np.ndarray):
-        batches = obj.shape[0]
-        max_size = self.frame.shape[0] // 4  # unrealistic that it'll fit if it takes up 25% of the memory
-        if batches > max_size:
-            for idx in range(0, batches, max_size):  # ... so we slice it up and feed in many smaller videos
-                self.put(obj[idx:idx + max_size])
-            return
-
-        def _fits():
-            return bool(self._free_memory(batches))
-
-        # until new frames fit into memory
-        waiting = 12
-        while not _fits():
-            time.sleep(5)
-            waiting -= 1
-        if not waiting:
-            print("Warning: waited for one minute for space to free up, but none found. Increase memory size to avoid "
-                  "fragmentation or implement defragmentation. Timestamp:", datetime.datetime.now(), flush=True)
-            return
-
-        self._put_item(obj)
-
-    def __bool__(self):
-        return bool(self.indices)
-
-
 def frame_worker(work: list, worker_id: int, lock: threading.Semaphore, target_image_size: int, target_fps: int,
                  batch_size: int, queue_export):
-    queue = SharedQueue.from_export(*queue_export)
+    queue = SharedEXTQueue.from_export(*queue_export)
     youtube_base = 'https://www.youtube.com/watch?v='
     youtube_getter = youtube_dl.YoutubeDL(
             {'writeautomaticsub': False, 'socket_timeout': 600, "quiet": True, "verbose": False, "no_warnings": True,
@@ -291,7 +204,7 @@ def frame_worker(work: list, worker_id: int, lock: threading.Semaphore, target_i
 
 
 def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, device: int,
-           queue: SharedQueue, procs: typing.List[multiprocessing.Process], tokens_per_file: int,
+           queue: SharedEXTQueue, procs: typing.List[multiprocessing.Process], tokens_per_file: int,
            padding_token: int):
     save_dir = f'{save_dir.rstrip("/")}/{device}'
     dev_str = f'cuda:{device}'
@@ -344,7 +257,7 @@ def main():
 
     shared_memory = shared_memory * 1024 ** 3  # it's in GB, we have to convert it to bytes
     shared_frames = shared_memory // (256 ** 2 * 3 * batch_size)
-    queue = SharedQueue.from_shape([shared_frames, batch_size, 3, 256, 256])
+    queue = SharedEXTQueue.from_shape([shared_frames, batch_size, 3, 256, 256])
 
     ids = []
     for path in os.listdir(urls):
