@@ -59,6 +59,8 @@ def parse_args():
     parser.add_argument("--config-path", type=str, help="Path to config.yaml")
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
+    parser.add_argument("--run-threshold", default=100, type=int,
+                        help="How many of the last runs to scan - at most.")
     args = parser.parse_args()
     return args
 
@@ -89,9 +91,11 @@ def main():
             return Context(zone=args.zone, host=host, config=config)
 
         start_step = 0
-        for run in wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}"):
+        for ridx, run in enumerate(wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}")):
             if run.name == config['wandb']['name']:
                 start_step = run.summary["_step"]
+                break
+            if ridx > args.run_threshold:
                 break
         start_step -= start_step % config["training"]["checkpoint_interval"]
         config["training"]["start_step"] = start_step
