@@ -1,172 +1,33 @@
 import argparse
-import datetime
-import netrc
-import os
-import subprocess
-import threading
-import time
+import dataclasses
 import typing
+from netrc import netrc
 
-import google.auth
-import googleapiclient.discovery
+from tpucare import delete_all, exec_command, exec_on_tpu, send_to_tpu, start_multiple
 
 from src.context import DataContext
 
-TIMEOUT_MULTIPLIER = 10
-
-API = googleapiclient.discovery.build('tpu', 'v1')
-_, PROJECT = google.auth.default()
+_, _, wandb_key = netrc().authenticators("api.wandb.ai")
 OLD_DATA_PATH = DataContext.path.replace("/", "\\/")[:-1]  # remove * at the end
-GLOBAL_DICT = {}
-CACHE_TIME = 10
 
 
-def exec_command(wandb_key: str, sweep_id: str, data_path: str, pretrained_path: str, branch: str):
-    data_path = data_path.replace("/", "\\/")
-    # Bottom one doesn't use , on purpose
-    return ' && '.join(("sudo apt --fix-missing --fix-broken install -y git python3 python3-pip",
-                        "(rm -rf HomebrewNLP-Jax ; pkill -f python3 ; exit 0)",
-                        f"git clone --depth 1 --branch {branch} https://github.com/HomebrewNLP/HomebrewNLP-Jax/",
-                        "cd HomebrewNLP-Jax", "(bash setup.sh ; exit 0)",
-                        f"/home/ubuntu/.local/bin/wandb login {wandb_key}",
-                        f'sed -i "s/{OLD_DATA_PATH}/{data_path}/g" src/context.py',
-                        f'screen -dmS model '
-                        f'bash -c "cd HomebrewNLP-Jax ; /home/ubuntu/.local/bin/wandb agent {sweep_id}"'))
+@dataclasses.dataclass
+class Context:
+    zone: str
+    host: str
+    sweep_id: str
+    data_path: str
 
 
-def send_to_tpu(zone: str, host: str, filename: str, command: str):
-    with open(host, 'w') as f:
-        f.write(command)
-    os.system(f"gcloud alpha compute tpus tpu-vm scp {host} ubuntu@{host}:~/{filename} --zone {zone}")
-    os.remove(host)
+def start_fn(ctx: Context, worker: int):
+    setup = f'(bash setup.sh ; sed -i "s/{OLD_DATA_PATH}/{ctx.data_path}/g" src/context.py; exit 0)'
+    cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
+                       setup_command=setup, run_command=f"/home/ubuntu/.local/bin/wandb agent {ctx.sweep_id}")
+    send_to_tpu(ctx.zone, ctx.host, "setup.sh", cmd, worker)
+    exec_on_tpu(ctx.zone, ctx.host, "bash setup.sh", worker)
 
 
-def send_commands_to_tpu(wandb_key: str, sweep_id: str, host: str, zone: str, data_path: str, pretrained_path: str,
-                         branch: str):
-    command = exec_command(wandb_key, sweep_id, data_path, pretrained_path, branch)
-    send_to_tpu(zone, host, "setup.sh", command)
-
-
-def exec_tpu(host: str, zone: str, command: str):
-    print(f"running '{command}' ...", end='')
-    start_time = time.time()
-    ret = subprocess.call(["gcloud", "alpha", "compute", "tpus", "tpu-vm", "ssh", f"ubuntu@{host}",
-                           f"--zone", zone, "--command", command])
-    if not ret:
-        print(f"done after {time.time() - start_time:.1f}s")
-        return
-
-    delete_one_tpu(host, host, zone)
-
-
-def all_tpus(zone: str):
-    zone = 'projects/' + PROJECT + '/locations/' + zone
-    if GLOBAL_DICT.get(f"last_write_{zone}", 0) < time.time() - CACHE_TIME:
-        GLOBAL_DICT[f"last_write_{zone}"] = time.time()
-        GLOBAL_DICT[f"tpus_{zone}"] = API.projects().locations().nodes().list(parent=zone).execute().get('nodes', [])
-    return GLOBAL_DICT[f"tpus_{zone}"]
-
-
-def tpu_names(zone: str, preempted: bool = True, deleting: bool = False, prefix: str = ''):
-    while True:
-        try:
-            tpus = all_tpus(zone)
-            tpus = [t['name'].split('/')[-1] for t in tpus if
-                    "state" in t
-                    and (deleting or t['state'] != "DELETING")
-                    and (preempted or t['state'] != "PREEMPTED")]
-            return [t for t in tpus if t.startswith(prefix)]
-        except KeyboardInterrupt as exc:
-            raise exc
-        except:
-            pass
-
-
-def delete_one_tpu(prefix: str, host: str, zone: str):
-    if prefix not in host:
-        return
-    print(f"\x1b[32;1m  DELETING {host}\x1b[0m")
-    os.system(f"echo y | gcloud alpha compute tpus tpu-vm delete {host} --zone {zone} --async")
-
-
-def synchronous_deletion(prefix: str, host: str, zone: str):
-    if prefix not in host:
-        return
-    while host in tpu_names(zone, deleting=True):
-        if host in tpu_names(zone):
-            delete_one_tpu(prefix, host, zone)
-        time.sleep(CACHE_TIME)
-
-
-def delete_all(prefix: str, zone: str):
-    while tpu_names(zone, prefix=prefix):
-        threads = [threading.Thread(target=synchronous_deletion, args=(prefix, host, zone), daemon=True) for host in
-                   tpu_names(zone, prefix=prefix)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-
-def create_tpu(host: str, zone: str, tpu_version: int, preemptible: bool, service_account: str,
-               semaphore: threading.Semaphore):
-    with semaphore:
-        os.system(f'while ! gcloud alpha compute tpus tpu-vm create {host} --service-account {service_account} '
-                  f'--zone {zone} --accelerator-type v{tpu_version}-8 --version v2-alpha '
-                  f'{"--preemptible" * preemptible}; do echo; done')
-
-
-def start_single(prefix: str, tpu_id: int, sweep_id: str, wandb_key: str, tpu_version: int, zone: str,
-                 data_path: str, pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
-                 branch: str, creation_semaphore: threading.Semaphore):
-    host = f"{prefix}-{tpu_id}"
-    time.sleep((tpu_id - 1) * TIMEOUT_MULTIPLIER * timeout_multiplier)
-    if host in tpu_names(zone, preempted=True, deleting=True):
-        if host not in tpu_names(zone, preempted=False, deleting=False):
-            synchronous_deletion(prefix, host, zone)
-            create_tpu(host, zone, tpu_version, preemptible, service_account, creation_semaphore)
-    else:
-        create_tpu(host, zone, tpu_version, preemptible, service_account, creation_semaphore)
-
-    while True:
-        try:
-            send_commands_to_tpu(wandb_key, sweep_id, host, zone, data_path, pretrained_path, branch)
-            exec_tpu(host, zone, "bash setup.sh")
-
-            while host in tpu_names(zone, preempted=False):
-                time.sleep(CACHE_TIME)
-            synchronous_deletion(prefix, host, zone)
-            create_tpu(host, zone, tpu_version, preemptible, service_account, creation_semaphore)
-
-        except KeyboardInterrupt:
-            print(f"{host} - {datetime.datetime.now()}: KeyboardInterrupt received. Killing TPU, then self.")
-            delete_one_tpu(prefix, host, zone)
-            return
-
-
-def start_multiple(prefix: str, tpus: int, sweep_id: str, tpu_version: int, zone: str, data_path: str,
-                   pretrained_path: str, preemptible: bool, timeout_multiplier: int, service_account: str,
-                   branch: str):
-    _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
-    procs = []
-    creation_semaphore = threading.Semaphore(2)
-    for tpu_id in range(tpus):
-        proc = threading.Thread(target=start_single, daemon=True,
-                                args=(prefix, tpu_id + 1, sweep_id, wandb_key, tpu_version, zone, data_path,
-                                      pretrained_path, preemptible, timeout_multiplier, service_account,
-                                      branch, creation_semaphore))
-        proc.start()
-        procs.append(proc)
-    while all(t.is_alive() for t in procs):
-        try:
-            time.sleep(10)
-        except KeyboardInterrupt:
-            print(f"MAIN - {datetime.datetime.now()}: KeyboardInterrupt received. Killing All TPUs, then self.")
-            delete_all(prefix, zone)
-            return
-
-
-def parse_args() -> typing.Tuple[int, int, str, str, str, str, str, bool, bool, int, str, str]:
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tpus", type=int, default=1, help="How many TPUs should be launched")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
@@ -188,19 +49,26 @@ def parse_args() -> typing.Tuple[int, int, str, str, str, str, str, bool, bool, 
                         help="Service account that controls permissions of TPU (for example, to ensure EU TPUs won't "
                              "use US data)")
     parser.add_argument("--branch", type=str, help="Branch on github to use")
+    parser.add_argument("--slices", type=int, help="How many TPU slices each TPU should have (1=>vX-8, 4=>vX-32)")
+    parser.add_argument("--config-path", type=str, help="Path to sweep's config.yaml")
     args = parser.parse_args()
     return (args.tpus, args.tpu_version, args.prefix, args.zone, args.sweep, args.data_path, args.pretrained_path,
-            bool(args.cleanup), bool(args.preemptible), args.timeout_multiplier, args.service_account, args.branch)
+            bool(args.cleanup), bool(args.preemptible), args.timeout_multiplier, args.service_account, args.branch,
+            args.slices, args.config_path)
 
 
 def main():
     (tpus, tpu_version, prefix, zone, sweep_id, data_path, pretrained_path, cleanup, preemptible, timeout_multiplier,
-     service_account, branch) = parse_args()
+     service_account, branch, slices, config_path) = parse_args()
     if cleanup:
-        delete_all(prefix, zone)
-    else:
-        start_multiple(prefix, tpus, sweep_id, tpu_version, zone, data_path, pretrained_path, preemptible,
-                       timeout_multiplier, service_account, branch)
+        return delete_all(prefix, zone)
+
+    def creation_callback(host: str, ctx: typing.Optional[Context]) -> Context:
+        if ctx is None:
+            return Context(zone=zone, host=host, sweep_id=sweep_id, data_path=data_path)
+        return ctx
+
+    start_multiple(prefix, tpu_version, zone, preemptible, service_account, slices, start_fn, creation_callback, tpus)
 
 
 if __name__ == '__main__':

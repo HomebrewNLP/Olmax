@@ -102,6 +102,7 @@ class TensorboardTrace(DataClass):
 
 
 class WandB(DataClass):
+    name: typing.Optional[str] = None
     use_wandb: bool = True
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
@@ -171,6 +172,7 @@ class Training(DataClass):
     device_steps: int = 4
     device_unroll: int = 1
     steps: int = 2 ** 16
+    start_step: int = 0
     print_interval: int = 1
     trace: TensorboardTrace = TensorboardTrace()
     early_stopping: EarlyStopping = EarlyStopping()

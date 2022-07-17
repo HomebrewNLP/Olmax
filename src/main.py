@@ -11,14 +11,14 @@ import wandb
 import yaml
 from jax import numpy as jnp
 
-from src.backend import device_id, loop
+from src.backend import device_id, loop, is_main
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
 from src.model import body_ctx, compute
 from src.optimizer import get_current_lr, update
 from src.utils.checkpoint import read_ckpt, write_ckpt
-from src.utils.wandb import WandbLog
+from src.utils.wandblog import WandbLog
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -98,7 +98,7 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
     return _fn
 
 
-def run_one(wblog: typing.Optional[WandbLog] = None):
+def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
     print(yaml.dump(wctx.ctx.config(), indent=4))
@@ -117,6 +117,10 @@ def run_one(wblog: typing.Optional[WandbLog] = None):
                  'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': None,
                  'current_step': None, 'loss': None, 'top_loss': None
                  }
+
+    wctx.current_step += wctx.ctx.training.start_step
+    wblog.idx += wctx.ctx.training.start_step
+
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
 
@@ -175,10 +179,11 @@ def main():
     # jax.config.update("jax_disable_jit", True)
     wctx = WhileTrainContext()
     ctx = wctx.ctx
-    if not ctx.wandb.use_wandb:
-        return run_one()
 
-    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config())
+    if is_main():
+        run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
+    else:
+        run = None
     wblog = WandbLog(run)
 
     cfg = {}
