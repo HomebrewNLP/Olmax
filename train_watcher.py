@@ -75,6 +75,7 @@ def main():
     config = yaml.safe_load(txt)
     config["training"]["do_checkpoint"] = True
     config["data"]["path"] = args.data_path
+    config["dims"]["heads"] = 8 * args.slices
     base_checkpoint_path = config["training"]["checkpoint_path"]
     wandb_api = wandb.Api()
 
