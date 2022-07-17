@@ -24,11 +24,11 @@ class Context:
 
 def start_fn(ctx: Context, worker: int):
     setup = f'(bash setup.sh ; exit 0)'
-    send_to_tpu(ctx.zone, ctx.host, "config.yaml", yaml.dump(ctx.config), worker)
+    send_to_tpu(ctx.host, ctx.zone, "config.yaml", yaml.dump(ctx.config), worker)
     cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
                        setup_command=setup, run_command=f"CONFIG=config.yaml bash run.sh")
-    send_to_tpu(ctx.zone, ctx.host, "setup.sh", cmd, worker)
-    exec_on_tpu(ctx.zone, ctx.host, "bash setup.sh", worker)
+    send_to_tpu(ctx.host, ctx.zone, "setup.sh", cmd, worker)
+    exec_on_tpu(ctx.host, ctx.zone, "bash setup.sh", worker)
 
 
 def recreate(host: str, zone: str, tpu_version: int, preemptible: bool, service_account: str, slices: int):
@@ -38,34 +38,6 @@ def recreate(host: str, zone: str, tpu_version: int, preemptible: bool, service_
             create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext(), slices)
     else:
         create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext(), slices)
-
-
-def start_single2(host: str, tpu_version: int, zone: str, data_path: str, preemptible: bool,
-                  service_account: str, branch: str, slices: int, run_prefix: str, config_path: str):
-    _, _, wandb_key = netrc.netrc().authenticators("api.wandb.ai")
-
-    def _start(worker: int):
-        send_to_tpu(zone, host, "config.yaml", yaml.dump(config), worker)
-        send_to_tpu(zone, host, "setup.sh", exec_command(wandb_key, branch), worker)
-        exec_on_tpu(host, zone, "bash setup.sh", worker)
-
-    while True:
-        try:
-
-            recreate(host, zone, tpu_version, preemptible, service_account, slices)
-            threads = [threading.Thread(target=_start, args=(i,)) for i in range(slices)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
-
-            while host in tpu_names(zone, preempted=False):
-                time.sleep(60)
-
-        except KeyboardInterrupt:
-            print(f"{host} - {datetime.datetime.now()}: KeyboardInterrupt received. Killing TPU, then self.")
-            synchronous_deletion("", host, zone)
-            return
 
 
 def parse_args():
@@ -115,6 +87,7 @@ def main():
         if ctx is None:
             return Context(zone=args.zone, host=host, config=config)
 
+        start_step = 0
         for run in wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}"):
             if run.name == config['wandb']['name']:
                 start_step = run.summary["_step"]

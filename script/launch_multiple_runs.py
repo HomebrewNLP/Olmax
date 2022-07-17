@@ -23,8 +23,8 @@ def start_fn(ctx: Context, worker: int):
     setup = f'(bash setup.sh ; sed -i "s/{OLD_DATA_PATH}/{ctx.data_path}/g" src/context.py; exit 0)'
     cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
                        setup_command=setup, run_command=f"/home/ubuntu/.local/bin/wandb agent {ctx.sweep_id}")
-    send_to_tpu(ctx.zone, ctx.host, "setup.sh", cmd, worker)
-    exec_on_tpu(ctx.zone, ctx.host, "bash setup.sh", worker)
+    send_to_tpu(ctx.host, ctx.zone, "setup.sh", cmd, worker)
+    exec_on_tpu(ctx.host, ctx.zone, "bash setup.sh", worker)
 
 
 def parse_args():
