@@ -16,13 +16,14 @@ class Context:
     zone: str
     host: str
     config: dict
+    branch: str
 
 
 def start_fn(ctx: Context, worker: int):
     setup = f'(bash setup.sh ; mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml ; exit 0)'
     send_to_tpu(ctx.host, ctx.zone, "config.yaml", yaml.dump(ctx.config), worker)
     cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
-                       setup_command=setup, run_command=f"CONFIG=config.yaml bash run.sh")
+                       setup_command=setup, run_command=f"CONFIG=config.yaml bash run.sh", branch=ctx.branch)
     send_to_tpu(ctx.host, ctx.zone, "setup.sh", cmd, worker)
     exec_on_tpu(ctx.host, ctx.zone, "bash setup.sh", worker)
 
@@ -84,7 +85,7 @@ def main():
         config["training"]["checkpoint_path"] = f"{base_checkpoint_path}-{idx}"
 
         if ctx is None:
-            return Context(zone=args.zone, host=host, config=config)
+            return Context(zone=args.zone, host=host, config=config, branch=args.branch)
 
         start_step = 0
         while idx > 0 and start_step == 0:  # check if _any_ run made it
