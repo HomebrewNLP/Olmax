@@ -17,6 +17,7 @@ import numpy as np
 from smart_open import open
 
 from src.context import Context
+from src.backend import is_main
 
 pieces = 16  # how many files to split each shard across
 
@@ -50,21 +51,23 @@ def write_ckpt(ctx: Context):
     structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')
     structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
 
-    success = False
-    for _ in range(8):
-        try:
-            with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
-                f.write(structure)
-        except:
-            print("Failed to save structure. Traceback:")
-            traceback.print_exc()
-            continue
-        success = True
-        break
-    if not success:
-        raise ValueError("Couldn't save structure")
+    if is_main():
+        success = False
+        for _ in range(8):
+            try:
+                with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
+                    f.write(structure)
+            except:
+                print("Failed to save structure. Traceback:")
+                traceback.print_exc()
+                continue
+            success = True
+            break
+        if not success:
+            raise ValueError("Couldn't save structure")
 
-    for shard in range(ctx.dims.heads):
+    for device in jax.local_devices():
+        shard = device.id
         cpu_flattened = index_weights(flattened, shard)
 
         k, m = divmod(len(cpu_flattened), pieces)
