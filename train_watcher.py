@@ -90,7 +90,7 @@ def main():
         start_step = 0
         while idx > 0 and start_step == 0:  # check if _any_ run made it
             for ridx, run in enumerate(wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}")):
-                if run.name == f"{args.host}-{idx}":
+                if run.name == f"{args.host}-{idx}" and "_step" in run.summary:
                     start_step = run.summary["_step"]
                     break
                 if ridx > args.run_threshold:
