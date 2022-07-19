@@ -75,7 +75,7 @@ def main():
     config["training"]["do_checkpoint"] = True
     config["data"]["path"] = args.data_path
     config["dims"]["heads"] = 8 * args.slices
-    base_checkpoint_path = config["training"]["checkpoint_path"]
+    base_checkpoint_path = f'{config["training"]["checkpoint_path"]}-{args.run_prefix}'
     wandb_api = wandb.Api()
 
     def creation_callback(host: str, ctx: typing.Optional[Context]) -> Context:
