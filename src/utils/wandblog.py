@@ -6,23 +6,23 @@ from src.context import WhileContext
 
 
 class WandbLog:
-    def __init__(self, run):
+    def __init__(self, run, device_steps: int):
         self.start_time = time.time()
         self.run = run
         self.losses = []
         self.accuracies = []
         self.idx = 0
         self.loss_medians = []
+        self.device_steps = device_steps
 
     def __call__(self, wctx: WhileContext, current_lr) -> bool:
         self.idx += 1
         ctx = wctx.ctx
-        device_steps = ctx.training.device_steps
-        curr_loss = wctx.loss / device_steps
-        step = self.idx * ctx.wandb.log_frequency * device_steps
-        sizes = [s // ctx.training.device_steps for s in ctx.wandb.median_sizes]
+        curr_loss = wctx.loss / self.device_steps
+        step = self.idx * ctx.wandb.log_frequency * self.device_steps
+        sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
         self.losses.append(curr_loss.astype(float))
-        self.accuracies.append((wctx.top_loss / device_steps).astype(float))
+        self.accuracies.append((wctx.top_loss / self.device_steps).astype(float))
         self.loss_medians.append(np.median(self.losses[-max(sizes):]))
         self.losses = self.losses[-max(sizes):]
         self.accuracies = self.accuracies[-max(sizes):]
@@ -34,16 +34,16 @@ class WandbLog:
                   f"Current Loss Median: {self.loss_medians[-1]:9.6f}")
             return True
         if all(loss > (self.loss_medians[-1] * es.maximum_spike_size)
-               for loss in self.losses[-es.maximum_spike_duration // device_steps:]):
+               for loss in self.losses[-es.maximum_spike_duration // self.device_steps:]):
             print(f"Spiking | Loss Median: {self.loss_medians[-1]:9.6f} - "
-                  f"Last Losses: {self.losses[-es.maximum_spike_duration // device_steps:]}")
+                  f"Last Losses: {self.losses[-es.maximum_spike_duration // self.device_steps:]}")
             return True
 
         if self.run is None:
             return False
 
-        self.run.log({f"Loss/Median{s * device_steps}": np.median(self.losses[-s:]) for s in sizes}, step=step)
-        self.run.log({f"Accuracy/Median{s * device_steps}": np.median(self.accuracies[-s:]) for s in sizes}, step=step)
+        self.run.log({f"Loss/Median{s * self.device_steps}": np.median(self.losses[-s:]) for s in sizes}, step=step)
+        self.run.log({f"Accuracy/Median{s * self.device_steps}": np.median(self.accuracies[-s:]) for s in sizes}, step=step)
 
         rate = step / (time.time() - self.start_time)
         tokens_per_day = 3600 * 24 * rate * ctx.dims.batch * ctx.dims.sequence

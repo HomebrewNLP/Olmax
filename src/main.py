@@ -191,7 +191,6 @@ def main():
     ctx = wctx.ctx
 
     run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
-    wblog = WandbLog(run)
 
     cfg = {}
     for param_name, param in run.config.items():
@@ -206,6 +205,8 @@ def main():
         inner_cfg[split_name[-1]] = param
     init_class(ctx, cfg)
     dump_ctx(ctx, run)
+
+    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count())
     return run_one(wblog)
 
 
