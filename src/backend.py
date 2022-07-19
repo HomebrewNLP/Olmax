@@ -94,8 +94,6 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
               init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
     prefix_name = prefixed_name(ctx, name)
 
-    scale = scale ** -0.5  # sqrt if we assume variables are independent, normal if they are dependent
-
     if dtype is None:
         computation_dtype = ctx.model.computation_dtype
         storage_dtype = ctx.model.storage_dtype
