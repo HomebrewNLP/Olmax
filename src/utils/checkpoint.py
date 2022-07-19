@@ -9,6 +9,7 @@ import json
 import multiprocessing
 import re
 import time
+import traceback
 
 import jax
 import jax.numpy as jnp
@@ -29,7 +30,7 @@ def index_weights(weights, idx):
 def write(x, ckpt_dir):
     idx, i = x
     file_path = ckpt_dir + f"{idx}.npz"
-    for _ in range(3):
+    for _ in range(8):
         try:
             with open(file_path, "wb") as f:
                 np.savez(f, *i)
@@ -49,8 +50,19 @@ def write_ckpt(ctx: Context):
     structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')
     structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
 
-    with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
-        f.write(structure)
+    success = False
+    for _ in range(8):
+        try:
+            with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
+                f.write(structure)
+        except:
+            print("Failed to save structure. Traceback:")
+            traceback.print_exc()
+            continue
+        success = True
+        break
+    if not success:
+        raise ValueError("Couldn't save structure")
 
     for shard in range(ctx.dims.heads):
         cpu_flattened = index_weights(flattened, shard)
@@ -81,8 +93,10 @@ def deep_replace(d, value):
         return {k: deep_replace(v, value) for k, v in d.items()}
     return value
 
-def depth(param_name, name:str='reversible'):
+
+def depth(param_name, name: str = 'reversible'):
     return int(param_name.split(f'/{name}:')[1].split('/')[0])
+
 
 def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     ignore = re.compile(ignore)

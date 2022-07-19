@@ -44,7 +44,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
 
     # each process has 8 devices -> divide by 8 without hardcoding that number
     # division because all devices got the same data, so the sum sees it 8 times. as it's still int, it's accurate
-    wctx.data = jax.lax.psum(data, ParallelAxes.model) // (jax.device_count() / jax.process_count())
+    wctx.data = jax.lax.psum(data, ParallelAxes.model) // (jax.device_count() // jax.process_count())
 
     return loop(train_step, while_ctx_dict, jax.process_count() * training.device_steps, training.device_unroll)
 
@@ -149,7 +149,7 @@ def run_one(wblog: WandbLog):
             tokens_processed = device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
             print(f'[{idx * device_steps:{len(str(total_steps))}d}/{total_steps}] '
                   f'Loss: {wctx.loss / device_steps:6.3f} - '
-                  f'TopLoss: {wctx.top_loss / device_steps:8.3f} | '
+                  f'Accuracy: {wctx.top_loss / device_steps:8.3f} | '
                   f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step)):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {tokens_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
