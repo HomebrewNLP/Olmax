@@ -38,7 +38,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     training = wctx.ctx.training
     steps, src_tgt, batch, sequence = wctx.data.shape
     data = jnp.zeros((steps, src_tgt, batch, jax.process_count(), sequence), wctx.data.dtype)
-    data[:, :, :, jax.process_index(), :] = wctx.data
+    data = data.at[:, :, :, jax.process_index(), :].set(wctx.data)
     data = data.transpose(0, 3, 1, 2, 4)
     data = data.reshape(steps * jax.process_count(), src_tgt, batch, sequence)
 
