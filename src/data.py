@@ -1,5 +1,6 @@
 import random
 
+import jax
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
 from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
@@ -46,6 +47,9 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     rng = random.Random(ctx.data.seed)
     rng.shuffle(filenames)
 
+    file_slice = len(filenames) / jax.process_count()
+    filenames = filenames[int(file_slice * jax.process_index()):int(file_slice * (jax.process_index() + 1))]
+
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
     sequence_length = ctx.dims.sequence
     batch_size = ctx.dims.batch
@@ -61,7 +65,7 @@ def text_dataset(ctx: Context) -> NumpyIterator:
         With 2 data loaders and a batch of 4, you'd have [[1, 1, 1, 1], [2, 2, 2, 2]] as returned sample without it and
         [[1, 2, 1, 2], [1, 2, 1, 2]] with it.
         :param x: tensor that's sliced
-        :return: src/tgt
+        :return: src/tgt Shape[Steps, Src/Tgt, Batch, Sequence]
         """
         x = tf.reshape(x, (batch_size, device_steps, sequence_length_1))
         x = tf.cast(x, tf.int32)
