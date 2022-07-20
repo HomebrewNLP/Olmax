@@ -96,11 +96,11 @@ def main():
                 if ridx > args.run_threshold:
                     idx -= 1
                     break
+        start_step -= start_step % config["training"]["checkpoint_interval"]
         if idx > 0 or start_step > 0:
             config["training"]["checkpoint_load_path"] = f"{base_checkpoint_path}-{idx - 1}"
         else:
             config["training"]["checkpoint_load_path"] = ""
-        start_step -= start_step % config["training"]["checkpoint_interval"]
         config["training"]["start_step"] = start_step
 
         return Context(zone=args.zone, host=host, config=config, branch=args.branch)
