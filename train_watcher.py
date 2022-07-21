@@ -23,7 +23,8 @@ def start_fn(ctx: Context, worker: int):
     setup = f'(bash setup.sh ; mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml ; exit 0)'
     send_to_tpu(ctx.host, ctx.zone, "config.yaml", yaml.dump(ctx.config), worker)
     cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
-                       setup_command=setup, run_command=f"CONFIG=config.yaml bash run.sh", branch=ctx.branch)
+                       setup_command=setup, run_command=f"CONFIG=config.yaml bash run.sh", branch=ctx.branch,
+                       install_python=False)
     send_to_tpu(ctx.host, ctx.zone, "setup.sh", cmd, worker)
     exec_on_tpu(ctx.host, ctx.zone, "bash setup.sh", worker)
 
