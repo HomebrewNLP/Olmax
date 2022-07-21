@@ -234,6 +234,11 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
     return resultant_mat_h, error
 
 
+def fallback_pth_root(prev: jnp.array, stat: jnp.array, p: int, eps: float):
+    new_p, error = matrix_inverse_pth_root(stat, p, ridge_epsilon=eps)
+    return select_preconditioner(error, new_p, prev)
+
+
 def merge_small_dims(shape_to_merge, max_dim):
     """Merge small dimensions.
 

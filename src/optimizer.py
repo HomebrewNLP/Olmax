@@ -3,9 +3,9 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from .backend import assign, get_param, prefixed_name, stable_rsqrt, zero_param
+from .backend import assign, get_param, maybe_fn, prefixed_name, stable_rsqrt, zero_param
 from .context import Context
-from .shampoo import Preconditioner, matrix_inverse_pth_root, select_preconditioner
+from .shampoo import Preconditioner, fallback_pth_root, matrix_inverse_pth_root, select_preconditioner
 
 
 def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
@@ -76,9 +76,11 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
         if ctx.is_initializing:
             continue
 
-        new_p, error = matrix_inverse_pth_root(new_stat, preconditioner.exponent_for_preconditioner(),
-                                               ridge_epsilon=ctx.optimizer.epsilon)
-        new_p = select_preconditioner(error, new_p, prev_p)
+        def _new_precond():
+            return fallback_pth_root(prev_p, new_stat, preconditioner.exponent_for_preconditioner(),
+                                     ctx.optimizer.epsilon)
+
+        new_p = maybe_fn((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond, lambda: prev_p)
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
     if ctx.is_initializing:
