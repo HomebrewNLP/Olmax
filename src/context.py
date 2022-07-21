@@ -167,6 +167,7 @@ class Training(DataClass):
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_load_path: str = ""
     checkpoint_interval: float = 16384
+    label_smoothing: float = 0.1
     do_checkpoint: bool = False
     z_loss: float = 0.01
     device_steps: int = 4
