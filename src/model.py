@@ -279,8 +279,7 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     @jax.custom_gradient
     def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, back_x0: jnp.ndarray, x1: jnp.ndarray,
             back_x1: jnp.ndarray):
-        def _grad(dy: REVERSIBLE_CTX) -> typing.Tuple[
-            typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        def _grad(dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0)
             d_params, dx0 = grad_fn(dy1)
