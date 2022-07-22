@@ -1,11 +1,12 @@
 import typing
 
 import jax
-from jax import numpy as jnp
+from jax import lax, numpy as jnp
 
 from .backend import assign, get_param, maybe_fn, prefixed_name, stable_rsqrt, zero_param
+from .constants import ParallelAxes
 from .context import Context
-from .shampoo import Preconditioner, fallback_pth_root, matrix_inverse_pth_root, select_preconditioner
+from .shampoo import Preconditioner, fallback_pth_root
 
 
 def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
@@ -89,7 +90,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 
 
 def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
-    return jnp.maximum(jnp.sqrt(jnp.square(val).sum()), min_norm)
+    return jnp.maximum(lax.psum(jnp.sqrt(jnp.square(val).sum()), ParallelAxes.model), min_norm)
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
