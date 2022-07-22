@@ -230,8 +230,7 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
         error = jnp.max(jnp.abs(mat_m - identity)).astype(jnp.float32)
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)
         resultant_mat_h = is_converged * mat_h + (1 - is_converged) * old_mat_h
-        resultant_mat_h = jnp.asarray(resultant_mat_h, orig_dtype)
-    return resultant_mat_h, error
+    return jnp.asarray(resultant_mat_h, orig_dtype), error
 
 
 def fallback_pth_root(prev: jnp.array, stat: jnp.array, p: int, eps: float):
