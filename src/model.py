@@ -82,9 +82,17 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_feat
     return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
 
 
+def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
+    def _fn(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+        ctx = ctx.add_to_prefix("prenorm")
+        inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False, init_mean=None)
+        return fn(ctx, inp)
+
+    return _fn
+
+
+@prenorm
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("bottleneck")
-    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False, init_mean=None)
     inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale / ctx.dims.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
@@ -95,9 +103,8 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
                 ctx.dims.inner_bottleneck_features, ctx.dims.features)
 
 
+@prenorm
 def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("pointwise")
-    inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False, init_mean=None)
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.pointwise_scale, ctx.dims.features,
                ctx.dims.pointwise_features)
     inp = activate(ctx, inp)
@@ -138,11 +145,11 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
     return _fn(forget, src)
 
 
+@prenorm
 def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     # 500ms at 256 features (forward pass, backward takes slightly longer)
     # While conv 256->256 with kernel_size=5 takes ~11.3ms
     ctx = ctx.add_to_prefix("qrnn")
-    inp = scale_norm_act(ctx, inp, ctx.dims.features, init_mean=None)
     mid = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.qrnn_scale, ctx.dims.features,
                ctx.dims.inner_bottleneck_features * 2)
     mid, forget = jnp.split(mid, 2, -1)
@@ -224,6 +231,7 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
     return x, own_indices
 
 
+@prenorm
 def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("moe")
     inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features, ctx.dims.moe_intermediate],
@@ -292,6 +300,7 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     return _fn(*src)
 
 
+@prenorm
 def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndarray], tgt: jnp.ndarray) -> typing.Tuple[
     jnp.ndarray, jnp.ndarray]:
     # Forward: logsumexp(x) - x[target]
@@ -378,7 +387,6 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
             src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
-    out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
                     scale=1 / ctx.dims.heads, lr_scale=ctx.optimizer.output_scale)
     if ctx.is_initializing:
