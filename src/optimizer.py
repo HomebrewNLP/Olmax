@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import assign, get_param, maybe_fn, prefixed_name, stable_rsqrt, zero_param
+from .backend import assign, get_param, prefixed_name, stable_rsqrt, zero_param
 from .constants import ParallelAxes
 from .context import Context
 from .shampoo import Preconditioner, fallback_pth_root
@@ -81,7 +81,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
             return fallback_pth_root(prev_p, step, new_stat, preconditioner.exponent_for_preconditioner(),
                                      ctx.optimizer.epsilon)
 
-        new_p = maybe_fn((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond, lambda: prev_p)
+        new_p = lax.cond((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond, lambda: prev_p)
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
     if ctx.is_initializing:

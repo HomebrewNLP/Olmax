@@ -126,7 +126,3 @@ def zero_param(ctx: Context, name: str, shape: typing.List[int], dtype: typing.O
 
 def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
-
-
-def maybe_fn(predicate: jnp.array, true_fn: typing.Callable[[], typing.Any], false_fn: typing.Callable[[], typing.Any]):
-    return lax.cond(predicate, lambda _: true_fn(), lambda _: false_fn(), operand=None)
