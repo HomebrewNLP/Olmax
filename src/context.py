@@ -114,7 +114,7 @@ class WandB(DataClass):
 class Optimizer(DataClass):
     use_shampoo: bool = True
     block_size: int = 512
-    epsilon: float = 1e-8
+    epsilon: float = 1e-16
     start_preconditioning_step: int = 16
     preconditioning_compute_steps: int = 128
     statistics_compute_steps: int = 4
@@ -140,7 +140,7 @@ class Optimizer(DataClass):
 class Model(DataClass):
     conv_scale: float = 4.
     conv_shift: float = 8.
-    norm_eps: float = 1e-8
+    norm_eps: float = 1e-16
     qrnn_frequency: int = 8
     rezero_lr_scale: float = 0.01
     leaky_relu_slope: float = 0.01
