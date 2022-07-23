@@ -196,7 +196,7 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
     lse += z_loss(ctx, lse, False)  # actual zloss
     gate = jnp.exp(gate)
     gate += z_loss(ctx, gate, False)  # aux loss
-    balanced = gate / lax.stop_gradient(gate).sum(0)  # balance gates across batch
+    balanced = gate / lax.stop_gradient(gate).sum(0, keepdims=True)  # balance gates across batch
 
     # shuffle to avoid imbalances across token position (https://arxiv.org/abs/2109.10465)
     ctx.prng_key, key = jax.random.split(ctx.prng_key)
