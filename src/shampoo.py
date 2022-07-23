@@ -185,7 +185,6 @@ def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_
     assert matrix.shape[0] == matrix.shape[1]
 
     matrix_size = matrix.shape[0]
-    orig_dtype = matrix.dtype
     matrix = matrix.astype(jnp.float64)
     alpha = jnp.asarray(-1.0 / p, jnp.float64)
     identity = jnp.eye(matrix_size, dtype=jnp.float64)
@@ -222,7 +221,7 @@ def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_
         error = jnp.max(jnp.abs(mat_m - identity))
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)
         resultant_mat_h = is_converged * mat_h + (1 - is_converged) * old_mat_h
-    return jnp.asarray(resultant_mat_h, orig_dtype), error.astype(orig_dtype)
+    return resultant_mat_h, error
 
 
 def fallback_pth_root(prev: jnp.array, step: jnp.ndarray, stat: jnp.array, p: int, eps: float):

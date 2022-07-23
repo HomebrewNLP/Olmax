@@ -44,9 +44,9 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
     if quantize is None:
         quantize = not small_parameter(ctx.global_prefix, inp)
-    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else ctx.model.storage_dtype,
+    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else inp.dtype,
                       init_val=jnp.zeros_like(inp) if init_val is None else init_val)
-    new_state = state.astype(jnp.float32) * beta + inp * (1 if heavyball else (1 - beta))
+    new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
     if heavyball:
         return new_state
@@ -72,8 +72,8 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
         new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
                        jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype) * ctx.optimizer.epsilon)
-        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=ctx.model.storage_dtype,
-                           init_val=jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype))
+        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype,
+                           init_val=jnp.eye(old_stat.shape[0]))
         if ctx.is_initializing:
             continue
 
@@ -122,7 +122,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             continue
         inner_ctx = ctx.add_to_prefix(param_name, count=False)
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
-        grad = grad.astype(ctx.model.storage_dtype)
+        grad = grad.astype(jnp.float64)
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         update = adam(inner_ctx, grad, step)
         if not small_parameter(param_name, grad):  # Do adam update for small parameters
@@ -131,4 +131,5 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
                                  heavyball=True)
             update = graft(update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+        update = update.astype(ctx.parameters[param_name])
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
