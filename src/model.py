@@ -387,6 +387,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
             src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
+    out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
                     scale=1 / ctx.dims.heads, lr_scale=ctx.optimizer.output_scale)
     if ctx.is_initializing:
