@@ -128,7 +128,7 @@ def power_iteration(matrix: jnp.ndarray, step: typing.Union[jnp.ndarray, int] = 
 
     # Figure out how to use step as seed for random.
     key = jax.random.PRNGKey(step)
-    v_0 = jax.random.uniform(key, matrix_shape, matrix.dtype, -1.0, 1.0)
+    v_0 = jax.random.uniform(key, matrix_size, matrix.dtype, -1.0, 1.0)
 
     init_state = (0, v_0, jnp.zeros([], dtype=matrix.dtype), v_0, True)
     _, v_out, s_out, _, _ = lax.while_loop(_iter_condition, _iter_body, init_state)
