@@ -78,7 +78,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
             continue
 
         def _new_precond():
-            return fallback_pth_root(prev_p, new_stat, preconditioner.exponent_for_preconditioner(),
+            return fallback_pth_root(prev_p, step, new_stat, preconditioner.exponent_for_preconditioner(),
                                      ctx.optimizer.epsilon)
 
         new_p = lax.cond((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond, lambda: prev_p)

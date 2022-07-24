@@ -28,6 +28,7 @@
 """Distributed Shampoo Implementation."""
 
 import itertools
+import typing
 
 import jax
 import jax.numpy as jnp
@@ -126,8 +127,7 @@ def power_iteration(matrix: jnp.ndarray, step: typing.Union[jnp.ndarray, int] = 
         return i + 1, s_v, s_new, s_v, jnp.greater(jnp.abs(s_new - s), error_tolerance)
 
     # Figure out how to use step as seed for random.
-    v_0 = np.random.RandomState(1729).uniform(-1.0, 1.0,
-                                              matrix_size).astype(matrix.dtype)
+    v_0 = np.random.RandomState(step).uniform(-1.0, 1.0, matrix_size).astype(matrix.dtype)
 
     init_state = (0, v_0, jnp.zeros([], dtype=matrix.dtype), v_0, True)
     _, v_out, s_out, _, _ = lax.while_loop(_iter_condition, _iter_body, init_state)
@@ -135,9 +135,8 @@ def power_iteration(matrix: jnp.ndarray, step: typing.Union[jnp.ndarray, int] = 
     return v_out, s_out
 
 
-def mat_power(mat_m, p):
+def mat_power(mat_m: jnp.ndarray, p: int):
     """A simple matrix power method. M^p where p can be TracedValue."""
-    power = jnp.eye(mat_m.shape[0], dtype=_MAT_INV_PTH_ROOT_DTYPE)
 
     def _iter_condition(state):
         i, _, _ = state
@@ -145,14 +144,13 @@ def mat_power(mat_m, p):
 
     def _iter_body(state):
         i, power, mat = state
-
         power = jax.lax.cond(i % 2 == 1, lambda: jnp.matmul(mat, power, precision=lax.Precision.HIGHEST), lambda: power)
         i //= 2
         mat = jnp.matmul(mat, mat, precision=lax.Precision.HIGHEST)
         return i, power, mat
 
-    _, result, _ = lax.while_loop(_iter_condition, _iter_body, (p, power, mat_m))
-    return result
+    initial_result = jnp.eye(mat_m.shape[0], dtype=jnp.float64)
+    return lax.while_loop(_iter_condition, _iter_body, (p, initial_result, mat_m))[1]
 
 
 def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_iters: int = 100,
@@ -187,7 +185,6 @@ def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_
     assert matrix.shape[0] == matrix.shape[1]
 
     matrix_size = matrix.shape[0]
-    orig_dtype = matrix.dtype
     matrix = matrix.astype(jnp.float64)
     alpha = jnp.asarray(-1.0 / p, jnp.float64)
     identity = jnp.eye(matrix_size, dtype=jnp.float64)
@@ -224,7 +221,7 @@ def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_
         error = jnp.max(jnp.abs(mat_m - identity))
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)
         resultant_mat_h = is_converged * mat_h + (1 - is_converged) * old_mat_h
-    return jnp.asarray(resultant_mat_h, orig_dtype), error.astype(orig_dtype)
+    return resultant_mat_h, error
 
 
 def fallback_pth_root(prev: jnp.array, step: jnp.ndarray, stat: jnp.array, p: int, eps: float):
