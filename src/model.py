@@ -300,7 +300,6 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
     return _fn(*src)
 
 
-@prenorm
 def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndarray], tgt: jnp.ndarray) -> typing.Tuple[
     jnp.ndarray, jnp.ndarray]:
     # Forward: logsumexp(x) - x[target]
