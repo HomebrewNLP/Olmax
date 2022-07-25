@@ -27,7 +27,7 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
                    psum: bool = False, act: bool = True, init_mean: typing.Optional[float] = 1) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("normalization")
-    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float64)
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         if init_mean is None:
             init_mean = float(bool(ctx.training.checkpoint_load_path))
