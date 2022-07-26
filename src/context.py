@@ -2,9 +2,9 @@ import copy
 import os
 import typing
 
+import jax
 import yaml
 from jax import numpy as jnp, random
-import jax
 
 
 class DataClass:

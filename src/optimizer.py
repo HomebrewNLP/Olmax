@@ -4,7 +4,6 @@ import jax
 from jax import lax, numpy as jnp
 
 from .backend import assign, get_param, prefixed_name, stable_rsqrt, zero_param
-from .constants import ParallelAxes
 from .context import Context
 from .shampoo import Preconditioner, fallback_pth_root
 
@@ -90,7 +89,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 
 
 def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
-    return jnp.maximum(jnp.sqrt(jnp.square(val).sum()), min_norm)
+    return jnp.maximum(jnp.sqrt(jnp.square(val).sum()), min_norm)  # psumming here causes 64x padding + OOM
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:

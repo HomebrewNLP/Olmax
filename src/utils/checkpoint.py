@@ -2,7 +2,6 @@
 Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca9370576ad9d247facf6cb8e9699300e690
 /mesh_transformer/checkpoint.py
 """
-import collections
 import functools
 import io
 import json
@@ -16,8 +15,8 @@ import jax.numpy as jnp
 import numpy as np
 from smart_open import open
 
-from src.context import Context
 from src.backend import is_main
+from src.context import Context
 
 pieces = 16  # how many files to split each shard across
 
@@ -25,7 +24,7 @@ pieces = 16  # how many files to split each shard across
 @functools.partial(jax.jit, backend="cpu")
 def index_weights(weights, idx):
     cpu_device = jax.devices("cpu")[0]
-    return jax.device_put(jax.tree_map(lambda i: i[idx], weights), cpu_device)
+    return jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), cpu_device)
 
 
 def write(x, ckpt_dir):
@@ -44,7 +43,7 @@ def write(x, ckpt_dir):
 
 
 def write_ckpt(ctx: Context):
-    flattened, structure = jax.tree_flatten(ctx.parameters)
+    flattened, structure = jax.tree_util.tree_flatten(ctx.parameters)
 
     structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
     structure = structure.replace('PyTreeDef', '')[1:-1]  # clean up "types"
@@ -121,7 +120,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
         if x.dtype == np.dtype('V2'):
             x.dtype = jnp.bfloat16
         unsharded.append(x)
-    params = jax.tree_unflatten(new_structure, unsharded)
+    params = jax.tree_util.tree_unflatten(new_structure, unsharded)
 
     print(f"Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
     print(f"Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
