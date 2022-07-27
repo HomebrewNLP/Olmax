@@ -46,16 +46,15 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
         mean = src_fp64.mean(-1, keepdims=True)
         std = stable_rsqrt(jnp.square(src_fp64).sum(-1, keepdims=True) - src.shape[-1] * jnp.square(mean),
                            ctx.model.norm_eps)
-        out = (src_fp64 - mean) * std
-        out = out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+        norm_out = (src_fp64 - mean) * std
+        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
         if act:
             out = activate(ctx, out)
         out = out.astype(original_dtype)
+        norm_out = norm_out.astype(original_dtype)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            out_fp64 = promote_to(out, run_type)
-            wgt_reshaped = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
-            norm_out_fp64 = out_fp64 * jnp.where(out >= 0, 1, 1 / ctx.model.leaky_relu_slope) / wgt_reshaped
+            norm_out_fp64 = promote_to(norm_out, run_type)
             dy = promote_to(dy, run_type)
             if act:
                 dy = dy * jnp.where(out >= 0, 1, ctx.model.leaky_relu_slope)
