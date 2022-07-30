@@ -133,6 +133,4 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         update = update.astype(ctx.parameters[param_name].dtype)
 
-        # bigger step if less certain, smaller step if more certain
-        update = update ** 2 * jax.lax.sign(update)
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
