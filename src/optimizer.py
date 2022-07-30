@@ -123,9 +123,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(jnp.float64)
 
-        # bigger step if less certain, smaller step if more certain
-        grad = jnp.where(jnp.logical_and(grad < 1e-8, grad > -1e-8), 0, 1 / grad)
-
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         update = adam(inner_ctx, grad, step)
         if not small_parameter(param_name, grad):  # Do adam update for small parameters
@@ -135,4 +132,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             update = graft(update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         update = update.astype(ctx.parameters[param_name].dtype)
+
+        # bigger step if less certain, smaller step if more certain
+        update = jnp.where(jnp.logical_and(update < 1e-8, update > -1e-8), 0, 1 / update)
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
