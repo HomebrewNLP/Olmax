@@ -134,5 +134,5 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         update = update.astype(ctx.parameters[param_name].dtype)
 
         # bigger step if less certain, smaller step if more certain
-        update = jnp.where(jnp.logical_and(update < 1e-8, update > -1e-8), 0, 1 / update)
+        update = update ** 2 * jax.lax.sign(update)
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
