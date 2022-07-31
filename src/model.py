@@ -14,10 +14,23 @@ compilation_cache.initialize_cache("compilation_cache")
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
 
+def activate_forward(inp: jnp.ndarray) -> jnp.ndarray:
+    return jax.nn.tanh(inp) + 0.1 * inp
+
+
+def activate_grad(inp: jnp.ndarray) -> jnp.ndarray:
+    return 1.1 - jax.nn.tanh(inp) ** 2
+
+
 def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
-    return jax.nn.leaky_relu(inp, ctx.model.leaky_relu_slope)
+
+    @jax.custom_gradient
+    def _fn(x: jnp.ndarray):
+        return activate_forward(x), lambda dy: dy * activate_grad(x)
+
+    return _fn(inp)
 
 
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
@@ -49,7 +62,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
         norm_out = (src_fp64 - mean) * std
         out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
         if act:
-            out = activate(ctx, out)
+            out = activate_forward(out)
         out = out.astype(original_dtype)
         norm_out = norm_out.astype(original_dtype)
 
@@ -57,7 +70,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             norm_out_fp64 = promote_to(norm_out, run_type)
             dy = promote_to(dy, run_type)
             if act:
-                dy = dy * jnp.where(out >= 0, 1, ctx.model.leaky_relu_slope)
+                dy = dy * activate_grad(norm_out_fp64)
             d_wgt = (dy * norm_out_fp64).sum(list(range(src.ndim - 1))).reshape((-1,))
             dy = dy * std * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy -= (dy * norm_out_fp64).mean(-1, keepdims=True) * norm_out_fp64 * src.shape[-1]  # "undo" l2norm
