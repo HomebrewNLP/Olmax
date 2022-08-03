@@ -49,13 +49,13 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
 
     if ctx.is_initializing:
         return inp
+    if psum:
+        inp = lax.psum(inp, axis_name=ParallelAxes.model)
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
         src_fp64 = promote_to(src, run_type)
-        if psum:
-            src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
         mean = src_fp64.mean(-1, keepdims=True)
         std = stable_rsqrt(jnp.square(src_fp64).sum(-1, keepdims=True) - src.shape[-1] * jnp.square(mean),
                            ctx.model.norm_eps)
