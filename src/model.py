@@ -49,13 +49,13 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
 
     if ctx.is_initializing:
         return inp
-    if psum:
-        inp = lax.psum(inp, axis_name=ParallelAxes.model)
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
         src_fp64 = promote_to(src, run_type)
+        if psum:
+            src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
         mean = src_fp64.mean(-1, keepdims=True)
         std = stable_rsqrt(jnp.square(src_fp64).sum(-1, keepdims=True) - src.shape[-1] * jnp.square(mean),
                            ctx.model.norm_eps)
@@ -75,6 +75,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             dy = dy * std * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy -= (dy * norm_out_fp64).mean(-1, keepdims=True) * norm_out_fp64 * src.shape[-1]  # "undo" l2norm
             dy -= dy.mean(-1, keepdims=True)
+            if psum:
+                dy = lax.psum(dy, axis_name=ParallelAxes.model)
             return dy.astype(original_dtype), d_wgt
 
         return out, _grad
@@ -107,7 +109,7 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
 @prenorm
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale / ctx.dims.heads,
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale / 8,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
     inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, ctx.optimizer.bottleneck_scale,

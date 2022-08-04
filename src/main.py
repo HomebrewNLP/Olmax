@@ -9,7 +9,7 @@ import jax
 import jax._src.util as util
 import wandb
 import yaml
-from jax import numpy as jnp
+from jax import numpy as jnp, lax
 
 from src.backend import device_id, loop
 from src.constants import ParallelAxes
@@ -62,7 +62,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         ctx.prng_key = initial_prng_key
         ctx.seed = initial_seed
         ctx.parameter_variance = {}
-        return params, var
+        return params, jax.tree_util.tree_map(lambda x: lax.psum(x / ctx.dims.heads, ParallelAxes.model), var)
 
     inp = jnp.broadcast_to(inp, (len(jax.local_devices()),) + inp.shape)
     pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0,), out_axes=(0, 0), donate_argnums=(0,))
