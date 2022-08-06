@@ -1,12 +1,11 @@
 import argparse
 import dataclasses
 import typing
-from contextlib import nullcontext
 from netrc import netrc
 
 import wandb
 import yaml
-from tpucare import create_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single, synchronous_deletion, tpu_names
+from tpucare import exec_command, exec_on_tpu, send_to_tpu, start_single
 
 _, _, wandb_key = netrc().authenticators("api.wandb.ai")
 
@@ -27,15 +26,6 @@ def start_fn(ctx: Context, worker: int):
                        install_python=False)
     send_to_tpu(ctx.host, ctx.zone, "setup.sh", cmd, worker)
     exec_on_tpu(ctx.host, ctx.zone, "bash setup.sh", worker)
-
-
-def recreate(host: str, zone: str, tpu_version: int, preemptible: bool, service_account: str, slices: int):
-    if host in tpu_names(zone, preempted=True, deleting=True):
-        if host not in tpu_names(zone, preempted=False, deleting=False):
-            synchronous_deletion("", host, zone)
-            create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext(), slices)
-    else:
-        create_tpu(host, zone, tpu_version, preemptible, service_account, nullcontext(), slices)
 
 
 def parse_args():
