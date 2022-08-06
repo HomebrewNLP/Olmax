@@ -39,12 +39,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     steps, src_tgt, batch, sequence = wctx.data.shape
     data = jnp.zeros((jax.process_count(), steps, src_tgt, batch, sequence), wctx.data.dtype)
     data = data.at[jax.process_index(), :, :, :, :].set(wctx.data)
-
-    # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
-    # process_count, steps, src_tgt, batch, sequence -> process_count, steps, batch, src_tgt, sequence
-    data = data.transpose(0, 1, 3, 2, 4)
-    data = data.reshape(batch, -1, src_tgt, sequence)
-    data = data.transpose(1, 2, 0, 3)
+    data = data.reshape(-1, src_tgt, batch, sequence)
 
     # each process has 8 devices -> divide by 8 without hardcoding that number
     # division because all devices got the same data, so the sum sees it 8 times. as it's still int, it's accurate
