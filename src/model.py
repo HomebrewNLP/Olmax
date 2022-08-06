@@ -43,7 +43,9 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         if init_mean is None:
-            init_mean = float(bool(ctx.training.checkpoint_load_path))
+            # init to 0 if checkpoint so, new layers get learned slowly (-> rezero but input)
+            # 1 otherwise to make sure model can learn
+            init_mean = float(not bool(ctx.training.checkpoint_load_path))
         weight = get_param(ctx, "scale", [feature_dim], std=0, mean=init_mean, dtype=run_type,
                            lr_scale=ctx.optimizer.norm_scale)
 
@@ -109,7 +111,7 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
 @prenorm
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale / 8,
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale / ctx.dims.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
     inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, ctx.optimizer.bottleneck_scale,
@@ -336,7 +338,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
 
         loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).sum()
-        accuracy = accuracy + (jnp.argmax(lax.stop_gradient(tmp), 1) == tgt_slice).sum()
+        accuracy = accuracy + (jnp.argmax(tmp, 1) == tgt_slice).sum()
 
         dx = lax.exp(tmp - lse)
         zloss = dx * lse * ctx.training.z_loss
@@ -356,8 +358,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         original_shape = inp.shape
         inp = inp.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1, ctx.dims.features)
         inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1)
-        index = lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) // devices
-        index = index.astype(jnp.int32)
+        index = device_id(ctx)
         (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (
                 inp, jnp.zeros((), dtype=jnp.int32), wgt, inner_tgt, index,
                 jnp.zeros(wgt.shape[::-1], dtype=jnp.float32), jnp.zeros((), dtype=jnp.float32),
@@ -405,7 +406,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=0,
-                    scale=1 / ctx.dims.heads, lr_scale=ctx.optimizer.output_scale)
+                    lr_scale=ctx.optimizer.output_scale / ctx.dims.heads)
     if ctx.is_initializing:
         return out
     return out, wgt
