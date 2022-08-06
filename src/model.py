@@ -416,4 +416,8 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    return cross_entropy_loss(ctx, body_ctx(ctx, src), tgt)
+    out = body_ctx(ctx, src)
+    if ctx.is_initializing:
+        return out
+    out = lax.psum(out, ParallelAxes.model)
+    return jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean()
