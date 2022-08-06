@@ -3,10 +3,12 @@ import dataclasses
 import typing
 from netrc import netrc
 
+import tpucare
 import wandb
 import yaml
 from tpucare import delete_one_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single
 
+tpucare.LOG_LEVEL = 0
 _, _, wandb_key = netrc().authenticators("api.wandb.ai")
 
 
