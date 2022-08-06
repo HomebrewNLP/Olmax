@@ -111,7 +111,7 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
 @prenorm
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("bottleneck")
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, 1,
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale / ctx.dims.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
     inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, ctx.optimizer.bottleneck_scale,
