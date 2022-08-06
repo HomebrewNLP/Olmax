@@ -9,7 +9,7 @@ import jax
 import jax._src.util as util
 import wandb
 import yaml
-from jax import numpy as jnp, lax
+from jax import lax, numpy as jnp
 
 from src.backend import device_id, loop
 from src.constants import ParallelAxes
@@ -37,13 +37,16 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     wctx = WhileTrainContext(while_ctx_dict)
     training = wctx.ctx.training
     steps, src_tgt, batch, sequence = wctx.data.shape
+    devices_per_process = jax.device_count() // jax.process_count()
+
+    dev_id = device_id(wctx.ctx) // devices_per_process
     data = jnp.zeros((jax.process_count(), steps, src_tgt, batch, sequence), wctx.data.dtype)
-    data = data.at[jax.process_index(), :, :, :, :].set(wctx.data)
+    data = data.at[dev_id, :, :, :, :].set(wctx.data)
     data = data.reshape(-1, src_tgt, batch, sequence)
 
     # each process has 8 devices -> divide by 8 without hardcoding that number
     # division because all devices got the same data, so the sum sees it 8 times. as it's still int, it's accurate
-    wctx.data = jax.lax.psum(data, ParallelAxes.model) // (jax.device_count() // jax.process_count())
+    wctx.data = jax.lax.psum(data, ParallelAxes.model) // devices_per_process
 
     return loop(train_step, while_ctx_dict, jax.process_count() * training.device_steps, training.device_unroll)
 
