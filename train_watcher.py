@@ -5,7 +5,7 @@ from netrc import netrc
 
 import wandb
 import yaml
-from tpucare import exec_command, exec_on_tpu, send_to_tpu, start_single
+from tpucare import delete_one_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single
 
 _, _, wandb_key = netrc().authenticators("api.wandb.ai")
 
@@ -56,7 +56,7 @@ def parse_args():
 def main():
     args = parse_args()
     if args.cleanup:
-        return synchronous_deletion("", args.host, args.zone)
+        return delete_one_tpu("", args.host, args.zone)
 
     idx = 0
 
