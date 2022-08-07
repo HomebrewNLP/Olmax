@@ -7,10 +7,9 @@ import warnings
 
 import jax
 import jax._src.util as util
-import numpy as np
 import wandb
 import yaml
-from jax import lax, numpy as jnp
+from jax import numpy as jnp, lax
 
 from src.backend import device_id, loop
 from src.constants import ParallelAxes
@@ -54,7 +53,6 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     # each process has 8 devices -> divide by 8 without hardcoding that number
     # division because all devices got the same data, so the sum sees it 8 times. as it's still int, it's accurate
     wctx.data = jax.lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // devices_per_process
-    return wctx.data
 
     return loop(train_step, while_ctx_dict, jax.process_count() * training.device_steps, training.device_unroll)
 
@@ -142,21 +140,10 @@ def run_one(wblog: WandbLog):
     wctx.current_step += wctx.ctx.training.start_step
     wblog.idx += wctx.ctx.training.start_step
 
-    step = timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
-                  in_axes=(partition,), out_axes=(0,), donate_argnums=(0,))
-    # step = train_loop(wctx, lambda x: x)
+    step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
+                                   in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
 
-    wctx = wctx(next(data))
-    wctx.loss = jnp.zeros_like(wctx.loss)
-    wctx.top_loss = jnp.zeros_like(wctx.loss)
-    out = timeit("Compiling model and performing first step", step, wctx.serialize())
-    print(out.shape)
-    out = np.asarray(out)
-    print(out.tolist())
-    np.savetxt("data.txt", out)
-
-    return
-
+    timeit("Compiling model and performing first step", step, next(data))
     timeit("Running second step", step, next(data))
     print("\n")
     print(f"Parameters: {jax.process_count() * parameter_count:,}")
