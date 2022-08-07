@@ -421,4 +421,4 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
         return out
     out, _ = out
     out = lax.psum(out, ParallelAxes.model)
-    return jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean()
+    return jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean(), out.mean()
