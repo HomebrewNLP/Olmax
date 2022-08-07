@@ -396,8 +396,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.depth):
-        # src = reversible(ctx, pointwise_block, src)
-        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, pointwise_block, src)
+        # src = reversible(ctx, bottleneck_block, src)
         # src = reversible(ctx, pointwise_block, src)
         # src = reversible(ctx, moe, src)
         # if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
@@ -421,4 +421,5 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
         return out
     out, _ = out
     out = lax.psum(out, ParallelAxes.model)
-    return jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean(), out.mean()
+    acc = (out.argmax(-1) == tgt).astype(jnp.float32).mean()
+    return jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean(), acc
