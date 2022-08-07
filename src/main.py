@@ -151,9 +151,9 @@ def run_one(wblog: WandbLog):
     wctx.top_loss = jnp.zeros_like(wctx.loss)
     out = timeit("Compiling model and performing first step", step, wctx.serialize())
     print(out.shape)
-    out = str(np.asarray(out[0]).tolist())
-    with open("data.txt", 'w') as f:
-        f.write(out)
+    out = np.asarray(out)
+    print(out.tolist())
+    np.savetxt("data.txt", out)
 
     return
 
