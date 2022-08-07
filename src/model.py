@@ -419,5 +419,6 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = body_ctx(ctx, src)
     if ctx.is_initializing:
         return out
+    out, _ = out
     out = lax.psum(out, ParallelAxes.model)
     return jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean()
