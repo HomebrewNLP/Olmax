@@ -70,11 +70,12 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             norm_out_fp64 = promote_to(norm_out, run_type)
+            reshaped_weight = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy = promote_to(dy, run_type)
             if act:
-                dy = dy * activate_grad(norm_out_fp64)
+                dy = dy * activate_grad(norm_out_fp64 * reshaped_weight)
             d_wgt = (dy * norm_out_fp64).sum(list(range(src.ndim - 1))).reshape((-1,))
-            dy = dy * std * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+            dy = dy * std * reshaped_weight
             dy -= (dy * norm_out_fp64).mean(-1, keepdims=True) * norm_out_fp64 * src.shape[-1]  # "undo" l2norm
             dy -= dy.mean(-1, keepdims=True)
             if psum:
