@@ -413,6 +413,14 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     return out, wgt
 
 
+def psum_grad(inp, axis):
+    @jax.custom_gradient
+    def _fn(x):
+        return lax.psum(x, axis), lambda y: lax.psum(y, axis)
+
+    return _fn(inp)
+
+
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
@@ -423,7 +431,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out, wgt = out
     out = matmul(out, wgt)
     out = out.astype(jnp.float32)
-    out = lax.psum(out, ParallelAxes.model)
+    out = psum_grad(out, ParallelAxes.model)
     acc = (out.argmax(-1) == tgt).astype(jnp.float32).mean()
     loss = jnp.square(out - one_hot(tgt, ctx.dims.features)).mean()
     return lax.pmean(loss, ParallelAxes.model), lax.pmean(acc, ParallelAxes.model)
