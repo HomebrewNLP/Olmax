@@ -433,5 +433,5 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = out.astype(jnp.float32)
     out = psum_grad(out, ParallelAxes.model)
     acc = (out.argmax(-1) == tgt).astype(jnp.float32).mean()
-    loss = jnp.square(out - one_hot(tgt, ctx.dims.features)).mean()
+    loss = jnp.abs(out - one_hot(tgt, ctx.dims.features)).mean()
     return lax.pmean(loss, ParallelAxes.model), lax.pmean(acc, ParallelAxes.model)
