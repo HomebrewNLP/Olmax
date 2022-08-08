@@ -421,6 +421,6 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     if ctx.is_initializing:
         return out
     out, _ = out
-    out = lax.pmean(out, ParallelAxes.model)
     acc = (out.argmax(-1) == tgt).astype(jnp.float32).mean()
-    return jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean(), acc
+    loss = jnp.square(jax.nn.softmax(out) - one_hot(tgt, ctx.dims.features)).mean()
+    return lax.psum(loss, ParallelAxes.model), lax.pmean(acc, ParallelAxes.model)
