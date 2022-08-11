@@ -5,7 +5,6 @@ import jax
 import numpy as np
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
-from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
 from .context import Context
 
@@ -51,12 +50,19 @@ def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
         target = np.cumsum(source, -1)
         target = np.sin(target)
         source = (source * ctx.dims.vocab).astype(np.int32) % ctx.dims.vocab
-        target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32)
+        target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32) % ctx.dims.vocab
         out = np.stack([source, target], 1)
         yield out
 
 
+def zero_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
+    while True:
+        yield np.zeros((ctx.training.device_steps, 2, ctx.dims.batch, ctx.dims.sequence), dtype=np.int32)
+
+
 def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
+    if jax.process_count() != 0:
+        return zero_generator(ctx)
     if ctx.training.debug:
         return debug_generator(ctx)
 
