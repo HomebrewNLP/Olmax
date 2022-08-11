@@ -270,16 +270,13 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("input_embed")
 
-    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1e-5,
+    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features,
                       lr_scale=ctx.optimizer.input_scale)
-    normalization_scale = get_param(ctx, "normalization_scale", [ctx.dims.features], std=0, mean=1,
-                                    lr_scale=ctx.optimizer.norm_scale,
-                                    dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
 
-    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-        return scale_norm_act(ctx, jnp.take(wgt, src, 0), ctx.dims.features, scale, act=False)
+    def _fn(src: jnp.ndarray, wgt: jnp.ndarray) -> jnp.ndarray:
+        return jnp.take(wgt, src, 0)
 
-    return jax.checkpoint(_fn)(inp, param, normalization_scale)
+    return jax.checkpoint(_fn)(inp, param)
 
 
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
