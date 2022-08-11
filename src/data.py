@@ -61,7 +61,7 @@ def zero_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
 
 
 def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
-    if jax.process_count() != 0:
+    if jax.process_index() != 0:
         return zero_generator(ctx)
     if ctx.training.debug:
         return debug_generator(ctx)
