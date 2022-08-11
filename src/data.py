@@ -71,8 +71,8 @@ def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
     rng = random.Random(ctx.data.seed)
     rng.shuffle(filenames)
 
-    file_slice = len(filenames) / jax.process_count()
-    filenames = filenames[int(file_slice * jax.process_index()):int(file_slice * (jax.process_index() + 1))]
+    # file_slice = len(filenames) / jax.process_count()
+    # filenames = filenames[int(file_slice * jax.process_index()):int(file_slice * (jax.process_index() + 1))]
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
     sequence_length = ctx.dims.sequence
