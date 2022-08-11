@@ -24,7 +24,7 @@ from src.utils.wandblog import WandbLog
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
-    data_slice = wctx.data[wctx.current_step % (wctx.ctx.training.device_steps * jax.process_count())]
+    data_slice = wctx.data[wctx.current_step % wctx.ctx.training.device_steps]
     (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
@@ -106,7 +106,7 @@ def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
     print(yaml.dump(wctx.ctx.config(), indent=4))
-    device_steps = wctx.ctx.training.device_steps * jax.process_count()
+    device_steps = wctx.ctx.training.device_steps
     total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
