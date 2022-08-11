@@ -398,11 +398,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.depth):
         src = reversible(ctx, pointwise_block, src)
-        # src = reversible(ctx, bottleneck_block, src)
-        # src = reversible(ctx, pointwise_block, src)
-        # src = reversible(ctx, moe, src)
-        # if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-        #    src = reversible(ctx, qrnn_block, src)
+        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, pointwise_block, src)
+        src = reversible(ctx, moe, src)
+        if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
+            src = reversible(ctx, qrnn_block, src)
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
