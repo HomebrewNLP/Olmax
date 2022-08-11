@@ -1,4 +1,5 @@
 import random
+import typing
 
 import jax
 import numpy as np
@@ -42,18 +43,22 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1, deterministic=False)
 
 
-def text_dataset(ctx: Context) -> NumpyIterator:
+def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
+    rstate = np.random.RandomState(0)
+    while True:
+        source = rstate.uniform(0, 1, (ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
+        source = source.reshape((ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
+        target = np.cumsum(source, -1)
+        target = np.sin(target)
+        source = (source * ctx.dims.vocab).astype(np.int32) % ctx.dims.vocab
+        target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32)
+        out = np.stack([source, target], 1)
+        yield out
+
+
+def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
     if ctx.training.debug:
-        rstate = np.random.RandomState(0)
-        while True:
-            source = rstate.uniform(0, 1, (ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
-            source = source.reshape((ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
-            target = np.cumsum(source, -1)
-            target = np.sin(target)
-            source = (source * ctx.dims.vocab).astype(np.int32) % ctx.dims.vocab
-            target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32)
-            out = np.stack([source, target], 1)
-            yield out
+        return debug_generator(ctx)
 
     filenames = tf.io.gfile.glob(ctx.data.path)
 
