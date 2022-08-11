@@ -90,7 +90,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 
 
 def clip_norm(val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
-    return jnp.maximum(jnp.sqrt(lax.psum(jnp.square(val).sum(), ParallelAxes.model)), min_norm)
+    return jnp.maximum(jnp.sqrt(jnp.square(val).sum()), min_norm)
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
