@@ -428,10 +428,4 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = body_ctx(ctx, src)
     if ctx.is_initializing:
         return out
-    out, wgt = out
-    out = matmul(out, wgt)
-    out = out.astype(jnp.float32)
-    out = psum_grad(out, ParallelAxes.model)
-    acc = (out.argmax(-1) == tgt).astype(jnp.float32).mean()
-    loss = jnp.abs(out - one_hot(tgt, ctx.dims.features)).mean()
-    return lax.pmean(loss, ParallelAxes.model), lax.pmean(acc, ParallelAxes.model)
+    return cross_entropy_loss(ctx, out, tgt)
