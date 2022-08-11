@@ -200,7 +200,7 @@ def main():
     init_class(ctx, cfg)
     dump_ctx(ctx, run)
 
-    wblog = WandbLog(run, ctx.training.device_steps)
+    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count())
     return run_one(wblog)
 
 
