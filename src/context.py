@@ -164,6 +164,7 @@ class EarlyStopping(DataClass):
 
 
 class Training(DataClass):
+    debug: bool = False
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_load_path: str = ""
     checkpoint_interval: float = 16384

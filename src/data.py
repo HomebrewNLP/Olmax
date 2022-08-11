@@ -1,6 +1,7 @@
 import random
 
 import jax
+import numpy as np
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
 from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
@@ -42,6 +43,18 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
 
 
 def text_dataset(ctx: Context) -> NumpyIterator:
+    if ctx.training.debug:
+        rstate = np.random.RandomState(0)
+        while True:
+            source = rstate.uniform(0, 1, (ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
+            source = source.reshape((ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
+            target = np.cumsum(source, -1)
+            target = np.sin(target)
+            source = (source * ctx.dims.vocab).astype(np.int32) % ctx.dims.vocab
+            target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32)
+            out = np.stack([source, target], 1)
+            yield out
+
     filenames = tf.io.gfile.glob(ctx.data.path)
 
     rng = random.Random(ctx.data.seed)
