@@ -129,9 +129,9 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             update = adam(inner_ctx, grad, step)
         else:  # Do adam update for small parameters
             update = sm3(ctx, param_name, grad)
-            # shampoo_update = shampoo(inner_ctx, grad, step)
-            # shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum")
-            # update = graft(update, shampoo_update)
+            shampoo_update = shampoo(inner_ctx, grad, step)
+            shampoo_update = ema(inner_ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta, "momentum")
+            update = graft(update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         update = update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
