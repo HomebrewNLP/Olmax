@@ -120,7 +120,7 @@ def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
     print(yaml.dump(wctx.ctx.config(), indent=4))
-    device_steps = wctx.ctx.training.device_steps
+    device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
