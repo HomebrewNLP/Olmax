@@ -422,7 +422,6 @@ def psum_grad(inp, axis):
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
-    print("inp", inp.shape)
     src, tgt = inp
     out = body_ctx(ctx, src)
     if ctx.is_initializing:
