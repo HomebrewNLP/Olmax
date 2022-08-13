@@ -24,7 +24,7 @@ from src.utils.wandblog import WandbLog
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
-    data_slice = wctx.data[wctx.current_step % (wctx.ctx.training.device_steps * jax.process_count())]
+    data_slice = wctx.data[wctx.current_step % wctx.ctx.training.device_steps]
     (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
@@ -36,25 +36,11 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     training = wctx.ctx.training
-    steps, src_tgt, batch, sequence = wctx.data.shape
 
-    # init sparse tensor with 0s everywhere except for local input slice
     devices_per_process = jax.device_count() // jax.process_count()
-    proc_id = device_id(wctx.ctx) // devices_per_process
-    data = jnp.zeros((jax.process_count(), steps, src_tgt, batch, sequence), wctx.data.dtype)
-    data = data.at[proc_id, :, :, :, :].set(wctx.data)
+    wctx.data = jax.lax.psum(wctx.data, ParallelAxes.model).astype(wctx.data.dtype) // devices_per_process
 
-    # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
-    # process_count, steps, src_tgt, batch, sequence -> process_count, steps, batch, src_tgt, sequence
-    data = data.transpose(0, 1, 3, 2, 4)
-    data = data.reshape(batch, -1, src_tgt, sequence)
-    data = data.transpose(1, 2, 0, 3)
-
-    # each process has 8 devices -> divide by 8 without hardcoding that number
-    # division because all devices got the same data, so the sum sees it 8 times. as it's still int, it's accurate
-    wctx.data = jax.lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // devices_per_process
-
-    return loop(train_step, while_ctx_dict, jax.process_count() * training.device_steps, training.device_unroll)
+    return loop(train_step, while_ctx_dict, training.device_steps, training.device_unroll)
 
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):
@@ -120,7 +106,7 @@ def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
     print(yaml.dump(wctx.ctx.config(), indent=4))
-    device_steps = wctx.ctx.training.device_steps * jax.process_count()
+    device_steps = wctx.ctx.training.device_steps
     total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
     inp = timeit("Enqueueing first batch", next, data)[0, 0]
@@ -214,7 +200,7 @@ def main():
     init_class(ctx, cfg)
     dump_ctx(ctx, run)
 
-    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count())
+    wblog = WandbLog(run, ctx.training.device_steps)
     return run_one(wblog)
 
 
