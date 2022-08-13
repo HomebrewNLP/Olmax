@@ -3,7 +3,6 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.constants import ParallelAxes
 from .backend import assign, get_param, prefixed_name, stable_rsqrt, zero_param
 from .context import Context
 from .shampoo import Preconditioner, fallback_pth_root
@@ -49,19 +48,21 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
     new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
     if heavyball:
-        return new_state
+        heavyball_debias = 1 / (1 - beta) * (1 - beta ** step)  # == (beta ** jnp.arange(step)).sum()
+        return new_state / heavyball_debias
+
     return new_state * (1 - beta ** (step + 1))  # debias
 
 
 def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
     ctx = ctx.add_to_prefix("square_ema", count=False)
-    buffer = ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "square_ema")
+    buffer = ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "square_ema", heavyball=True)
     return stable_rsqrt(buffer, ctx.optimizer.epsilon)
 
 
 def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("adam", count=False)
-    return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg") * square_ema(ctx, grad, step)
+    return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg", heavyball=True) * square_ema(ctx, grad, step)
 
 
 def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
@@ -132,7 +133,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             if ctx.optimizer.use_shampoo:
                 shampoo_update = shampoo(inner_ctx, grad, step)
                 update = graft(update, shampoo_update)
-            update = ema(inner_ctx, update, step, 1 - ctx.optimizer.momentum_beta, "momentum")
+            update = ema(inner_ctx, update, step, 1 - ctx.optimizer.momentum_beta, "momentum", heavyball=True)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         update = update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
