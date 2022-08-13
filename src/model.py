@@ -142,6 +142,9 @@ def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
 
 
 def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarray:
+    if ctx.is_initializing:
+        return src
+    
     @jax.custom_gradient
     def _fn(fgt: jnp.ndarray, inp: jnp.ndarray):
         dtype = inp.dtype
