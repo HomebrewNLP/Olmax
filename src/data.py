@@ -51,7 +51,7 @@ def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
         target = np.cumsum(source, -1)
         target = np.sin(target)
         source = (source * ctx.dims.vocab).astype(np.int32) % ctx.dims.vocab
-        target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32)
+        target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32) % ctx.dims.vocab
         out = np.stack([source, target], 1)
         yield out
 
