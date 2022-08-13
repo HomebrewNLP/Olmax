@@ -25,10 +25,10 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % (wctx.ctx.training.device_steps * jax.process_count())]
-    (loss, (maxs, mins)), grads = grad_fn(wctx.ctx.parameters, data_slice)
+    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
-    wctx.loss += maxs
-    wctx.top_loss += mins
+    wctx.loss += loss
+    wctx.top_loss += accuracy
     wctx.current_step += 1
     return wctx.serialize()
 
@@ -155,8 +155,8 @@ def run_one(wblog: WandbLog):
         if idx % wctx.ctx.training.print_interval == 0:
             tokens_processed = device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
             print(f'[{idx * device_steps:{len(str(total_steps))}d}/{total_steps}] '
-                  f'Loss: {wctx.loss / device_steps / 2:6.3f} - '
-                  f'Accuracy: {wctx.top_loss / device_steps / 2:8.3f} | '
+                  f'Loss: {wctx.loss / device_steps:6.3f} - '
+                  f'Accuracy: {wctx.top_loss / device_steps:8.3f} | '
                   f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step)):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {tokens_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')

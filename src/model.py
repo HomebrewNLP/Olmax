@@ -426,4 +426,4 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = body_ctx(ctx, src)
     if ctx.is_initializing:
         return out
-    return cross_entropy_loss(ctx, out, tgt)[0], (src.max() + tgt.max(), src.min() + tgt.min())
+    return cross_entropy_loss(ctx, out, tgt)
