@@ -41,11 +41,10 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
 
     # "all-to-all" / "all-concat" with jax.process_count() outputs instead of jax.device_count() outputs
     # init sparse tensor with 0s everywhere except for local input slice
-    devices_per_process = jax.device_count() // jax.process_count()
     data = jnp.zeros((jax.process_count(), step_batch, sequence_p1), wctx.data.dtype)
     data = data.at[jax.process_index(), :, :].set(wctx.data)
-    # same value was seen `devices_per_process` times, so divide to remove implicit multiplication (int32 --> accurate)
-    data = jax.lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // devices_per_process
+    # same value was seen `local_device_count` times, so divide to remove implicit multiplication (int32 --> accurate)
+    data = lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // jax.local_device_count()
 
     # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
     # process_count, steps * batch, sequence
