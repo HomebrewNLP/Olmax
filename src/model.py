@@ -317,7 +317,7 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
             original_params = ctx.parameters
             ctx.parameters = params
-            update(ctx, {name: grad for name, grad in d_params.items() if '0' in str(grad.dtype)}, back_step)
+            update(ctx, {name: grad for name, grad in d_params.items() if '0' not in str(grad.dtype)}, back_step)
             inner_params = ctx.parameters
             ctx.parameters = original_params
             _, grad_fn = jax.vjp(base, inner_params, y0)
