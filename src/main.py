@@ -36,26 +36,25 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     training = wctx.ctx.training
-    steps, src_tgt, batch, sequence = wctx.data.shape
+    steps = training.device_steps * jax.process_count()
+    step_batch, sequence_p1 = wctx.data.shape
 
     # "all-to-all" / "all-concat" with jax.process_count() outputs instead of jax.device_count() outputs
     # init sparse tensor with 0s everywhere except for local input slice
     devices_per_process = jax.device_count() // jax.process_count()
-    data = jnp.zeros((jax.process_count(), steps, src_tgt, batch, sequence), wctx.data.dtype)
-    data = data.at[jax.process_index(), :, :, :, :].set(wctx.data)
+    data = jnp.zeros((jax.process_count(), step_batch, sequence_p1), wctx.data.dtype)
+    data = data.at[jax.process_index(), :, :].set(wctx.data)
     # same value was seen `devices_per_process` times, so divide to remove implicit multiplication (int32 --> accurate)
     data = jax.lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // devices_per_process
 
     # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
-    # process_count, steps, src_tgt, batch, sequence
-    # --index--> process_count, steps, batch, sequence
+    # process_count, steps * batch, sequence
     # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
     # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
-    src = data[:, :, 0].reshape(batch, -1, sequence).transpose(1, 0, 2)
-    tgt = data[:, :, 1].reshape(batch, -1, sequence).transpose(1, 0, 2)
-    wctx.data = jnp.stack([src, tgt], 1)
+    data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
+    wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
 
-    return loop(train_step, while_ctx_dict, jax.process_count() * training.device_steps, training.device_unroll)
+    return loop(train_step, while_ctx_dict, steps, training.device_unroll)
 
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):

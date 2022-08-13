@@ -5,7 +5,6 @@ import jax
 import numpy as np
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
-from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
 from .context import Context
 
@@ -46,14 +45,11 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
 def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
     rstate = np.random.RandomState(0)
     while True:
-        source = rstate.uniform(0, 1, (ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
-        source = source.reshape((ctx.training.device_steps, ctx.dims.batch, ctx.dims.sequence))
-        target = np.cumsum(source, -1)
-        target = np.sin(target)
-        source = (source * ctx.dims.vocab).astype(np.int32) % ctx.dims.vocab
-        target = ((target + 1) * ctx.dims.vocab / 2).astype(np.int32) % ctx.dims.vocab
-        out = np.stack([source, target], 1)
-        yield out
+        start = rstate.uniform(1, 2**30, (ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
+        multiplier = rstate.normal(size=(ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
+        out = np.arange(0, ctx.dims.sequence + 1).astype(np.int64).reshape(1, -1)
+        out += start
+        yield (np.sin(out) * multiplier * ctx.dims.vocab) % ctx.dims.vocab
 
 
 def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
@@ -78,17 +74,12 @@ def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
 
     def _slice_target(x):
         """
-        We're transposing here to ensure that the sampled data is balanced not only between batches but also within
-        the batch.
-        With 2 data loaders and a batch of 4, you'd have [[1, 1, 1, 1], [2, 2, 2, 2]] as returned sample without it and
-        [[1, 2, 1, 2], [1, 2, 1, 2]] with it.
-        :param x: tensor that's sliced
-        :return: src/tgt Shape[Steps, Src/Tgt, Batch, Sequence]
+        :param x: tensor
+        :return: Shape[Steps * Batch, Sequence + 1]
         """
-        x = tf.reshape(x, (batch_size, device_steps, sequence_length_1))
+        x = tf.reshape(x, (device_steps * batch_size, sequence_length_1))
         x = tf.cast(x, tf.int32)
-        x = tf.transpose(x, (1, 0, 2))
-        return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
+        return x
 
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, rng.randint(0, 2 ** 32),
                                              sequence_length_1, full_batch // ctx.data.datasets_used_per_step),
