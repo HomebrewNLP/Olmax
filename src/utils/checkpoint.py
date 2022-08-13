@@ -18,7 +18,8 @@ from smart_open import open
 from src.backend import is_main
 from src.context import Context
 
-pieces = 16  # how many files to split each shard across
+WEIGHT_PIECES = 16  # how many files to split each shard across
+UPLOAD_RETRIES = 8
 
 
 @functools.partial(jax.jit, backend="cpu")
@@ -30,7 +31,7 @@ def index_weights(weights, idx):
 def write(x, ckpt_dir):
     idx, i = x
     file_path = ckpt_dir + f"{idx}.npz"
-    for _ in range(8):
+    for _ in range(UPLOAD_RETRIES):
         try:
             with open(file_path, "wb") as f:
                 np.savez(f, *i)
@@ -52,7 +53,7 @@ def write_ckpt(ctx: Context):
 
     if is_main():
         success = False
-        for _ in range(8):
+        for _ in range(UPLOAD_RETRIES):
             try:
                 with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
                     f.write(structure)
@@ -69,17 +70,18 @@ def write_ckpt(ctx: Context):
         shard = device.id
         cpu_flattened = index_weights(flattened, shard)
 
-        k, m = divmod(len(cpu_flattened), pieces)
-        cpu_flattened_chunked = (cpu_flattened[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(pieces))
+        k, m = divmod(len(cpu_flattened), WEIGHT_PIECES)
+        cpu_flattened_chunked = (cpu_flattened[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in
+                                 range(WEIGHT_PIECES))
 
-        with multiprocessing.pool.ThreadPool(pieces) as p:
+        with multiprocessing.pool.ThreadPool(WEIGHT_PIECES) as p:
             write_fn = functools.partial(write, ckpt_dir=f"{ctx.training.checkpoint_path}/{shard}_")
             list((p.imap_unordered(write_fn, enumerate(cpu_flattened_chunked))))
 
 
 def read_shard(ckpt_dir):
     out = []
-    for idx in range(pieces):
+    for idx in range(WEIGHT_PIECES):
         file_path = ckpt_dir + f"{idx}.npz"
         with open(file_path, "rb") as f:
             buf = f.read()

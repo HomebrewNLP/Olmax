@@ -38,21 +38,22 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     training = wctx.ctx.training
     steps, src_tgt, batch, sequence = wctx.data.shape
 
+    # "all-to-all" / "all-concat" with jax.process_count() outputs instead of jax.device_count() outputs
     # init sparse tensor with 0s everywhere except for local input slice
     devices_per_process = jax.device_count() // jax.process_count()
-    proc_id = device_id(wctx.ctx) // devices_per_process
     data = jnp.zeros((jax.process_count(), steps, src_tgt, batch, sequence), wctx.data.dtype)
-    data = data.at[proc_id, :, :, :, :].set(wctx.data)
+    data = data.at[jax.process_index(), :, :, :, :].set(wctx.data)
+    # same value was seen `devices_per_process` times, so divide to remove implicit multiplication (int32 --> accurate)
+    data = jax.lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // devices_per_process
 
     # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
-    # process_count, steps, src_tgt, batch, sequence -> process_count, steps, batch, src_tgt, sequence
-    data = data.transpose(0, 1, 3, 2, 4)
-    data = data.reshape(batch, -1, src_tgt, sequence)
-    data = data.transpose(1, 2, 0, 3)
-
-    # each process has 8 devices -> divide by 8 without hardcoding that number
-    # division because all devices got the same data, so the sum sees it 8 times. as it's still int, it's accurate
-    wctx.data = jax.lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // devices_per_process
+    # process_count, steps, src_tgt, batch, sequence
+    # --index--> process_count, steps, batch, sequence
+    # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
+    # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
+    src = data[:, :, 0].reshape(batch, -1, sequence).transpose(1, 0, 2)
+    tgt = data[:, :, 1].reshape(batch, -1, sequence).transpose(1, 0, 2)
+    wctx.data = jnp.stack([src, tgt], 2)
 
     return loop(train_step, while_ctx_dict, jax.process_count() * training.device_steps, training.device_unroll)
 
