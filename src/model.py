@@ -286,14 +286,14 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
                src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
-        params, x00, x01, x10, x11 = src
+        params, x00, x01, x10, x11, step = src
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
         out = fn(new_ctx, x10)
         ctx.parameters = new_ctx.parameters
         ctx.name_cache = new_ctx.name_cache
         ctx.prng_key = new_ctx.prng_key
-        return new_ctx.parameters, x10, x11, out, x01
+        return new_ctx.parameters, x10, x11, out, x01, step
 
     name_cache = copy.deepcopy(ctx.name_cache)
 
