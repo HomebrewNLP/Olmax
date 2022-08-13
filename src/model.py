@@ -11,7 +11,7 @@ from src.constants import ParallelAxes
 from src.context import Context
 from src.optimizer import update
 compilation_cache.initialize_cache("compilation_cache")
-REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
 
 def activate_forward(inp: jnp.ndarray) -> jnp.ndarray:
@@ -284,7 +284,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
-               src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+               src: REVERSIBLE_CTX, current_step: jnp.ndarray) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
@@ -307,9 +307,9 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
     @jax.custom_gradient
     def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, back_x0: jnp.ndarray, x1: jnp.ndarray,
-            back_x1: jnp.ndarray, step: jnp.ndarray):
+            back_x1: jnp.ndarray):
         def _grad(dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
-            d_params_old, dy0, y0, dy1, y1, back_step = dy
+            d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0)
             d_params, _ = grad_fn(dy1)
 
@@ -317,16 +317,16 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
             original_params = ctx.parameters
             ctx.parameters = params
-            update(ctx, d_params, back_step)
+            update(ctx, d_params, current_step)
             inner_params = ctx.parameters
             ctx.parameters = original_params
             _, grad_fn = jax.vjp(base, inner_params, y0)
             _, dx0 = grad_fn(dy1)
 
-            return d_params, dy1, y1 - x0, dx0 + dy0, y0, jnp.zeros([])
+            return d_params, dy1, y1 - x0, dx0 + dy0, y0
 
         out = base(params, x1) + x0
-        return (params, x1, x1, out, out, step), _grad
+        return (params, x1, x1, out, out), _grad
 
     return _fn(*src)
 
@@ -394,9 +394,9 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
 def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
     @jax.custom_gradient
-    def _fn(x0: jnp.ndarray, x0_back: jnp.ndarray, x1: jnp.ndarray, x1_back: jnp.ndarray, step: jnp.ndarray):
-        def _grad(dy) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            return dy, x0, dy, x1, step
+    def _fn(x0: jnp.ndarray, x0_back: jnp.ndarray, x1: jnp.ndarray, x1_back: jnp.ndarray):
+        def _grad(dy) -> typing.Tuple[jnp.ndarray, jnp.ndarray, None, jnp.ndarray]:
+            return dy, x0, dy, x1
 
         return x0 + x1, _grad
 
@@ -407,14 +407,14 @@ def body_ctx(ctx: Context, src: jnp.ndarray, current_step: jnp.ndarray
              ) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
-    src = (ctx.parameters, src, zero, src, zero, current_step)
+    src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.depth):
-        src = reversible(ctx, pointwise_block, src)
-        src = reversible(ctx, bottleneck_block, src)
-        src = reversible(ctx, pointwise_block, src)
+        src = reversible(ctx, pointwise_block, src, current_step)
+        src = reversible(ctx, bottleneck_block, src, current_step)
+        src = reversible(ctx, pointwise_block, src, current_step)
         # src = reversible(ctx, moe, src)
         if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-            src = reversible(ctx, qrnn_block, src)
+            src = reversible(ctx, qrnn_block, src, current_step)
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
