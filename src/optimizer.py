@@ -3,6 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
+from src.constants import ParallelAxes
 from .backend import assign, get_param, prefixed_name, stable_rsqrt, zero_param
 from .context import Context
 from .shampoo import Preconditioner, fallback_pth_root

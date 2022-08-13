@@ -31,7 +31,7 @@ def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
 def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhilePredictContext(while_ctx_dict)
 
-    out, wgt = body_ctx(wctx.ctx, wctx.data, jnp.zeros([]))
+    out, wgt = body_ctx(wctx.ctx, wctx.data)
     out = (out * one_hot(wctx.current_step - 1, wctx.ctx.dims.sequence).reshape(1, -1, 1)).sum(1, keepdims=True)
     out = matmul(out, wgt).reshape(out.shape[0], 1, -1)
     out = promote_to(out, jnp.float32)

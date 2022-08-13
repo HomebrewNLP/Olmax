@@ -25,7 +25,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % (wctx.ctx.training.device_steps * jax.process_count())]
-    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice, wctx.current_step)
+    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
     wctx.top_loss += accuracy
@@ -62,7 +62,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         initial_prng_key = ctx.prng_key
         ctx.seed += device_id(ctx)
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
-        body_ctx(ctx, x, jnp.zeros([]))
+        body_ctx(ctx, x)
         params = ctx.parameters
         var = ctx.parameter_variance
         ctx.parameters = {}
