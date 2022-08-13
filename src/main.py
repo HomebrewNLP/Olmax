@@ -122,7 +122,7 @@ def run_one(wblog: WandbLog):
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
-    inp = timeit("Enqueueing first batch", next, data)[0, 0]
+    inp = timeit("Enqueueing first batch", next, data)[:wctx.ctx.dims.batch]
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items())
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
