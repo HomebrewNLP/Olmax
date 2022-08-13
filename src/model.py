@@ -313,6 +313,8 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
             x0, grad_fn = jax.vjp(base, params, y0)
             d_params, _ = grad_fn(dy1)
 
+            d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
+
             original_params = ctx.parameters
             ctx.parameters = params
             update(ctx, {name: grad for name, grad in d_params.items() if '0' not in str(grad.dtype)}, back_step)
@@ -320,8 +322,6 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
             ctx.parameters = original_params
             _, grad_fn = jax.vjp(base, inner_params, y0)
             _, dx0 = grad_fn(dy1)
-
-            d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
 
             return d_params, dy1, y1 - x0, dx0 + dy0, y0, jnp.zeros([])
 
@@ -407,7 +407,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray, current_step: jnp.ndarray
              ) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
-    src = (ctx.parameters, src, zero, src, zero, current_step.astype(jnp.float32))
+    src = (ctx.parameters, src, zero, src, zero, current_step)
     for i in range(ctx.dims.depth):
         src = reversible(ctx, pointwise_block, src)
         src = reversible(ctx, bottleneck_block, src)
