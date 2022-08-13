@@ -53,7 +53,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
     src = data[:, :, 0].reshape(batch, -1, sequence).transpose(1, 0, 2)
     tgt = data[:, :, 1].reshape(batch, -1, sequence).transpose(1, 0, 2)
-    wctx.data = jnp.stack([src, tgt], 2)
+    wctx.data = jnp.stack([src, tgt], 1)
 
     return loop(train_step, while_ctx_dict, jax.process_count() * training.device_steps, training.device_unroll)
 
