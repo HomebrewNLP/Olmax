@@ -57,7 +57,7 @@ def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
 
 def zero_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
     while True:
-        yield np.zeros((ctx.training.device_steps, 2, ctx.dims.batch, ctx.dims.sequence))
+        yield np.zeros((ctx.training.device_steps, 2, ctx.dims.batch, ctx.dims.sequence), dtype=np.int32)
 
 
 def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
