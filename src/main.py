@@ -25,6 +25,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     wctx = WhileTrainContext(while_ctx_dict)
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % (wctx.ctx.training.device_steps * jax.process_count())]
+    print("slice", data_slice.shape)
     (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss
@@ -53,6 +54,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
     data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
     wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
+    print("data", wctx.data.shape)
 
     return loop(train_step, while_ctx_dict, steps, training.device_unroll)
 
