@@ -9,7 +9,7 @@ from jax.experimental.compilation_cache import compilation_cache
 from src.backend import conv as lax_conv, device_id, get_param, matmul, stable_rsqrt
 from src.constants import ParallelAxes
 from src.context import Context
-
+from src.optimizer import update
 compilation_cache.initialize_cache("compilation_cache")
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
@@ -144,7 +144,7 @@ def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
 def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return src
-    
+
     @jax.custom_gradient
     def _fn(fgt: jnp.ndarray, inp: jnp.ndarray):
         dtype = inp.dtype
@@ -284,7 +284,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
-               src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+               src: REVERSIBLE_CTX, current_step: jnp.ndarray) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         params, x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
@@ -311,8 +311,18 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
         def _grad(dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0)
-            d_params, dx0 = grad_fn(dy1)
+            d_params, _ = grad_fn(dy1)
+
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
+
+            original_params = ctx.parameters
+            ctx.parameters = params
+            update(ctx, d_params, current_step)
+            inner_params = ctx.parameters
+            ctx.parameters = original_params
+            _, grad_fn = jax.vjp(base, inner_params, y0)
+            _, dx0 = grad_fn(dy1)
+
             return d_params, dy1, y1 - x0, dx0 + dy0, y0
 
         out = base(params, x1) + x0
@@ -393,17 +403,18 @@ def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndar
     return _fn(*src)
 
 
-def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+def body_ctx(ctx: Context, src: jnp.ndarray, current_step: jnp.ndarray
+             ) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.depth):
-        src = reversible(ctx, pointwise_block, src)
-        src = reversible(ctx, bottleneck_block, src)
-        src = reversible(ctx, pointwise_block, src)
+        src = reversible(ctx, pointwise_block, src, current_step)
+        src = reversible(ctx, bottleneck_block, src, current_step)
+        src = reversible(ctx, pointwise_block, src, current_step)
         # src = reversible(ctx, moe, src)
         if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-            src = reversible(ctx, qrnn_block, src)
+            src = reversible(ctx, qrnn_block, src, current_step)
     ctx.parameters = src[0]
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
@@ -422,11 +433,11 @@ def psum_grad(inp, axis):
     return _fn(inp)
 
 
-def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray, current_step: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
-    out = body_ctx(ctx, src)
+    out = body_ctx(ctx, src, current_step)
     if ctx.is_initializing:
         return out
     return cross_entropy_loss(ctx, out, tgt)
