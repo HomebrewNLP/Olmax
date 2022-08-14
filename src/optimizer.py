@@ -149,7 +149,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         if small_parameter(param_name, grad):  # Do adam update for small parameters
             update = adam(inner_ctx, grad, step)
         else:
-            update = sm3(ctx, param_name, grad)
+            update = sm3(inner_ctx, param_name, grad)
             if ctx.optimizer.use_shampoo:
                 shampoo_update = shampoo(inner_ctx, grad, step)
                 update = graft(update, shampoo_update)
