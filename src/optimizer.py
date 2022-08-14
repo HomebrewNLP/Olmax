@@ -126,6 +126,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = grad.astype(jnp.float64)
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
+        grad = graft(grad, jnp.sign(grad) * grad ** 2)
         if small_parameter(param_name, grad):  # Do adam update for small parameters
             update = adam(inner_ctx, grad, step)
         else:
