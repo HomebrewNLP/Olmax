@@ -145,7 +145,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = grad.astype(jnp.float64)
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
-        grad = graft(grad, jnp.sign(grad) * grad ** 2)
         update = madgrad(inner_ctx, grad, step)
         if not small_parameter(param_name, grad):
             if ctx.optimizer.use_shampoo:
