@@ -112,6 +112,7 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
+    graft_to_adam: bool = False
     use_shampoo: bool = True
     block_size: int = 512
     epsilon: float = 1e-16
