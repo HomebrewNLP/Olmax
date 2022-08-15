@@ -127,10 +127,12 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
         grad = graft(grad, jnp.sign(grad) * grad ** 2)
-        if small_parameter(param_name, grad):  # Do adam update for small parameters
+
+        if small_parameter(param_name, grad) or ctx.optimizer.graft_to_adam:  # Do adam update for small parameters
             update = adam(inner_ctx, grad, step)
         else:
             update = sm3(inner_ctx, param_name, grad)
+        if not small_parameter(param_name, grad):
             if ctx.optimizer.use_shampoo:
                 shampoo_update = shampoo(inner_ctx, grad, step)
                 update = graft(update, shampoo_update)
