@@ -48,8 +48,7 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
     new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
     if heavyball:
-        heavyball_debias = 1 / (1 - beta) * (1 - beta ** step)  # == (beta ** jnp.arange(step)).sum()
-        return new_state / heavyball_debias
+        return new_state
 
     return new_state * (1 - beta ** (step + 1))  # debias
 
