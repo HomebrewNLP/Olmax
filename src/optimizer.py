@@ -39,7 +39,7 @@ def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
 
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: str,
         quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None,
-        heavyball: bool = False) -> jnp.ndarray:
+        heavyball: bool = False, nesterov: bool = True) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
     if quantize is None:
         quantize = not small_parameter(ctx.global_prefix, inp)
@@ -47,10 +47,11 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
                       init_val=jnp.zeros_like(inp) if init_val is None else init_val)
     new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
-    if heavyball:
-        return new_state
-
-    return new_state * (1 - beta ** (step + 1))  # debias
+    if not heavyball:  # non-heavyball momentum needs to be debiased
+        new_state = new_state * (1 - beta ** (step + 1))
+    if nesterov:
+        return new_state * beta + inp
+    return new_state
 
 
 def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
