@@ -65,25 +65,6 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg", heavyball=True) * square_ema(ctx, grad, step)
 
 
-def madgrad(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("madgrad", count=False)
-    step_size = jnp.sqrt(step + 1)
-    grad_sum = zero_param(ctx, "grad_sum", grad.shape, ctx.model.storage_dtype)
-    grad_sum_sq = zero_param(ctx, "grad_sum_sq", grad.shape, ctx.model.storage_dtype)
-
-    rms = jnp.reciprocal(jnp.maximum(jnp.cbrt(grad_sum_sq), ctx.optimizer.epsilon))
-    prev_update = grad_sum * rms
-
-    grad_sum = grad_sum + grad * step_size
-    grad_sum_sq = grad_sum_sq + jnp.square(grad) * step_size
-    assign(ctx, "grad_sum", grad_sum)
-    assign(ctx, "grad_sum_sq", grad_sum_sq)
-
-    rms = jnp.reciprocal(jnp.maximum(jnp.cbrt(grad_sum_sq), ctx.optimizer.epsilon))
-    new_update = grad_sum * rms
-    return new_update - prev_update
-
-
 def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("shampoo", count=False)
 
