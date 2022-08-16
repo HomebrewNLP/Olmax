@@ -112,6 +112,8 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
+    nesterov: bool = True
+    heavyball: bool = True
     graft_to_adam: bool = False
     use_shampoo: bool = True
     block_size: int = 512
