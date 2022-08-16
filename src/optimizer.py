@@ -39,7 +39,7 @@ def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
 
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: str,
         quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None,
-        heavyball: bool = False, nesterov: bool = True) -> jnp.ndarray:
+        heavyball: bool = False, nesterov: bool = False) -> jnp.ndarray:
     ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
     if quantize is None:
         quantize = not small_parameter(ctx.global_prefix, inp)
