@@ -103,6 +103,7 @@ class TensorboardTrace(DataClass):
 
 class WandB(DataClass):
     name: typing.Optional[str] = None
+    id: typing.Optional[str] = None
     use_wandb: bool = True
     project: str = 'gpt'
     entity: str = 'homebrewnlp'

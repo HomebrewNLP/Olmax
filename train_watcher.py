@@ -1,12 +1,15 @@
 import argparse
 import dataclasses
+import string
 import typing
 from netrc import netrc
 
+import shortuuid
 import tpucare
-import wandb
 import yaml
 from tpucare import delete_one_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single
+
+import wandb
 
 tpucare.LOG_LEVEL = 0
 _, _, wandb_key = netrc().authenticators("api.wandb.ai")
@@ -45,7 +48,7 @@ def parse_args():
     parser.add_argument("--branch", type=str, default="main", help="Branch on github to use")
     parser.add_argument("--slices", default=1, type=int,
                         help="How many TPU slices each TPU should have (1=>vX-8, 4=>vX-32)")
-    parser.add_argument("--run-prefix", type=str, help="Prefix to use for all runs on WandB")
+    parser.add_argument("--storage-prefix", type=str, help="Storage prefix to use for all runs on WandB")
     parser.add_argument("--config-path", type=str, help="Path to config.yaml")
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
@@ -60,42 +63,33 @@ def main():
     if args.cleanup:
         return delete_one_tpu("", args.host, args.zone)
 
-    idx = 0
-
+    run_id = str(shortuuid.ShortUUID(alphabet=list(string.digits + string.ascii_lowercase)).random(32))
     with open(args.config_path, 'r') as f:
         txt = f.read()
     config = yaml.safe_load(txt)
     config["training"]["do_checkpoint"] = True
     config["data"]["path"] = args.data_path
     config["dims"]["heads"] = 8 * args.slices
-    base_checkpoint_path = f'{config["training"]["checkpoint_path"]}-{args.run_prefix}'
+    config["wandb"]["id"] = run_id
+    config["wandb"]["name"] = args.host
+
+    checkpoint_path = f'{config["training"]["checkpoint_path"]}-{args.storage_prefix}'
     wandb_api = wandb.Api()
 
     def creation_callback(host: str, ctx: typing.Optional[Context]) -> Context:
-        nonlocal idx
-        idx += 1
-        config["wandb"]["name"] = f"{args.host}-{idx}"
-        config["training"]["checkpoint_path"] = f"{base_checkpoint_path}-{idx}"
+        config["training"]["checkpoint_path"] = checkpoint_path
 
-        if ctx is None:
+        if ctx is None:  # first call
             return Context(zone=args.zone, host=host, config=config, branch=args.branch)
 
-        start_step = 0
-        while idx > 0 and start_step == 0:  # check if _any_ run made it
-            for ridx, run in enumerate(wandb_api.runs(f"{config['wandb']['entity']}/{config['wandb']['project']}")):
-                if run.name == f"{args.host}-{idx}" and "_step" in run.summary:
-                    start_step = run.summary["_step"]
-                    break
-                if ridx > args.run_threshold:
-                    idx -= 1
-                    break
+        try:
+            run = wandb_api.run(f'{config["wandb"]["entity"]}/{config["wandb"]["project"]}/{config["wandb"]["id"]}')
+            start_step = int(run.summary["_step"])
+        except:
+            start_step = 0
         start_step -= start_step % config["training"]["checkpoint_interval"]
-        if idx > 0 or start_step > 0:
-            config["training"]["checkpoint_load_path"] = f"{base_checkpoint_path}-{idx - 1}"
-        else:
-            config["training"]["checkpoint_load_path"] = ""
+        config["training"]["checkpoint_load_path"] = checkpoint_path if start_step > 0 else ""
         config["training"]["start_step"] = start_step
-
         return Context(zone=args.zone, host=host, config=config, branch=args.branch)
 
     start_single(args.host, args.tpu_version, args.zone, args.preemptible, args.service_account, args.slices, start_fn,

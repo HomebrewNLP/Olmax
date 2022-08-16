@@ -197,7 +197,8 @@ def main():
     wctx = WhileTrainContext()
     ctx = wctx.ctx
 
-    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
+    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name,
+                     id=ctx.wandb.id)
 
     cfg = {}
     for param_name, param in run.config.items():
