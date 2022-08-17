@@ -51,10 +51,9 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
     # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
     data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
-    data = data[:1]
     wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
 
-    return loop(train_step, wctx.serialize(), 1, training.device_unroll)
+    return loop(train_step, wctx.serialize(), steps, training.device_unroll)
 
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):
