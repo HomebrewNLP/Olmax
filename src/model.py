@@ -424,4 +424,6 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = lax.psum(matmul(out[0], out[1]), ParallelAxes.model)
     out = out.reshape(-1, ctx.dims.vocab)
     tgt = tgt.reshape(-1, 1)
-    return jax.nn.logsumexp(out, -1).mean() - jnp.take_along_axis(out, tgt, -1).mean()
+    loss = jax.nn.logsumexp(out, -1).mean() - jnp.take_along_axis(out, tgt, -1).mean()
+    acc = (out.argmax(-1) == tgt).sum() / tgt.size
+    return loss, acc
