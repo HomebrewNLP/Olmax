@@ -426,4 +426,4 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     tgt = tgt.reshape(-1, 1)
     loss = jax.nn.logsumexp(out, -1).mean() - jnp.take_along_axis(out, tgt, -1).mean()
     acc = (out.argmax(-1) == tgt).sum() / tgt.size
-    return loss.astype(jnp.float64), acc.astype(jnp.float64)
+    return loss.astype(jnp.float32), acc.astype(jnp.float32)
