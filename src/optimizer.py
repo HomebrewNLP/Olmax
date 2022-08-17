@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import assign, get_param, prefixed_name, stable_rsqrt, zero_param
+from .backend import assign, get_param, prefixed_name, stable_rsqrt, with_context, zero_param
 from .context import Context
 from .shampoo import Preconditioner, fallback_pth_root
 
@@ -14,8 +14,8 @@ def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
     return base
 
 
+@with_context(count=False)
 def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("sm3", count=False)
     weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, grad.shape[0], 0), ctx.model.storage_dtype)
     buffer = [weight_update]
 
@@ -36,10 +36,9 @@ def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
     return "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2
 
 
-def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: str,
-        quantize: typing.Optional[bool] = None, init_val: typing.Optional[jnp.ndarray] = None,
-        heavyball: bool = None, nesterov: bool = None) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix(f"{prefix}_ema", count=False)
+@with_context(count=False)
+def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize: typing.Optional[bool] = None,
+        init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None) -> jnp.ndarray:
     if quantize is None:
         quantize = not small_parameter(ctx.global_prefix, inp)
     if heavyball is None:
@@ -57,25 +56,24 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, prefix: 
     return new_state
 
 
+@with_context(count=False)
 def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
-    ctx = ctx.add_to_prefix("square_ema", count=False)
-    buffer = ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2, "square_ema")
+    buffer = ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2)
     return stable_rsqrt(buffer, ctx.optimizer.epsilon)
 
 
+@with_context(count=False)
 def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("adam", count=False)
-    return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1, "avg") * square_ema(ctx, grad, step)
+    return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1) * square_ema(ctx, grad, step)
 
 
+@with_context(count=False)
 def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("shampoo", count=False)
-
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
         eye = jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype)
-        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, f"statistics_{i}", True,
+        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True,
                        init_val=eye * ctx.optimizer.epsilon, nesterov=False, heavyball=False)
         prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye)
         if ctx.is_initializing:
@@ -138,7 +136,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             if ctx.optimizer.use_shampoo:
                 shampoo_update = shampoo(ctx, grad, step)
                 update = graft(update, shampoo_update)
-            update = ema(ctx, update, step, 1 - ctx.optimizer.momentum_beta, "momentum")
+            update = ema(ctx, update, step, 1 - ctx.optimizer.momentum_beta)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         update = update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]

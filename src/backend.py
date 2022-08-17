@@ -10,6 +10,24 @@ from .context import Context
 
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 
+OUTPUT = typing.TypeVar("OUTPUT")
+CTX_FN = typing.Callable[[Context, ...], OUTPUT]
+
+
+def with_context(count: typing.Optional[bool] = None) -> CTX_FN:
+    def _inner(fn: CTX_FN) -> CTX_FN:
+        prefix_kwargs = {"appended": fn.__name__}
+        if count is not None:
+            prefix_kwargs["count"] = count
+
+        def _fn(ctx: Context, *args, **kwargs):
+            ctx.add_to_prefix(**prefix_kwargs)
+            return fn(ctx, *args, **kwargs)
+
+        return _fn
+
+    return _inner
+
 
 def is_main():
     return jax.process_index() == 0

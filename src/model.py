@@ -6,7 +6,7 @@ import jax
 from jax import lax, numpy as jnp
 from jax.experimental.compilation_cache import compilation_cache
 
-from src.backend import conv as lax_conv, device_id, get_param, matmul, stable_rsqrt
+from src.backend import conv as lax_conv, device_id, get_param, matmul, stable_rsqrt, with_context
 from src.constants import ParallelAxes
 from src.context import Context
 
@@ -37,9 +37,9 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
+@with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
                    psum: bool = False, act: bool = True, init_mean: typing.Optional[float] = 1) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("normalization")
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         if init_mean is None:
@@ -87,8 +87,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     return _fn(inp, weight)
 
 
+@with_context()
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
-    ctx = ctx.add_to_prefix("conv")
     fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
     fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
     fan_in = fan_in / fan_in.sum()
@@ -111,8 +111,8 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
 
 
 @prenorm
+@with_context()
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("bottleneck")
     inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale / ctx.dims.heads,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
@@ -124,8 +124,8 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 @prenorm
+@with_context()
 def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("pointwise")
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.pointwise_scale, ctx.dims.features,
                ctx.dims.pointwise_features)
     inp = activate(ctx, inp)
@@ -170,10 +170,10 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
 
 
 @prenorm
+@with_context()
 def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     # 500ms at 256 features (forward pass, backward takes slightly longer)
     # While conv 256->256 with kernel_size=5 takes ~11.3ms
-    ctx = ctx.add_to_prefix("qrnn")
     mid = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.qrnn_scale, ctx.dims.features,
                ctx.dims.inner_bottleneck_features * 2)
     mid, forget = jnp.split(mid, 2, -1)
@@ -256,8 +256,8 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
 
 
 @prenorm
+@with_context()
 def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("moe")
     inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features, ctx.dims.moe_intermediate],
                         scale=1 / ctx.model.activation_std, lr_scale=ctx.optimizer.moe_scale)
     out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features],
@@ -271,9 +271,8 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.zeros_like(inp).reshape(-1, inp.shape[-1]).at[indices].set(out).reshape(inp.shape)
 
 
+@with_context()
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    ctx = ctx.add_to_prefix("input_embed")
-
     param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features,
                       lr_scale=ctx.optimizer.input_scale)
 
@@ -425,5 +424,5 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = out.reshape(-1, ctx.dims.vocab)
     tgt = tgt.reshape(-1, 1)
     loss = jax.nn.logsumexp(out, -1).mean() - jnp.take_along_axis(out, tgt, -1).mean()
-    acc = (out.argmax(-1) == tgt).sum() / tgt.size
+    acc = (out.argmax(-1) == tgt.reshape(-1)).sum() / tgt.size
     return loss.astype(jnp.float32), acc.astype(jnp.float32)
