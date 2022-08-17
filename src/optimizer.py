@@ -14,13 +14,12 @@ def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
     return base
 
 
-def sm3(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
+def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
     ctx = ctx.add_to_prefix("sm3", count=False)
-    dims = ctx.parameters[param_name].shape if param_name in ctx.parameters else ["one"] * grad.ndim
-    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, dims[0], 0), ctx.model.storage_dtype)
+    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, grad.shape[0], 0), ctx.model.storage_dtype)
     buffer = [weight_update]
 
-    for i, d in enumerate(dims[1:], 1):
+    for i, d in enumerate(grad.shape[1:], 1):
         buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i), ctx.model.storage_dtype))
         weight_update = jnp.minimum(weight_update, buffer[-1])
 
@@ -119,27 +118,27 @@ def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
 
 
 def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray):
-    ctx = ctx.add_to_prefix("optimizer")
+    outer_ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, step)
 
     for param_name, grad in grads.items():
         if "optimizer" in param_name:
             continue
-        inner_ctx = ctx.add_to_prefix(param_name, count=False)
+        ctx = outer_ctx.add_to_prefix(param_name, count=False)
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(jnp.float64)
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
         if small_parameter(param_name, grad) or ctx.optimizer.graft_to_adam:  # Do adam update for small parameters
-            update = adam(inner_ctx, grad, step)
+            update = adam(ctx, grad, step)
         else:
-            update = sm3(inner_ctx, param_name, grad)
+            update = sm3(ctx, grad)
         if not small_parameter(param_name, grad):
             if ctx.optimizer.use_shampoo:
-                shampoo_update = shampoo(inner_ctx, grad, step)
+                shampoo_update = shampoo(ctx, grad, step)
                 update = graft(update, shampoo_update)
-            update = ema(inner_ctx, update, step, 1 - ctx.optimizer.momentum_beta, "momentum")
+            update = ema(ctx, update, step, 1 - ctx.optimizer.momentum_beta, "momentum")
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         update = update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
