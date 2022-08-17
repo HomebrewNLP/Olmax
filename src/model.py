@@ -330,8 +330,9 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     devices = ctx.dims.heads
 
     def _xent_slice(inp: typing.Tuple[
-        jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray], carry):
-        inp, i, wgt, inner_tgt, index, d_wgt, loss, accuracy = inp
+        jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray], carry):
+        inp, i, wgt, inner_tgt, d_wgt, loss, accuracy = inp
+        index = device_id(ctx)
         inp_slice = inp[i]
         tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.vocab)
         tmp = promote_to(tmp, jnp.float32)
@@ -353,16 +354,15 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
         d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.vocab, -1)
         d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
-        return (inp, i + 1, wgt, inner_tgt, index, d_wgt, loss, accuracy), d_x
+        return (inp, i + 1, wgt, inner_tgt, d_wgt, loss, accuracy), d_x
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
         original_shape = inp.shape
         inp = inp.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1, ctx.dims.features)
         inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1)
-        index = device_id(ctx)
-        (_, _, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (
-                inp, jnp.zeros((), dtype=jnp.int32), wgt, inner_tgt, index,
+        (_, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (
+                inp, jnp.zeros((), dtype=jnp.int32), wgt, inner_tgt,
                 jnp.zeros(wgt.shape[::-1], dtype=jnp.float32), jnp.zeros((), dtype=jnp.float32),
                 jnp.zeros((), dtype=jnp.float32)), None, inp.shape[0])
         dx = dx.transpose(1, 0, 2) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
@@ -412,14 +412,6 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     if ctx.is_initializing:
         return out
     return out, wgt
-
-
-def psum_grad(inp, axis):
-    @jax.custom_gradient
-    def _fn(x):
-        return lax.psum(x, axis), lambda y: lax.psum(y, axis)
-
-    return _fn(inp)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
