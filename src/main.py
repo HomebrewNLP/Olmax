@@ -130,7 +130,7 @@ def run_one(wblog: WandbLog):
         read_ckpt(wctx.ctx)
 
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()},
-                 'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': None,
+                 'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': 0,
                  'current_step': None, 'loss': None, 'top_loss': None
                  }
 
