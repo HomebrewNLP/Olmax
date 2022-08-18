@@ -11,7 +11,7 @@ from .context import Context
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 
 OUTPUT = typing.TypeVar("OUTPUT")
-CTX_FN = typing.Callable[[Context, ...], OUTPUT]
+CTX_FN = typing.TypeVar("CTX_FN")
 
 
 def with_context(count: typing.Optional[bool] = None) -> CTX_FN:
