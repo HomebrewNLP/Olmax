@@ -20,6 +20,8 @@ from src.optimizer import get_current_lr, update
 from src.utils.checkpoint import read_ckpt, write_ckpt
 from src.utils.wandblog import WandbLog
 
+jax.distributed.initialize()
+
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
@@ -117,6 +119,7 @@ def run_one(wblog: WandbLog):
     device_steps = wctx.ctx.training.device_steps
     total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
+    data = (jax.device_put_replicated(d, jax.local_devices()) for d in data)
     inp = timeit("Enqueueing first batch", next, data)[:wctx.ctx.dims.batch]
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items())
