@@ -54,6 +54,8 @@ def parse_args():
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
     parser.add_argument("--run-threshold", default=100, type=int,
                         help="How many of the last runs to scan - at most.")
+    parser.add_argument("--merge-runs", default=1, type=int,
+                        help="Whether to merge all WandB runs into one logstream or keep one for each host.")
     args = parser.parse_args()
     return args
 
@@ -63,15 +65,15 @@ def main():
     if args.cleanup:
         return delete_one_tpu("", args.host, args.zone)
 
-    run_id = str(shortuuid.ShortUUID(alphabet=list(string.digits + string.ascii_lowercase)).random(32))
     with open(args.config_path, 'r') as f:
         txt = f.read()
     config = yaml.safe_load(txt)
     config["training"]["do_checkpoint"] = True
     config["data"]["path"] = args.data_path
     config["dims"]["heads"] = 8 * args.slices
-    config["wandb"]["id"] = run_id
     config["wandb"]["name"] = args.host
+    if args.merge_runs:
+        config["wandb"]["id"] = str(shortuuid.ShortUUID(alphabet=string.digits + string.ascii_lowercase).random(32))
 
     checkpoint_path = f'{config["training"]["checkpoint_path"]}-{args.storage_prefix}'
     wandb_api = wandb.Api()
