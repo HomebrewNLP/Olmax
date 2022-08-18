@@ -36,15 +36,10 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     training = wctx.ctx.training
-    steps = training.device_steps * jax.process_count()
+    steps = training.device_steps
     step_batch, sequence_p1 = wctx.data.shape
 
-    # "all-to-all" / "all-concat" with jax.process_count() outputs instead of jax.device_count() outputs
-    # init sparse tensor with 0s everywhere except for local input slice
-    data = jnp.zeros((jax.process_count(), step_batch, sequence_p1), wctx.data.dtype)
-    data = data.at[device_id(wctx.ctx) // jax.process_count(), :, :].set(wctx.data)
-    # same value was seen `local_device_count` times, so divide to remove implicit multiplication (int32 --> accurate)
-    data = lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // jax.local_device_count()
+    data = lax.psum(wctx.data, ParallelAxes.model).astype(wctx.data.dtype) // jax.local_device_count()
 
     # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
     # process_count, steps * batch, sequence
@@ -119,7 +114,7 @@ def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
     print(yaml.dump(wctx.ctx.config(), indent=4))
-    device_steps = wctx.ctx.training.device_steps * jax.process_count()
+    device_steps = wctx.ctx.training.device_steps
     total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
     inp = timeit("Enqueueing first batch", next, data)[:wctx.ctx.dims.batch]
@@ -214,7 +209,7 @@ def main():
     init_class(ctx, cfg)
     dump_ctx(ctx, run)
 
-    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count())
+    wblog = WandbLog(run, ctx.training.device_steps)
     return run_one(wblog)
 
 

@@ -6,6 +6,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
 
+from .backend import is_main
 from .context import Context
 
 tf1 = tf.compat.v1
@@ -45,14 +46,21 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
 def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
     rstate = np.random.RandomState(0)
     while True:
-        start = rstate.uniform(1, 2**30, (ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
+        start = rstate.uniform(1, 2 ** 30, (ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
         multiplier = rstate.normal(size=(ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
         out = np.arange(0, ctx.dims.sequence + 1).astype(np.int64).reshape(1, -1)
         out += start
         yield (np.sin(out) * multiplier * ctx.dims.vocab) % ctx.dims.vocab
 
 
+def zero_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
+    while True:
+        yield np.zeros((ctx.training.device_steps * ctx.dims.batch, ctx.dims.sequence + 1), dtype=np.int32)
+
+
 def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
+    if not is_main():
+        return zero_generator(ctx)
     if ctx.training.debug:
         return debug_generator(ctx)
 
@@ -102,7 +110,6 @@ def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
     options.experimental_optimization.noop_elimination = True
     options.experimental_optimization.parallel_batch = True
     options.experimental_optimization.shuffle_and_repeat_fusion = True
-    options.threading.max_intra_op_parallelism = 1
     options.threading.private_threadpool_size = 96
     options.experimental_slack = True
     options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
