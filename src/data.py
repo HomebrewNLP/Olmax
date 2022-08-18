@@ -6,7 +6,6 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
 
-from .backend import is_main
 from .context import Context
 
 tf1 = tf.compat.v1
@@ -53,14 +52,7 @@ def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
         yield (np.sin(out) * multiplier * ctx.dims.vocab) % ctx.dims.vocab
 
 
-def zero_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
-    while True:
-        yield np.zeros((ctx.training.device_steps * ctx.dims.batch, ctx.dims.sequence + 1), dtype=np.int32)
-
-
 def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
-    if not is_main():
-        return zero_generator(ctx)
     if ctx.training.debug:
         return debug_generator(ctx)
 
