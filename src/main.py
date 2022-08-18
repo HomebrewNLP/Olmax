@@ -117,6 +117,10 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
     return _fn
 
 
+def replicate(x: typing.Any) -> typing.Any:
+    return jax.device_put_replicated(x, jax.local_devices())
+
+
 def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
@@ -124,7 +128,7 @@ def run_one(wblog: WandbLog):
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
-    data = (jax.device_put_replicated(d, jax.local_devices()) for d in data)
+    data = map(replicate, data)
     inp = timeit("Enqueueing first batch", next, data)[:wctx.ctx.dims.batch]
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items())
@@ -135,8 +139,8 @@ def run_one(wblog: WandbLog):
         read_ckpt(wctx.ctx)
 
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()},
-                 'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': 0,
-                 'current_step': None, 'loss': None, 'top_loss': None
+                 'parameter_variance': {k: 0 for k in wctx.ctx.parameter_variance.keys()}, 'data': 0,
+                 'current_step': 0, 'loss': 0, 'top_loss': 0
                  }
 
     wctx.current_step += wctx.ctx.training.start_step
@@ -144,6 +148,11 @@ def run_one(wblog: WandbLog):
 
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
+
+    wctx.ctx.parameter_variance = replicate(wctx.ctx.parameter_variance)
+    wctx.current_step = replicate(wctx.current_step)
+    wctx.loss = replicate(wctx.loss)
+    wctx.top_loss = replicate(wctx.top_loss)
 
     timeit("Compiling model and performing first step", step, next(data))
     timeit("Running second step", step, next(data))
@@ -158,8 +167,8 @@ def run_one(wblog: WandbLog):
         if idx % wctx.ctx.training.print_interval == 0:
             tokens_processed = device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
             print(f'[{idx * device_steps:{len(str(total_steps))}d}/{total_steps}] '
-                  f'Loss: {wctx.loss / device_steps:6.3f} - '
-                  f'Accuracy: {wctx.top_loss / device_steps:8.3f} | '
+                  f'Loss: {wctx.loss[0] / device_steps:6.3f} - '
+                  f'Accuracy: {wctx.top_loss[0] / device_steps:8.3f} | '
                   f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step)):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {tokens_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
