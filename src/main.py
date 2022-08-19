@@ -46,7 +46,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     data = jnp.zeros((jax.process_count(), step_batch, sequence_p1), wctx.data.dtype)
     data = data.at[device_id(wctx.ctx) // jax.process_count(), :, :].set(wctx.data)
     # same value was seen `local_device_count` times, so divide to remove implicit multiplication (int32 --> accurate)
-    data = lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // jax.local_device_count()
+    data = lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype)
 
     # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
     # process_count, steps * batch, sequence
@@ -59,6 +59,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     out.loss = data.min().astype(jnp.float32)
     out.top_loss = data.max().astype(jnp.float32)
     return out.serialize()
+
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):
     def _fn(x: jnp.ndarray):
