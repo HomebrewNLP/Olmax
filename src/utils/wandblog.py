@@ -18,11 +18,11 @@ class WandbLog:
     def __call__(self, wctx: WhileContext, current_lr) -> bool:
         self.idx += 1
         ctx = wctx.ctx
-        curr_loss = wctx.loss / self.device_steps
+        curr_loss = wctx.loss[0] / self.device_steps
         step = self.idx * ctx.wandb.log_frequency * self.device_steps
         sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
         self.losses.append(curr_loss.astype(float))
-        self.accuracies.append((wctx.top_loss / self.device_steps).astype(float))
+        self.accuracies.append((wctx.top_loss[0] / self.device_steps).astype(float))
         self.loss_medians.append(np.median(self.losses[-max(sizes):]))
         self.losses = self.losses[-max(sizes):]
         self.accuracies = self.accuracies[-max(sizes):]
