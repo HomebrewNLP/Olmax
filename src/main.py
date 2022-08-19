@@ -172,11 +172,11 @@ def run_one(wblog: WandbLog):
                   f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step[0])):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {tokens_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
-        if jnp.isnan(wctx.loss):
+        if jnp.isnan(wctx.loss[0]):
             print("Loss is NaN")
             return wblog.loss_medians[-1]
         if wctx.ctx.wandb.use_wandb and idx % wctx.ctx.wandb.log_frequency == 0:
-            if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
+            if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step[0])):
                 pass  # return wblog.loss_medians[-1]
         log_step = math.log2((idx + 1) * device_steps + 1)
         el = wctx.ctx.training.early_stopping.expected_loss
