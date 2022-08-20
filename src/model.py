@@ -104,8 +104,7 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
     def _fn(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         ctx = ctx.add_to_prefix("prenorm")
         inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False, init_mean=None)
-        out = fn(ctx, inp)
-        return scale_norm_act(ctx, out, ctx.dims.features, act=False)
+        return fn(ctx, inp)
 
     return _fn
 
