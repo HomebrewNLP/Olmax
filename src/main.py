@@ -168,8 +168,8 @@ def run_one(wblog: WandbLog):
         if idx % wctx.ctx.training.print_interval == 0:
             tokens_processed = device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
             print(f'[{idx * device_steps:{len(str(total_steps))}d}/{total_steps}] '
-                  f'Loss: {wctx.loss[0] / device_steps:6.3f} - '
-                  f'Accuracy: {wctx.top_loss[0] / device_steps:8.3f} | '
+                  f'Loss: {wctx.loss[0]:6.3f} - '
+                  f'Accuracy: {wctx.top_loss[0]:8.3f} | '
                   f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step[0])):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
                   f'Rate: {tokens_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
