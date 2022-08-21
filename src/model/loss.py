@@ -35,11 +35,11 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         label = ctx.training.label_smoothing * (ctx.dims.vocab - 1) / ctx.dims.vocab - 1  # div so it sums to `LS - 1`
         dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(label)
         dx = dx + zloss
-        d_tmp = jnp.transpose(dx, (1, 0))
+        d_tmp = jnp.transpose(dx, (1, 0)) / tgt.size
         d_tmp = d_tmp.astype(inp_slice.dtype)
         d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
         d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.vocab, -1)
-        d_wgt = d_wgt + matmul(d_tmp, inp_slice) / tgt.size  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
+        d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
         return (inp, i + 1, wgt, inner_tgt, d_wgt, loss, accuracy), d_x
 
     @jax.custom_gradient

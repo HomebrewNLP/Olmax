@@ -8,11 +8,12 @@ from jax import lax, numpy as jnp, random
 from pydantic import BaseModel
 from transformers import GPT2TokenizerFast
 
-from src.backend import matmul
+from src.backend import matmul, promote_to
+from src.model.moe import one_hot
 from src.constants import ParallelAxes
 from src.context import Context, WhilePredictContext
 from src.main import get_parameters
-from src.model import body_ctx, one_hot, promote_to
+from src.model.main import body_ctx
 from src.utils.checkpoint import read_ckpt
 
 
