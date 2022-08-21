@@ -14,6 +14,11 @@ OUTPUT = typing.TypeVar("OUTPUT")
 CTX_FN = typing.TypeVar("CTX_FN")
 
 
+def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
+    return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
+
+
+
 def with_context(count: typing.Optional[bool] = None) -> CTX_FN:
     def _inner(fn: CTX_FN) -> CTX_FN:
         prefix_kwargs = {"appended": fn.__name__}

@@ -10,17 +10,20 @@ import jax._src.util as util
 import wandb
 import yaml
 from jax import lax, numpy as jnp
+from jax.experimental.compilation_cache import compilation_cache
 
 from src.backend import device_id, loop
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
-from src.model import body_ctx, compute
+from src.model.main import body_ctx, compute
 from src.optimizer import get_current_lr, update
 from src.utils.checkpoint import read_ckpt, write_ckpt
 from src.utils.wandblog import WandbLog
 
 jax.distributed.initialize()
+
+compilation_cache.initialize_cache("compilation_cache")
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
