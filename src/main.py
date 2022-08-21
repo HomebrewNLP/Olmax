@@ -25,12 +25,13 @@ jax.distributed.initialize()
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
+    steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
-    data_slice = wctx.data[wctx.current_step % (wctx.ctx.training.device_steps * jax.process_count())]
+    data_slice = wctx.data[wctx.current_step % steps]
     (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
-    wctx.loss += loss
-    wctx.top_loss += accuracy
+    wctx.loss += loss / steps  # higher numerical accuracy if we divide before summing
+    wctx.top_loss += accuracy / steps
     wctx.current_step += 1
     return wctx.serialize()
 

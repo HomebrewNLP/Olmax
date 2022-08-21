@@ -352,7 +352,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         d_tmp = d_tmp.astype(inp_slice.dtype)
         d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
         d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.vocab, -1)
-        d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
+        d_wgt = d_wgt + matmul(d_tmp, inp_slice) / tgt.size  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
         return (inp, i + 1, wgt, inner_tgt, d_wgt, loss, accuracy), d_x
 
     @jax.custom_gradient
@@ -367,7 +367,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         dx = dx.transpose(1, 0, 2) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.features, -1).transpose(1, 0)
         dx = dx.reshape(original_shape)
-        d_wgt = d_wgt.transpose(1, 0) / tgt.size
+        d_wgt = d_wgt.transpose(1, 0)
         d_wgt = d_wgt.reshape(param.shape)
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]) -> typing.Tuple[jnp.ndarray, None, jnp.ndarray]:
@@ -420,9 +420,4 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = body_ctx(ctx, src)
     if ctx.is_initializing:
         return out
-    out = lax.psum(matmul(out[0], out[1]), ParallelAxes.model)
-    out = out.reshape(-1, ctx.dims.vocab)
-    tgt = tgt.reshape(-1, 1)
-    loss = jax.nn.logsumexp(out, -1).mean() - jnp.take_along_axis(out, tgt, -1).mean()
-    acc = (out.argmax(-1) == tgt.reshape(-1)).sum() / tgt.size
-    return loss.astype(jnp.float32), acc.astype(jnp.float32)
+    return cross_entropy_loss(ctx, out, tgt)
