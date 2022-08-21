@@ -29,7 +29,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         loss = loss + ((lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)) / tgt.size).sum()
         accuracy = accuracy + lax.eq(lax.argmax(tmp, 1, tgt.dtype), tgt_slice).sum() / tgt.size
 
-        dx = lax.exp(tmp - lse)
+        dx = lax.exp(tmp - jnp.max(tmp, 1, keepdims=True))
+        dx = dx / dx.sum(1, keepdims=True)
         zloss = dx * lse * ctx.training.z_loss
         dx -= ctx.training.label_smoothing / ctx.dims.vocab
         label = ctx.training.label_smoothing * (ctx.dims.vocab - 1) / ctx.dims.vocab - 1  # div so it sums to `LS - 1`
