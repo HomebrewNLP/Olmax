@@ -26,7 +26,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.vocab)
         tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
         lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
-        loss = loss + (lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)).sum() / tgt.size
+        loss = loss + ((lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)) / tgt.size).sum()
         accuracy = accuracy + lax.eq(lax.argmax(tmp, 1, tgt.dtype), tgt_slice).sum() / tgt.size
 
         dx = lax.exp(tmp - lse)
