@@ -16,43 +16,41 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     src, param = src_wgt
     devices = ctx.dims.heads
 
-    def _xent_slice(inp: typing.Tuple[
-        jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray], carry):
-        inp, i, wgt, inner_tgt, d_wgt, loss, accuracy = inp
+    def _xent_slice(carry: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+                    x: typing.Tuple[jnp.ndarray, jnp.ndarray]):
+        wgt, d_wgt, loss, accuracy = carry
+        inp_slice, inner_tgt = x
         index = device_id(ctx)
-        inp_slice = inp[i]
         tmp = matmul(inp_slice, wgt).reshape(devices, -1, ctx.dims.vocab)
         tmp = promote_to(tmp, jnp.float32)
         tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(-1, ctx.dims.vocab)
-        tgt_slice = lax.dynamic_slice_in_dim(inner_tgt[i], index * tmp.shape[0], tmp.shape[0])
+        tgt_slice = lax.dynamic_slice_in_dim(inner_tgt, index * tmp.shape[0], tmp.shape[0])
         lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
-        loss = loss + ((lse - jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1)) / tgt.size).sum()
+        loss = loss + (lse / tgt.size).sum()
+        loss = loss - (jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1) / tgt.size).sum()
         accuracy = accuracy + lax.eq(lax.argmax(tmp, 1, tgt.dtype), tgt_slice).sum() / tgt.size
 
         dx = lax.exp(tmp - jnp.max(tmp, 1, keepdims=True))
-        dx = dx / dx.sum(1, keepdims=True)
+        dx = dx / dx.sum(1, keepdims=True) / tgt.size
         zloss = dx * lse * ctx.training.z_loss
-        dx -= ctx.training.label_smoothing / ctx.dims.vocab
-        label = ctx.training.label_smoothing * (ctx.dims.vocab - 1) / ctx.dims.vocab - 1  # div so it sums to `LS - 1`
-        dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(label)
+        dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / tgt.size)
         dx = dx + zloss
-        d_tmp = jnp.transpose(dx, (1, 0)) / tgt.size
+        d_tmp = jnp.transpose(dx, (1, 0))
         d_tmp = d_tmp.astype(inp_slice.dtype)
         d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, Batch] -> [Features, Batch]
         d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1).reshape(ctx.dims.vocab, -1)
         d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, Batch] @ [Batch, Features] -> [Vocab, Features]
-        return (inp, i + 1, wgt, inner_tgt, d_wgt, loss, accuracy), d_x
+        return (wgt, d_wgt, loss, accuracy), d_x
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, inner_tgt: jnp.ndarray, wgt: jnp.ndarray):
         original_shape = inp.shape
         inp = inp.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1, ctx.dims.features)
         inner_tgt = inner_tgt.reshape(ctx.data.vocab_size // ctx.dims.inner_bottleneck_features, -1)
-        (_, _, _, _, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, (
-                inp, jnp.zeros((), dtype=jnp.int32), wgt, inner_tgt,
-                jnp.zeros(wgt.shape[::-1], dtype=jnp.float32), jnp.zeros((), dtype=jnp.float32),
-                jnp.zeros((), dtype=jnp.float32)), None, inp.shape[0])
-        dx = dx.transpose(1, 0, 2) / tgt.size  # Shape[Features, inp.shape[0] // step, step // devices]
+        init = (wgt, jnp.zeros(wgt.shape[::-1], dtype=jnp.float32), jnp.zeros((), dtype=jnp.float32),
+                jnp.zeros((), dtype=jnp.float32))
+        (_, d_wgt, loss, accuracy), dx = lax.scan(_xent_slice, init, (inp, inner_tgt))
+        dx = dx.transpose(1, 0, 2)  # Shape[Features, inp.shape[0] // step, step // devices]
         dx = lax.all_gather(dx, ParallelAxes.model, axis=2).reshape(ctx.dims.features, -1).transpose(1, 0)
         dx = dx.reshape(original_shape)
         d_wgt = d_wgt.transpose(1, 0)
