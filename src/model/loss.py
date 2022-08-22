@@ -40,8 +40,9 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         d_tmp = jnp.transpose(dx, (1, 0))  # [LocalBatch, Vocab] -> [Vocab, LocalBatch]
         d_tmp = d_tmp.astype(src.dtype)
         d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, LocalBatch] -> [Features, LocalBatch]
-        d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1)  # [Features, Devices, LocalBatch]
-        d_tmp = d_tmp.reshape(ctx.dims.vocab, step_batch)  # [Features, Devices, LocalBatch] -> [Features, StepBatch]
+        d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1)  # [Vocab, Devices, LocalBatch]
+        d_tmp = d_tmp.reshape(ctx.dims.vocab, step_batch)  # [Vocab, Devices, LocalBatch] -> [Vocab, StepBatch]+
+        inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
         d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
         return (d_wgt, loss, accuracy), d_x
 
