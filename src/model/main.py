@@ -1,12 +1,12 @@
 import typing
 
 import jax
-from jax import lax, numpy as jnp
+from jax import numpy as jnp
 
-from src.backend import get_param, matmul, with_context
-from src.constants import ParallelAxes
+from src.backend import get_param, with_context
 from src.context import Context
 from src.model.conv import bottleneck_block, pointwise_block
+from src.model.loss import cross_entropy_loss
 from src.model.norm import scale_norm_act
 from src.model.qrnn import qrnn_block
 from src.model.reversible import reversible, revnet_out
@@ -51,14 +51,4 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.T
     out = body_ctx(ctx, src)
     if ctx.is_initializing:
         return out
-
-    out = matmul(out[0], out[1]).astype(jnp.float32)
-    out = lax.psum(out, ParallelAxes.model)
-    out = out.reshape(-1, ctx.dims.vocab)
-
-    def mean(x: jnp.ndarray) -> jnp.ndarray:
-        return (x.astype(jnp.float32) / tgt.size).sum()
-
-    loss = mean(jax.nn.logsumexp(out, -1)) - mean(jnp.take_along_axis(out, tgt.reshape(-1, 1), -1))
-    acc = mean(lax.eq(out.argmax(-1), tgt.reshape(-1)))
-    return loss, acc
+    return cross_entropy_loss(ctx, out, tgt)
