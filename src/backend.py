@@ -10,17 +10,16 @@ from .context import Context
 
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 
-OUTPUT = typing.TypeVar("OUTPUT")
-CTX_FN = typing.TypeVar("CTX_FN")
+Output = typing.TypeVar("Output")
+CtxFn = typing.TypeVar("CtxFn")
 
 
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
-
-def with_context(count: typing.Optional[bool] = None) -> CTX_FN:
-    def _inner(fn: CTX_FN) -> CTX_FN:
+def with_context(count: typing.Optional[bool] = None) -> CtxFn:
+    def _inner(fn: CtxFn) -> CtxFn:
         prefix_kwargs = {"appended": fn.__name__}
         if count is not None:
             prefix_kwargs["count"] = count
