@@ -65,6 +65,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]) -> typing.Tuple[jnp.ndarray, None, jnp.ndarray]:
             # dy == 1 since this is the last function before the output
+            dy, _ = dy
             return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype)
 
         loss = lax.psum(loss, ParallelAxes.model)
