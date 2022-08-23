@@ -35,14 +35,15 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         loss = loss - (jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1) / total_items).sum()
         accuracy = accuracy + lax.eq(lax.argmax(tmp, 1, outer_tgt.dtype), tgt_slice).sum() / total_items
 
-        dy = lax.exp(tmp - (lse + math.log(total_items)))
+        dy = lax.exp(tmp - (lse + math.log(total_items)))  # [LocalBatch, Vocab]
         zloss = dy * lse * ctx.training.z_loss * 2
         dy = dy.at[jnp.arange(local_batch).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / total_items)
         dy = dy + zloss
-        dy = jnp.transpose(dy, (1, 0)) * jax.device_count()  # [LocalBatch, Vocab] -> [Vocab, LocalBatch]
-        dy = lax.all_gather(dy, ParallelAxes.model, axis=1)  # [Vocab, Devices, StepBatch]
+        dy = dy * jax.device_count()
+        dy = jnp.zeros([jax.device_count()] + list(dy.shape), dtype=dy.dtype).at[device_id(ctx)].set(dy)
+        dy = lax.psum(dy, ParallelAxes.model)  # Shape[Devices, LocalBatch, Vocab]
+        dy = dy.reshape(step_batch, ctx.dims.vocab).transpose(1, 0)
         dy = dy.astype(src.dtype)
-        dy = dy.reshape(ctx.dims.vocab, step_batch)
         dx = matmul(wgt, dy)  # [Features, Vocab] @ [Vocab, StepBatch] -> [Features, StepBatch]
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
