@@ -26,14 +26,14 @@ def main():
     key = jax.random.PRNGKey(0)
     k0, k1, k2 = jax.random.split(key, 3)
     tgt = jax.random.randint(k0, (ctx.dims.batch, ctx.dims.sequence), 0, ctx.dims.vocab)
+
     tgt = jax.device_put_replicated(tgt, jax.local_devices())
     src = random(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
     wgt = random(ctx.dims.vocab, ctx.dims.features) / ctx.dims.features
 
-    inp = (src, wgt), tgt
-
-    grad0 = jax.pmap(jax.grad(lambda x, y: cross_entropy_loss(ctx, x, y)[0]), ParallelAxes.model)(inp)
-    grad1 = jax.pmap(jax.grad(naive_loss), ParallelAxes.model)(inp)
+    inp = src, wgt
+    grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)(inp)
+    grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt)), ParallelAxes.model)(inp)
 
     for gr0, gr1 in zip(grad0, grad1):  # iterate over src and weight
         print("NEW TENSOR")
