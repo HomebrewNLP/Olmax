@@ -1,6 +1,7 @@
 import random
 
 import jax
+import pytest
 from jax import lax, numpy as jnp
 
 from src.backend import is_main, matmul
@@ -16,16 +17,23 @@ def randn(div: float, seed: int, *shape: int):
     return fn(seeds)
 
 
-def naive_loss(x, y):
+def mean(x: jnp.ndarray):
+    return (x / x.size).sum()
+
+
+def naive_loss(x, y, z_loss):
     tmp = lax.psum(matmul(x[0], x[1]), ParallelAxes.model)
-    pos = (jax.nn.logsumexp(tmp, -1) / y.size).sum()
-    neg = (jnp.take_along_axis(tmp.reshape(-1, tmp.shape[-1]), y.reshape(-1, 1), -1) / y.size).sum()
-    return pos - neg
+    lse = jax.nn.logsumexp(tmp, -1)
+    pos = mean(lse)
+    neg = mean(jnp.take_along_axis(tmp.reshape(-1, tmp.shape[-1]), y.reshape(-1, 1), -1))
+    return pos - neg + mean(lse ** 2 * z_loss)
 
 
-def main(trials: int = 16, samples: int = 2 ** 20):
+@pytest.mark.parametrize("z_loss", [1, 0.01, 0])
+@pytest.mark.parametrize("samples", [2 ** 10, 2 ** 16])
+def test_loss(z_loss: float, samples: int, trials: int = 16):
     ctx = Context()
-    ctx.training.z_loss = 0
+    ctx.training.z_loss = z_loss
     ctx.dims.sequence = int(samples ** 0.5)
     ctx.dims.batch = int(samples ** 0.5)
 
@@ -50,7 +58,7 @@ def main(trials: int = 16, samples: int = 2 ** 20):
         wgt = randn(div, rng.randint(0, 2 ** 30), ctx.dims.features, ctx.dims.vocab)
 
         grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)((src, wgt))
-        grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt)), ParallelAxes.model)((src, wgt))
+        grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt, z_loss)), ParallelAxes.model)((src, wgt))
         for g0, g1 in zip(grad0, grad1):
             statistics("Grad0", g0)
             statistics("Grad1", g1)
@@ -59,7 +67,4 @@ def main(trials: int = 16, samples: int = 2 ** 20):
             allclose = int(jax.pmap(lambda x, y: lax.psum(jnp.allclose(x, y).astype(jnp.float32), "i"), "i")(g0, g1)[0])
             if is_main():
                 print(f'{allclose=}/{jax.device_count()}\n')
-
-
-if __name__ == '__main__':
-    main()
+            assert allclose == jax.device_count()

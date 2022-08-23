@@ -35,7 +35,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         accuracy = accuracy + lax.eq(lax.argmax(tmp, 1, outer_tgt.dtype), tgt_slice).sum() / total_items
 
         dy = lax.exp(tmp - (lse + math.log(total_items)))
-        zloss = dy * lse * ctx.training.z_loss
+        zloss = dy * lse * ctx.training.z_loss * 2
         dy = dy.at[jnp.arange(local_batch).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / total_items)
         dy = dy + zloss
         dy = jnp.transpose(dy, (1, 0))  # [LocalBatch, Vocab] -> [Vocab, LocalBatch]
