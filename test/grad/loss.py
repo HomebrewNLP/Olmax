@@ -39,7 +39,7 @@ def main():
                               lax.pmean(jnp.square(x - x.mean()).mean(), "i")), "i")
 
     def statistics(name: str, var: jnp.ndarray):
-        max, min, mean, std = _fn(var)
+        max, min, mean, std = [a[0] for a in _fn(var)]
         print(f"{name}: {max=}, {min=}, {mean=}, {std=}")
 
     for g0, g1 in zip(grad0, grad1):
