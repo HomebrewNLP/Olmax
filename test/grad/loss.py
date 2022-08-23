@@ -16,8 +16,8 @@ def random(*shape: int):
 
 def naive_loss(x, y):
     tmp = lax.psum(matmul(x[0], x[1]), ParallelAxes.model)
-    pos = jax.nn.logsumexp(tmp, -1).mean()
-    neg = jnp.take_along_axis(tmp.reshape(-1, tmp.shape[-1]), y.reshape(-1, 1), -1).mean()
+    pos = (jax.nn.logsumexp(tmp, -1) / y.size).sum()
+    neg = (jnp.take_along_axis(tmp.reshape(-1, tmp.shape[-1]), y.reshape(-1, 1), -1) / y.size).sum()
     return pos - neg
 
 
@@ -27,8 +27,9 @@ def main():
     k0, k1, k2 = jax.random.split(key, 3)
     tgt = jax.random.randint(k0, (ctx.dims.batch, ctx.dims.sequence), 0, ctx.dims.vocab)
 
-    src = random(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
-    wgt = random(ctx.dims.vocab, ctx.dims.features) / ctx.dims.features
+    div = (ctx.dims.features * ctx.dims.heads) ** 0.5
+    src = random(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features) / div
+    wgt = random(ctx.dims.features, ctx.dims.vocab) / div
 
     inp = src, wgt
     grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)(inp)
