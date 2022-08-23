@@ -27,7 +27,6 @@ def main():
     k0, k1, k2 = jax.random.split(key, 3)
     tgt = jax.random.randint(k0, (ctx.dims.batch, ctx.dims.sequence), 0, ctx.dims.vocab)
 
-    tgt = jax.device_put_replicated(tgt, jax.local_devices())
     src = random(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
     wgt = random(ctx.dims.vocab, ctx.dims.features) / ctx.dims.features
 
