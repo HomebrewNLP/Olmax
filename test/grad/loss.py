@@ -39,7 +39,8 @@ def main(trials: int = 16):
             print(f"{name}: {max=}, {min=}, {mean=}, {std=}")
 
     for i in range(trials):
-        print(f"Attempt: {i}")
+        if is_main():
+            print(f"\n\nAttempt: {i}\n")
         div = (ctx.dims.features * ctx.dims.heads) ** 0.25
         src = randn(div, rng.randint(0, 2 ** 30), ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         wgt = randn(div, rng.randint(0, 2 ** 30), ctx.dims.features, ctx.dims.vocab)
