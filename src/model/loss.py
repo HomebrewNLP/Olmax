@@ -27,7 +27,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         inp_slice, tgt_slice = x
         tmp = matmul(inp_slice, wgt)
         tmp = promote_to(tmp, jnp.float32)
-        tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(local_batch, ctx.dims.vocab)
+        tmp = lax.psum(tmp, ParallelAxes.model)
+        tmp = lax.dynamic_slice_in_dim(tmp, device_id(ctx), 1).reshape(local_batch, ctx.dims.vocab)
         lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
 
         loss = loss + (lse / total_items).sum()
@@ -38,12 +39,12 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         zloss = dy * lse * ctx.training.z_loss * 2
         dy = dy.at[jnp.arange(local_batch).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / total_items)
         dy = dy + zloss
-        dy = jnp.transpose(dy, (1, 0))  # [LocalBatch, Vocab] -> [Vocab, LocalBatch]
+        dy = jnp.transpose(dy, (1, 0)) * jax.device_count()  # [LocalBatch, Vocab] -> [Vocab, LocalBatch]
+        dy = lax.all_gather(dy, ParallelAxes.model, axis=1)  # [Vocab, Devices, StepBatch]
         dy = dy.astype(src.dtype)
-        dx = matmul(wgt, dy)  # [Features, Vocab] @ [Vocab, LocalBatch] -> [Features, LocalBatch]
-
-        dy = lax.all_gather(dy, ParallelAxes.model, axis=1)  # [Vocab, Devices, LocalBatch]
         dy = dy.reshape(ctx.dims.vocab, step_batch)
+        dx = matmul(wgt, dy)  # [Features, Vocab] @ [Vocab, StepBatch] -> [Features, StepBatch]
+
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
         d_wgt = d_wgt + matmul(dy, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
         return (d_wgt, loss, accuracy), dx
@@ -60,8 +61,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros(()), jnp.zeros(()))
         (d_wgt, loss, accuracy), dx = lax.scan(_slice_fn, init, (inp, tgt))
 
-        dx = lax.all_gather(dx, ParallelAxes.model, axis=1)  # Shape[Steps, Devices, Features, LocalBatch]
-        dx = dx.transpose(0, 1, 3, 2)  # Shape[Steps, Devices, LocalBatch, Features]
+        dx = dx.transpose(0, 2, 1)  # [Steps, Features, StepBatch] -> [Steps, StepBatch, Features]
         dx = dx.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         d_wgt = d_wgt.transpose(1, 0)  # [Vocab, Features]  ->  [Features, Vocab]
 
