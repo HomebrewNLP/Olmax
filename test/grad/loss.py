@@ -17,7 +17,7 @@ def randn_fn():
     def _fn(*shape: int):
         seed = rng.randint(0, 2 ** 30)
         div = (shape[-1] * jax.device_count()) ** 0.25
-        fn = jax.pmap(lambda x: jax.random.normal(jax.random.PRNGKey(x + seed), shape) / div)
+        fn = jax.pmap(lambda x: jax.random.normal(jax.random.PRNGKey(x + seed), shape, jnp.float32).astype(jnp.float_) / div)
         local_devices = jax.local_device_count()
         seeds = jnp.arange(local_devices * jax.process_index(), local_devices * (1 + jax.process_index()))
         return fn(seeds)
@@ -59,6 +59,7 @@ def statistics(name: str, var: jnp.ndarray):
         print(f"{name}: {max=}, {min=}, {mean=}, {std=}")
 
 
+@pytest.mark.skip
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
 @pytest.mark.parametrize("samples", [2 ** 10, 2 ** 16])
 def test_value(z_loss: float, samples: int, trials: int = 16):
@@ -74,7 +75,7 @@ def test_value(z_loss: float, samples: int, trials: int = 16):
 
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
-@pytest.mark.parametrize("samples", [2 ** 10, 2 ** 16])
+@pytest.mark.parametrize("samples", [2 ** 6])
 def test_grad(z_loss: float, samples: int, trials: int = 1):
     ctx, rng, tgt, randn = initialize(z_loss, samples)
 
