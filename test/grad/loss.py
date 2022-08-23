@@ -34,12 +34,13 @@ def main():
     grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)(inp)
     grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt)), ParallelAxes.model)(inp)
 
-    for gr0, gr1 in zip(grad0, grad1):  # iterate over src and weight
-        print("NEW TENSOR")
-        if not jnp.allclose(gr0, gr1):
-            for i, (g0, g1) in enumerate(zip(gr0.ravel(), gr0.ravel())):
-                if not jnp.isclose(g0, g1):
-                    print(i, g0, g1)
+    for g0, g1 in zip(grad0, grad1):
+        max_abs_dist = jax.pmap(lambda x, y: lax.pmax((x - y).abs().max(), "i"), "i")(g0, g1)[0]
+        max_rel_dist = jax.pmap(lambda x, y: lax.pmax((x / y).abs().max(), "i"), "i")(g0, g1)[0]
+        print(max_abs_dist, max_rel_dist)
+        allclose = jax.pmap(lambda x, y: lax.psum(jnp.allclose(x, y).astype(jnp.float32), "i"), "i")(g0, g1)[0]
+        if not allclose:
+            raise ValueError
 
 
 if __name__ == '__main__':
