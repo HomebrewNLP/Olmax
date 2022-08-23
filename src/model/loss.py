@@ -1,3 +1,4 @@
+import math
 import typing
 
 import jax
@@ -12,7 +13,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
                        ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
-    # -> softmax(x) - 1 + softmax(x) * logsumexp(x) * z_loss
+    # -> softmax(x) - one_hot(target) + softmax(x) * logsumexp(x) * z_loss
     src, param = src_wgt
     devices = ctx.dims.heads
     total_items = ctx.dims.batch * ctx.dims.sequence
@@ -28,23 +29,24 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         tmp = promote_to(tmp, jnp.float32)
         tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(local_batch, ctx.dims.vocab)
         lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
+
         loss = loss + (lse / total_items).sum()
         loss = loss - (jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1) / total_items).sum()
         accuracy = accuracy + lax.eq(lax.argmax(tmp, 1, outer_tgt.dtype), tgt_slice).sum() / total_items
 
-        dx = lax.exp(tmp - jnp.max(tmp, 1, keepdims=True))
-        dx = dx / dx.sum(1, keepdims=True) / total_items
-        zloss = dx * lse * ctx.training.z_loss
-        dx = dx.at[jnp.arange(dx.shape[0]).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / total_items)
-        dx = dx + zloss
-        d_tmp = jnp.transpose(dx, (1, 0))  # [LocalBatch, Vocab] -> [Vocab, LocalBatch]
-        d_tmp = d_tmp.astype(src.dtype)
-        d_x = matmul(wgt, d_tmp)  # [Features, Vocab] @ [Vocab, LocalBatch] -> [Features, LocalBatch]
-        d_tmp = lax.all_gather(d_tmp, ParallelAxes.model, axis=1)  # [Vocab, Devices, LocalBatch]
-        d_tmp = d_tmp.reshape(ctx.dims.vocab, step_batch)  # [Vocab, Devices, LocalBatch] -> [Vocab, StepBatch]+
+        dy = lax.exp(tmp - (lse + math.log(total_items)))
+        zloss = dy * lse * ctx.training.z_loss
+        dy = dy.at[jnp.arange(local_batch).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / total_items)
+        dy = dy + zloss
+        dy = jnp.transpose(dy, (1, 0))  # [LocalBatch, Vocab] -> [Vocab, LocalBatch]
+        dy = dy.astype(src.dtype)
+        dx = matmul(wgt, dy)  # [Features, Vocab] @ [Vocab, LocalBatch] -> [Features, LocalBatch]
+
+        dy = lax.all_gather(dy, ParallelAxes.model, axis=1)  # [Vocab, Devices, LocalBatch]
+        dy = dy.reshape(ctx.dims.vocab, step_batch)
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
-        d_wgt = d_wgt + matmul(d_tmp, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
-        return (d_wgt, loss, accuracy), d_x
+        d_wgt = d_wgt + matmul(dy, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
+        return (d_wgt, loss, accuracy), dx
 
     @jax.custom_gradient
     def _fn(inp: jnp.ndarray, tgt: jnp.ndarray, wgt: jnp.ndarray):
