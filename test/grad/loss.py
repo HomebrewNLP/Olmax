@@ -35,11 +35,20 @@ def main():
     grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)(inp)
     grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt)), ParallelAxes.model)(inp)
 
+    _fn = jax.pmap(lambda x: (lax.pmax(x.max(), "i"), lax.pmin(x.min(), "i"), lax.pmean(x.mean(), "i"),
+                              lax.pmean(jnp.square(x - x.mean()).mean(), "i")), "i")
+
+    def statistics(name: str, var: jnp.ndarray):
+        max, min, mean, std = _fn(var)
+        print(f"{name}: {max=}, {min=}, {mean=}, {std=}")
+
     for g0, g1 in zip(grad0, grad1):
-        max_abs_dist = jax.pmap(lambda x, y: lax.pmax(jnp.abs(x - y).max(), "i"), "i")(g0, g1)[0]
-        max_rel_dist = jax.pmap(lambda x, y: lax.pmax(jnp.abs(x / y).max(), "i"), "i")(g0, g1)[0]
+        statistics("Grad0", g0)
+        statistics("Grad1", g1)
+        statistics("abs(Grad0 - Grad1)", jax.pmap(lambda x, y: jnp.abs(x - y), "i")(g0, g1))
+        statistics("abs(Grad0 / Grad1)", jax.pmap(lambda x, y: jnp.abs(x - y), "i")(g0, g1))
         allclose = jax.pmap(lambda x, y: lax.psum(jnp.allclose(x, y).astype(jnp.float32), "i"), "i")(g0, g1)[0]
-        print(f'{max_abs_dist=}, {max_rel_dist=}, {allclose=}/{jax.device_count()}')
+        print(f'{allclose=}/{jax.device_count()}')
         if allclose < jax.device_count():
             raise ValueError
 
