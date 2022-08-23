@@ -23,8 +23,12 @@ def naive_loss(x, y):
     return pos - neg
 
 
-def main(trials: int = 16):
+def main(trials: int = 16, samples: int = 2 ** 20):
     ctx = Context()
+    ctx.training.z_loss = 0
+    ctx.dims.sequence = int(samples ** 0.5)
+    ctx.dims.batch = int(samples ** 0.5)
+
     key = jax.random.PRNGKey(0)
     rng = random.Random(0)
     k0, k1, k2 = jax.random.split(key, 3)
@@ -52,9 +56,9 @@ def main(trials: int = 16):
             statistics("Grad1", g1)
             statistics("abs(Grad0 - Grad1)", jax.pmap(lambda x, y: jnp.abs(x - y), "i")(g0, g1))
             statistics("abs(Grad0 / Grad1)", jax.pmap(lambda x, y: jnp.abs(x / y), "i")(g0, g1))
-            allclose = jax.pmap(lambda x, y: lax.psum(jnp.allclose(x, y).astype(jnp.float32), "i"), "i")(g0, g1)[0]
+            allclose = int(jax.pmap(lambda x, y: lax.psum(jnp.allclose(x, y).astype(jnp.float32), "i"), "i")(g0, g1)[0])
             if is_main():
-                print(f'{allclose=}/{jax.device_count()}')
+                print(f'{allclose=}/{jax.device_count()}\n')
 
 
 if __name__ == '__main__':
