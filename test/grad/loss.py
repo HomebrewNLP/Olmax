@@ -38,9 +38,9 @@ def main():
     for g0, g1 in zip(grad0, grad1):
         max_abs_dist = jax.pmap(lambda x, y: lax.pmax(jnp.abs(x - y).max(), "i"), "i")(g0, g1)[0]
         max_rel_dist = jax.pmap(lambda x, y: lax.pmax(jnp.abs(x / y).max(), "i"), "i")(g0, g1)[0]
-        print(max_abs_dist, max_rel_dist)
         allclose = jax.pmap(lambda x, y: lax.psum(jnp.allclose(x, y).astype(jnp.float32), "i"), "i")(g0, g1)[0]
-        if not allclose:
+        print(f'{max_abs_dist=}, {max_rel_dist=}, {allclose=}/{jax.device_count()}')
+        if allclose < jax.device_count():
             raise ValueError
 
 
