@@ -27,7 +27,7 @@ def main():
     k0, k1, k2 = jax.random.split(key, 3)
     tgt = jax.random.randint(k0, (ctx.dims.batch, ctx.dims.sequence), 0, ctx.dims.vocab)
 
-    div = (ctx.dims.features * ctx.dims.heads) ** 0.5
+    div = (ctx.dims.features * ctx.dims.heads) ** 0.25
     src = random(div, ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
     wgt = random(div, ctx.dims.features, ctx.dims.vocab)
 
