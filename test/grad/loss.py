@@ -7,8 +7,8 @@ from src.context import Context
 from src.model.loss import cross_entropy_loss
 
 
-def random(*shape: int):
-    fn = jax.pmap(lambda x: jax.random.normal(jax.random.PRNGKey(x), shape))
+def random(div: float, *shape: int):
+    fn = jax.pmap(lambda x: jax.random.normal(jax.random.PRNGKey(x), shape) / div)
     local_devices = jax.local_device_count()
     seeds = jnp.arange(local_devices * jax.process_index(), local_devices * (1 + jax.process_index()))
     return fn(seeds)
@@ -28,8 +28,8 @@ def main():
     tgt = jax.random.randint(k0, (ctx.dims.batch, ctx.dims.sequence), 0, ctx.dims.vocab)
 
     div = (ctx.dims.features * ctx.dims.heads) ** 0.5
-    src = random(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features) / div
-    wgt = random(ctx.dims.features, ctx.dims.vocab) / div
+    src = random(div, ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
+    wgt = random(div, ctx.dims.features, ctx.dims.vocab)
 
     inp = src, wgt
     grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)(inp)
