@@ -35,8 +35,8 @@ def main():
     grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt)), ParallelAxes.model)(inp)
 
     for g0, g1 in zip(grad0, grad1):
-        max_abs_dist = jax.pmap(lambda x, y: lax.pmax((x - y).abs().max(), "i"), "i")(g0, g1)[0]
-        max_rel_dist = jax.pmap(lambda x, y: lax.pmax((x / y).abs().max(), "i"), "i")(g0, g1)[0]
+        max_abs_dist = jax.pmap(lambda x, y: lax.pmax(jnp.abs(x - y).max(), "i"), "i")(g0, g1)[0]
+        max_rel_dist = jax.pmap(lambda x, y: lax.pmax(jnp.abs(x / y).max(), "i"), "i")(g0, g1)[0]
         print(max_abs_dist, max_rel_dist)
         allclose = jax.pmap(lambda x, y: lax.psum(jnp.allclose(x, y).astype(jnp.float32), "i"), "i")(g0, g1)[0]
         if not allclose:
