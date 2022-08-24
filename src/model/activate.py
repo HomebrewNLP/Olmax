@@ -13,7 +13,9 @@ def activate_forward(inp: jnp.ndarray) -> jnp.ndarray:
 
 
 def activate_grad(inp: jnp.ndarray) -> jnp.ndarray:
-    return 1 - lax.square(lax.tanh(softplus(inp))) * inp * jax.nn.sigmoid(inp)
+    gate = lax.tanh(softplus(inp))
+    sigmoid = jax.nn.sigmoid(inp)
+    return (1 - sigmoid) * gate + sigmoid * (inp + gate - gate ** 2 * inp)
 
 
 def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
