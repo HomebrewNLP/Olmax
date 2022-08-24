@@ -63,8 +63,6 @@ def test_grad(z_loss: float, samples: int, trials: int = 1):  # skipcq: PYL-W064
     ctx, tgt, randn = initialize(z_loss, samples)
 
     for _ in range(trials):
-        if is_main():
-            print(f"\n\nAttempt: {i}\n")
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         wgt = randn(ctx.dims.features, ctx.dims.vocab)
 
