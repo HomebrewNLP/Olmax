@@ -19,6 +19,24 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
     return _fn
 
 
+def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarray] = None, psum: bool = False,
+                 act: bool = True):
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
+    original_dtype = src.dtype
+    src_fp64 = promote_to(src, run_type)
+    if psum:
+        src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
+    mean = src_fp64.mean(-1, keepdims=True)
+    std = stable_rsqrt(jnp.square(src_fp64).sum(-1, keepdims=True) - src.shape[-1] * jnp.square(mean),
+                       ctx.model.norm_eps)
+    norm_out = (src_fp64 - mean) * std
+    out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+    if act:
+        out = activate_forward(out)
+    out = out.astype(original_dtype)
+    return out, norm_out, std
+
+
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
                    psum: bool = False, act: bool = True, init_mean: typing.Optional[float] = 1) -> jnp.ndarray:
@@ -37,18 +55,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
-        src_fp64 = promote_to(src, run_type)
-        if psum:
-            src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
-        mean = src_fp64.mean(-1, keepdims=True)
-        std = stable_rsqrt(jnp.square(src_fp64).sum(-1, keepdims=True) - src.shape[-1] * jnp.square(mean),
-                           ctx.model.norm_eps)
-        norm_out = (src_fp64 - mean) * std
-        out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
-        if act:
-            out = activate_forward(out)
-        out = out.astype(original_dtype)
-        norm_out = norm_out.astype(original_dtype)
+        out, norm_out, std = norm_forward(ctx, src, wgt, psum, act)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             norm_out_fp64 = promote_to(norm_out, run_type)
