@@ -1,15 +1,10 @@
 import copy
-import math
 import typing
 
 import jax
-from jax import lax, numpy as jnp
-from jax.experimental.compilation_cache import compilation_cache
+from jax import numpy as jnp
 
-from src.backend import conv as lax_conv, device_id, get_param, matmul, stable_rsqrt, with_context
-from src.constants import ParallelAxes
 from src.context import Context
-
 
 REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
@@ -37,8 +32,8 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
         return out
 
     @jax.custom_gradient
-    def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, back_x0: jnp.ndarray, x1: jnp.ndarray,
-            back_x1: jnp.ndarray):
+    def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, _back_x0: jnp.ndarray, x1: jnp.ndarray,
+            _back_x1: jnp.ndarray):
         def _grad(dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0)
@@ -54,11 +49,10 @@ def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.nda
 
 def revnet_out(src: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> jnp.ndarray:
     @jax.custom_gradient
-    def _fn(x0: jnp.ndarray, x0_back: jnp.ndarray, x1: jnp.ndarray, x1_back: jnp.ndarray):
+    def _fn(x0: jnp.ndarray, _x0_back: jnp.ndarray, x1: jnp.ndarray, _x1_back: jnp.ndarray):
         def _grad(dy) -> typing.Tuple[jnp.ndarray, jnp.ndarray, None, jnp.ndarray]:
             return dy, x0, dy, x1
 
         return x0 + x1, _grad
 
     return _fn(*src)
-

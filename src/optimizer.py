@@ -68,13 +68,13 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context(count=False)
-def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # skipcq: PYL-W0640
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
         eye = jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype)
-        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True,
-                       init_val=eye * ctx.optimizer.epsilon, nesterov=False, heavyball=False)
+        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
+                       nesterov=False, heavyball=False)
         prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye)
         if ctx.is_initializing:
             continue
@@ -129,14 +129,14 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
         if small_parameter(param_name, grad) or ctx.optimizer.graft_to_adam:  # Do adam update for small parameters
-            update = adam(ctx, grad, step)
+            weight_update = adam(ctx, grad, step)
         else:
-            update = sm3(ctx, grad)
+            weight_update = sm3(ctx, grad)
         if not small_parameter(param_name, grad):
             if ctx.optimizer.use_shampoo:
                 shampoo_update = shampoo(ctx, grad, step)
-                update = graft(update, shampoo_update)
-            update = ema(ctx, update, step, 1 - ctx.optimizer.momentum_beta)
+                weight_update = graft(weight_update, shampoo_update)
+            weight_update = ema(ctx, weight_update, step, 1 - ctx.optimizer.momentum_beta)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
-        update = update.astype(ctx.parameters[param_name].dtype)
-        ctx.parameters[param_name] = update * parameter_lr + ctx.parameters[param_name]
+        weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
+        ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]

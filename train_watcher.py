@@ -52,8 +52,7 @@ def parse_args():
     parser.add_argument("--config-path", type=str, help="Path to config.yaml")
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
-    parser.add_argument("--run-threshold", default=100, type=int,
-                        help="How many of the last runs to scan - at most.")
+    parser.add_argument("--run-threshold", default=100, type=int, help="How many of the last runs to scan - at most.")
     parser.add_argument("--merge-runs", default=1, type=int,
                         help="Whether to merge all WandB runs into one logstream or keep one for each host.")
     args = parser.parse_args()
@@ -87,7 +86,7 @@ def main():
         try:
             run = wandb_api.run(f'{config["wandb"]["entity"]}/{config["wandb"]["project"]}/{config["wandb"]["id"]}')
             start_step = int(run.summary["_step"])
-        except:
+        except:  # skipcq: FLK-E722
             start_step = 0
         start_step -= start_step % config["training"]["checkpoint_interval"]
         config["training"]["checkpoint_load_path"] = checkpoint_path if start_step > 0 else ""

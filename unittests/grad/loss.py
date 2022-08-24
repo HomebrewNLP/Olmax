@@ -38,14 +38,14 @@ def initialize(z_loss: float, samples: int):
 def statistics(name: str, var: jnp.ndarray):
     _fn = jax.pmap(lambda x: (lax.pmax(x.max(), "i"), lax.pmin(x.min(), "i"), lax.pmean(x.mean(), "i"),
                               lax.pmean(jnp.square(x - x.mean()).mean(), "i")), "i")
-    max, min, mean, std = [float(a[0]) for a in _fn(var)]
     if is_main():
-        print(f"{name}: {max=}, {min=}, {mean=}, {std=}")
+        vmax, vmin, vmean, vstd = [float(a[0]) for a in _fn(var)]
+        print(f"{name}: max={vmax}, min={vmin}, mean={vmean}, std={vstd}")
 
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
 @pytest.mark.parametrize("samples", [2 ** 6])
-def test_value(z_loss: float, samples: int, trials: int = 16):
+def test_value(z_loss: float, samples: int, trials: int = 16):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
 
     for _ in range(trials):
@@ -59,7 +59,7 @@ def test_value(z_loss: float, samples: int, trials: int = 16):
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
 @pytest.mark.parametrize("samples", [2 ** 6])
-def test_grad(z_loss: float, samples: int, trials: int = 1):
+def test_grad(z_loss: float, samples: int, trials: int = 1):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
 
     for _ in range(trials):

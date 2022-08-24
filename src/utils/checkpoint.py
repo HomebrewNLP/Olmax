@@ -36,7 +36,7 @@ def write(x, ckpt_dir):
             with open(file_path, "wb") as f:
                 np.savez(f, *i)
             return
-        except:
+        except:  # skipcq: FLK-E722
             print("save failed, trying again")
 
     print("save failed 3 times, exiting")

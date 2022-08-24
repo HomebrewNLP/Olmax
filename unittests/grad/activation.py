@@ -8,7 +8,7 @@ from unittests.grad.backend import randn_fn
 
 
 @pytest.mark.parametrize("samples", [2 ** 6, 2 ** 12])
-def test_grad(samples: int, trials: int = 16):
+def test_grad(samples: int, trials: int = 16):  # skipcq: PYL-W0640
     ctx = Context()
     ctx.is_initializing = False
     randn = randn_fn()

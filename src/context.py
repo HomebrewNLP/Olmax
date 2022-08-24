@@ -257,7 +257,8 @@ class WhileContext(DataClass):
 
     def _serialize(self) -> dict:
         return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'data': self.data,
-                'parameter_variance': self.ctx.parameter_variance}
+                'parameter_variance': self.ctx.parameter_variance
+                }
 
     def __call__(self, data: jnp.ndarray):
         self.data = data
