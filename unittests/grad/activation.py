@@ -12,7 +12,7 @@ def test_grad(samples: int, trials: int = 16):
     ctx = Context()
     ctx.is_initializing = False
     randn = randn_fn()
-    for i in range(trials):
+    for _ in range(trials):
         inp = randn(samples)
         out0 = jax.grad(lambda x: activate(ctx, x).mean())(inp)
         out1 = jax.grad(lambda x: activate_forward(x).mean())(inp)

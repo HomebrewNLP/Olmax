@@ -15,7 +15,7 @@ def test_grad(act: bool, psum: bool, samples: int, trials: int = 16):
     ctx = Context()
     ctx.is_initializing = False
     randn = randn_fn()
-    for i in range(trials):
+    for _ in range(trials):
         src = randn(samples, ctx.dims.features)
         wgt = randn(ctx.dims.features)
 

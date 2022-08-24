@@ -17,7 +17,7 @@ REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray, jnp.nd
 def reversible(ctx: Context, fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray],
                src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
-        params, x00, x01, x10, x11 = src
+        params, _x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
         out = fn(new_ctx, x10)
