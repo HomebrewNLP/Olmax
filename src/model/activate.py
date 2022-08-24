@@ -5,7 +5,7 @@ from src.context import Context
 
 
 def softplus(inp: jnp.ndarray):
-    return lax.max(inp, 0) + lax.log1p(lax.exp(-lax.abs(inp)))
+    return lax.max(inp, jnp.zeros((), dtype=inp.dtype)) + lax.log1p(lax.exp(-lax.abs(inp)))
 
 
 def activate_forward(inp: jnp.ndarray) -> jnp.ndarray:
