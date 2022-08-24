@@ -1,5 +1,5 @@
-sudo apt update
-sudo apt install -y libpq-dev python-dev python3-dev gcc libgl1-mesa-glx ffmpeg libgl-dev python3-pip git
+sudo apt-get -o DPkg::Lock::Timeout=-1  update
+sudo apt-get -o DPkg::Lock::Timeout=-1  install -y libpq-dev python-dev python3-dev gcc libgl1-mesa-glx ffmpeg libgl-dev python3-pip git
 python3 -m pip install --upgrade pip
 python3 -m pip install --upgrade "jax[tpu]>=0.3.10" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 sudo python3 -m pip uninstall tensorboard tbp-nightly tb-nightly tensorboard-plugin-profile -y

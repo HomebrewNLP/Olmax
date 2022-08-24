@@ -8,11 +8,12 @@ from jax import lax, numpy as jnp, random
 from pydantic import BaseModel
 from transformers import GPT2TokenizerFast
 
-from src.backend import matmul
+from src.backend import matmul, promote_to
 from src.constants import ParallelAxes
 from src.context import Context, WhilePredictContext
 from src.main import get_parameters
-from src.model import body_ctx, one_hot, promote_to
+from src.model.main import body_ctx
+from src.model.moe import one_hot
 from src.utils.checkpoint import read_ckpt
 
 
@@ -145,7 +146,7 @@ class Inference:
                  typical_mass: float = 1, max_probability_to_filter: float = 1., adaptive_filter_power: float = 1,
                  adaptive_filter_scale: float = 0, seed: int = 0, length: int = 128):
         tokens = jnp.asarray(np.frombuffer(text.encode(), np.uint8)).astype(jnp.int32).reshape(1, -1)
-        out = self.complete_tokens(tokens, temperature, max_tokens, max_probability_mass, typical_mass, 
+        out = self.complete_tokens(tokens, temperature, max_tokens, max_probability_mass, typical_mass,
                                    max_probability_to_filter, adaptive_filter_power, adaptive_filter_scale, seed,
                                    length)[0]
         return np.asarray(out).astype(np.uint8).tobytes().decode(errors='ignore')[len(text):len(text) + length]
@@ -217,7 +218,7 @@ class RestAPI:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
         tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.max_tokens,
-                                              params.max_probability_mass, params.typical_mass, 
+                                              params.max_probability_mass, params.typical_mass,
                                               params.max_probability_to_filter, params.adaptive_filter_power,
                                               params.adaptive_filter_scale, params.seed, params.length)
         tok = tok[0, len(tokens):len(tokens) + params.length].tolist()

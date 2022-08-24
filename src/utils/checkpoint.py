@@ -2,39 +2,41 @@
 Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca9370576ad9d247facf6cb8e9699300e690
 /mesh_transformer/checkpoint.py
 """
-import collections
 import functools
 import io
 import json
 import multiprocessing
 import re
 import time
+import traceback
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from smart_open import open
 
+from src.backend import is_main
 from src.context import Context
 
-pieces = 16  # how many files to split each shard across
+WEIGHT_PIECES = 16  # how many files to split each shard across
+UPLOAD_RETRIES = 8
 
 
 @functools.partial(jax.jit, backend="cpu")
 def index_weights(weights, idx):
     cpu_device = jax.devices("cpu")[0]
-    return jax.device_put(jax.tree_map(lambda i: i[idx], weights), cpu_device)
+    return jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), cpu_device)
 
 
 def write(x, ckpt_dir):
     idx, i = x
     file_path = ckpt_dir + f"{idx}.npz"
-    for _ in range(3):
+    for _ in range(UPLOAD_RETRIES):
         try:
             with open(file_path, "wb") as f:
                 np.savez(f, *i)
             return
-        except:
+        except:  # skipcq: FLK-E722
             print("save failed, trying again")
 
     print("save failed 3 times, exiting")
@@ -42,30 +44,44 @@ def write(x, ckpt_dir):
 
 
 def write_ckpt(ctx: Context):
-    flattened, structure = jax.tree_flatten(ctx.parameters)
+    flattened, structure = jax.tree_util.tree_flatten(ctx.parameters)
 
     structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
     structure = structure.replace('PyTreeDef', '')[1:-1]  # clean up "types"
     structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')
     structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
 
-    with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
-        f.write(structure)
+    if is_main():
+        success = False
+        for _ in range(UPLOAD_RETRIES):
+            try:
+                with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
+                    f.write(structure)
+            except:  # skipcq: FLK-E722
+                print("Failed to save structure. Traceback:")
+                traceback.print_exc()
+                continue
+            success = True
+            break
+        if not success:
+            raise ValueError("Couldn't save structure")
 
-    for shard in range(ctx.dims.heads):
+    for device in jax.local_devices():
+        shard = device.id
         cpu_flattened = index_weights(flattened, shard)
 
-        k, m = divmod(len(cpu_flattened), pieces)
-        cpu_flattened_chunked = (cpu_flattened[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(pieces))
+        k, m = divmod(len(cpu_flattened), WEIGHT_PIECES)
+        cpu_flattened_chunked = (cpu_flattened[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in
+                                 range(WEIGHT_PIECES))
 
-        with multiprocessing.pool.ThreadPool(pieces) as p:
+        with multiprocessing.pool.ThreadPool(WEIGHT_PIECES) as p:
             write_fn = functools.partial(write, ckpt_dir=f"{ctx.training.checkpoint_path}/{shard}_")
             list((p.imap_unordered(write_fn, enumerate(cpu_flattened_chunked))))
 
 
 def read_shard(ckpt_dir):
     out = []
-    for idx in range(pieces):
+    for idx in range(WEIGHT_PIECES):
         file_path = ckpt_dir + f"{idx}.npz"
         with open(file_path, "rb") as f:
             buf = f.read()
@@ -81,8 +97,10 @@ def deep_replace(d, value):
         return {k: deep_replace(v, value) for k, v in d.items()}
     return value
 
-def depth(param_name, name:str='reversible'):
+
+def depth(param_name, name: str = 'reversible'):
     return int(param_name.split(f'/{name}:')[1].split('/')[0])
+
 
 def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     ignore = re.compile(ignore)
@@ -104,7 +122,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
         if x.dtype == np.dtype('V2'):
             x.dtype = jnp.bfloat16
         unsharded.append(x)
-    params = jax.tree_unflatten(new_structure, unsharded)
+    params = jax.tree_util.tree_unflatten(new_structure, unsharded)
 
     print(f"Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
     print(f"Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])

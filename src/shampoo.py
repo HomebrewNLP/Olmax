@@ -28,20 +28,16 @@
 """Distributed Shampoo Implementation."""
 
 import itertools
+import typing
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-# Dtype for inverse-pth root routine
-# Switch to f64 if you have hardware that supports it. Enable the jax flag
-# jax_enable_x64 for this to work, otherwise it will default to float32.
-_MAT_INV_PTH_ROOT_DTYPE = jnp.float64
 INVERSE_FAILURE_THRESHOLD = 0.1
 
 
-@jax.jit
 def materialize_matrix_from_concat(block_rows_concat):
     """Returns a materialized symmetric matrix from concatenated slices.
     Args:
@@ -95,7 +91,8 @@ def find_num_blocks(block_rows_concat):
     return num_blocks
 
 
-def power_iteration(matrix, num_iters=100, error_tolerance=1e-6, ):
+def power_iteration(matrix: jnp.ndarray, step: typing.Union[jnp.ndarray, int] = 1729, num_iters: int = 100,
+                    error_tolerance: float = 1e-6):
     r"""Power iteration algorithm.
 
     The power iteration algorithm takes a symmetric PSD matrix `A`, and produces
@@ -106,7 +103,8 @@ def power_iteration(matrix, num_iters=100, error_tolerance=1e-6, ):
       [Wikipedia, 2021](https://en.wikipedia.org/wiki/Power_iteration)
 
     Args:
-      matrix: the symmetric PSD matrix.
+      matrix: the symmetric PSD matrix
+      step: Current step in training loop of model (or any other number that can be used to see an RNG).
       num_iters: Number of iterations.
       error_tolerance: Iterative exit condition.
 
@@ -126,22 +124,20 @@ def power_iteration(matrix, num_iters=100, error_tolerance=1e-6, ):
 
         s_v = jnp.einsum("ij,j->i", matrix, new_v, precision=lax.Precision.HIGHEST)
         s_new = jnp.einsum("i,i->", new_v, s_v, precision=lax.Precision.HIGHEST)
-        return (i + 1, s_v, s_new, s_v,
-                jnp.greater(jnp.abs(s_new - s), error_tolerance))
+        return i + 1, s_v, s_new, s_v, jnp.greater(jnp.abs(s_new - s), error_tolerance)
 
     # Figure out how to use step as seed for random.
-    v_0 = np.random.RandomState(1729).uniform(-1.0, 1.0,
-                                              matrix_size).astype(matrix.dtype)
+    key = jax.random.PRNGKey(step)
+    v_0 = jax.random.uniform(key, (matrix_size,), jnp.float32, -1.0, 1.0).astype(matrix.dtype)  # fp64 only indirectly
 
-    init_state = tuple([0, v_0, jnp.zeros([], dtype=matrix.dtype), v_0, True])
+    init_state = (0, v_0, jnp.zeros([], dtype=matrix.dtype), v_0, True)
     _, v_out, s_out, _, _ = lax.while_loop(_iter_condition, _iter_body, init_state)
     v_out = v_out / jnp.linalg.norm(v_out)
     return v_out, s_out
 
 
-def mat_power(mat_m, p):
+def mat_power(mat_m: jnp.ndarray, p: int):
     """A simple matrix power method. M^p where p can be TracedValue."""
-    power = jnp.eye(mat_m.shape[0], dtype=_MAT_INV_PTH_ROOT_DTYPE)
 
     def _iter_condition(state):
         i, _, _ = state
@@ -149,17 +145,17 @@ def mat_power(mat_m, p):
 
     def _iter_body(state):
         i, power, mat = state
-
         power = jax.lax.cond(i % 2 == 1, lambda: jnp.matmul(mat, power, precision=lax.Precision.HIGHEST), lambda: power)
         i //= 2
         mat = jnp.matmul(mat, mat, precision=lax.Precision.HIGHEST)
         return i, power, mat
 
-    _, result, _ = lax.while_loop(_iter_condition, _iter_body, (p, power, mat_m))
-    return result
+    initial_result = jnp.eye(mat_m.shape[0], dtype=jnp.float64)
+    return lax.while_loop(_iter_condition, _iter_body, (p, initial_result, mat_m))[1]
 
 
-def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_tolerance=1e-6):
+def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_iters: int = 100,
+                            ridge_epsilon: float = 1e-6, error_tolerance: float = 1e-6):
     """Computes `matrix^(-1/p)`, where `p` is a positive integer.
 
     This function uses the Coupled newton iterations algorithm for
@@ -173,6 +169,7 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
 
     Args:
       matrix: the symmetric PSD matrix whose power it to be computed
+      step: Current step in training loop of model (or any other number that can be used to see an RNG).
       p: exponent, for p a positive integer.
       num_iters: Maximum number of iterations.
       ridge_epsilon: Ridge epsilon added to make the matrix positive definite.
@@ -188,32 +185,27 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
 
     assert matrix.shape[0] == matrix.shape[1]
 
-    # We use _MAT_INV_PTH_ROOT_DTYPE for the matrix inverse pth root.
-    # Switch to f64 if you have hardware that supports it. Enable the jax flag
-    # jax_enable_x64 for this to work.
     matrix_size = matrix.shape[0]
-    orig_dtype = matrix.dtype
-    matrix = matrix.astype(_MAT_INV_PTH_ROOT_DTYPE)
-    alpha = jnp.asarray(-1.0 / p, _MAT_INV_PTH_ROOT_DTYPE)
-    identity = jnp.eye(matrix_size, dtype=_MAT_INV_PTH_ROOT_DTYPE)
-    _, max_ev = power_iteration(matrix=matrix, num_iters=100, error_tolerance=1e-6)
+    matrix = matrix.astype(jnp.float64)
+    alpha = jnp.asarray(-1.0 / p, jnp.float64)
+    identity = jnp.eye(matrix_size, dtype=jnp.float64)
+    _, max_ev = power_iteration(matrix, step, num_iters=100, error_tolerance=1e-6)
     ridge_epsilon = ridge_epsilon * jnp.maximum(max_ev, 1e-6)
 
     def _iter_condition(state):
-        (i, unused_mat_m, unused_mat_h, unused_old_mat_h, error, run_step) = state
+        i, unused_mat_m, unused_mat_h, unused_old_mat_h, error, run_step = state
         error_above_threshold = jnp.logical_and(error > error_tolerance, run_step)
         return jnp.logical_and(i < num_iters, error_above_threshold)
 
     def _iter_body(state):
-        (i, mat_m, mat_h, unused_old_mat_h, error, unused_run_step) = state
+        i, mat_m, mat_h, unused_old_mat_h, error, unused_run_step = state
         mat_m_i = (1 - alpha) * identity + alpha * mat_m
         new_mat_m = jnp.matmul(mat_power(mat_m_i, p), mat_m, precision=lax.Precision.HIGHEST)
         new_mat_h = jnp.matmul(mat_h, mat_m_i, precision=lax.Precision.HIGHEST)
         new_error = jnp.max(jnp.abs(new_mat_m - identity))
         # sometimes error increases after an iteration before decreasing and
         # converging. 1.2 factor is used to bound the maximal allowed increase.
-        return (i + 1, new_mat_m, new_mat_h, mat_h, new_error,
-                new_error < error * 1.2)
+        return i + 1, new_mat_m, new_mat_h, mat_h, new_error, new_error < error * 1.2
 
     if matrix_size == 1:
         resultant_mat_h = (matrix + ridge_epsilon) ** alpha
@@ -227,11 +219,15 @@ def matrix_inverse_pth_root(matrix, p, num_iters=100, ridge_epsilon=1e-6, error_
         new_mat_h_0 = identity * jnp.power(z, 1.0 / p)
         init_state = tuple([0, new_mat_m_0, new_mat_h_0, new_mat_h_0, new_error, True])
         _, mat_m, mat_h, old_mat_h, error, convergence = lax.while_loop(_iter_condition, _iter_body, init_state)
-        error = jnp.max(jnp.abs(mat_m - identity)).astype(jnp.float32)
+        error = jnp.max(jnp.abs(mat_m - identity))
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)
         resultant_mat_h = is_converged * mat_h + (1 - is_converged) * old_mat_h
-        resultant_mat_h = jnp.asarray(resultant_mat_h, orig_dtype)
     return resultant_mat_h, error
+
+
+def fallback_pth_root(prev: jnp.array, step: jnp.ndarray, stat: jnp.array, p: int, eps: float):
+    new_p, error = matrix_inverse_pth_root(stat, step, p, ridge_epsilon=eps)
+    return select_preconditioner(error, new_p, prev)
 
 
 def merge_small_dims(shape_to_merge, max_dim):

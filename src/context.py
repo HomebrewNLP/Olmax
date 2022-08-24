@@ -2,9 +2,9 @@ import copy
 import os
 import typing
 
+import jax
 import yaml
 from jax import numpy as jnp, random
-import jax
 
 
 class DataClass:
@@ -103,6 +103,7 @@ class TensorboardTrace(DataClass):
 
 class WandB(DataClass):
     name: typing.Optional[str] = None
+    id: typing.Optional[str] = None
     use_wandb: bool = True
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
@@ -112,9 +113,12 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
+    nesterov: bool = True
+    heavyball: bool = True
+    graft_to_adam: bool = False
     use_shampoo: bool = True
     block_size: int = 512
-    epsilon: float = 1e-8
+    epsilon: float = 1e-16
     start_preconditioning_step: int = 16
     preconditioning_compute_steps: int = 128
     statistics_compute_steps: int = 4
@@ -140,7 +144,7 @@ class Optimizer(DataClass):
 class Model(DataClass):
     conv_scale: float = 4.
     conv_shift: float = 8.
-    norm_eps: float = 1e-8
+    norm_eps: float = 1e-16
     qrnn_frequency: int = 8
     rezero_lr_scale: float = 0.01
     leaky_relu_slope: float = 0.01
@@ -164,6 +168,7 @@ class EarlyStopping(DataClass):
 
 
 class Training(DataClass):
+    debug: bool = False
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_load_path: str = ""
     checkpoint_interval: float = 16384
@@ -252,7 +257,8 @@ class WhileContext(DataClass):
 
     def _serialize(self) -> dict:
         return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'data': self.data,
-                'parameter_variance': self.ctx.parameter_variance}
+                'parameter_variance': self.ctx.parameter_variance
+                }
 
     def __call__(self, data: jnp.ndarray):
         self.data = data

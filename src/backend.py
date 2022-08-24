@@ -10,6 +10,28 @@ from .context import Context
 
 INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 
+Output = typing.TypeVar("Output")
+CtxFn = typing.TypeVar("CtxFn")
+
+
+def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
+    return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
+
+
+def with_context(count: typing.Optional[bool] = None) -> CtxFn:
+    def _inner(fn: CtxFn) -> CtxFn:
+        prefix_kwargs = {"appended": fn.__name__}
+        if count is not None:
+            prefix_kwargs["count"] = count
+
+        def _fn(ctx: Context, *args, **kwargs):
+            local_ctx = ctx.add_to_prefix(**prefix_kwargs)
+            return fn(local_ctx, *args, **kwargs)
+
+        return _fn
+
+    return _inner
+
 
 def is_main():
     return jax.process_index() == 0

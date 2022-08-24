@@ -1,8 +1,10 @@
 import random
+import typing
 
+import jax
+import numpy as np
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
-from tensorflow.python.data.ops.dataset_ops import _NumpyIterator as NumpyIterator
 
 from .context import Context
 
@@ -37,14 +39,30 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
         dat = tf.reshape(dat, (-1, batch_prod))
         return tf.data.Dataset.from_tensor_slices(dat)
 
-    return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1, deterministic=True)
+    return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1, deterministic=False)
 
 
-def text_dataset(ctx: Context) -> NumpyIterator:
+def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
+    rstate = np.random.RandomState(0)
+    while True:
+        start = rstate.uniform(1, 2 ** 30, (ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
+        multiplier = rstate.normal(size=(ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
+        out = np.arange(0, ctx.dims.sequence + 1).astype(np.int64).reshape(1, -1)
+        out += start
+        yield (np.sin(out) * multiplier * ctx.dims.vocab) % ctx.dims.vocab
+
+
+def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
+    if ctx.training.debug:
+        return debug_generator(ctx)
+
     filenames = tf.io.gfile.glob(ctx.data.path)
 
     rng = random.Random(ctx.data.seed)
     rng.shuffle(filenames)
+
+    file_slice = len(filenames) / jax.process_count()
+    filenames = filenames[int(file_slice * jax.process_index()):int(file_slice * (jax.process_index() + 1))]
 
     dset = tf.data.Dataset.from_tensor_slices(filenames).repeat()
     sequence_length = ctx.dims.sequence
@@ -56,30 +74,25 @@ def text_dataset(ctx: Context) -> NumpyIterator:
 
     def _slice_target(x):
         """
-        We're transposing here to ensure that the sampled data is balanced not only between batches but also within
-        the batch.
-        With 2 data loaders and a batch of 4, you'd have [[1, 1, 1, 1], [2, 2, 2, 2]] as returned sample without it and
-        [[1, 2, 1, 2], [1, 2, 1, 2]] with it.
-        :param x: tensor that's sliced
-        :return: src/tgt
+        :param x: tensor
+        :return: Shape[Steps * Batch, Sequence + 1]
         """
-        x = tf.reshape(x, (batch_size, device_steps, sequence_length_1))
+        x = tf.reshape(x, (device_steps * batch_size, sequence_length_1))
         x = tf.cast(x, tf.int32)
-        x = tf.transpose(x, (1, 0, 2))
-        return tf.stack([x[:, :, :sequence_length], x[:, :, 1:]], 1)
+        return x
 
     dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, rng.randint(0, 2 ** 32),
                                              sequence_length_1, full_batch // ctx.data.datasets_used_per_step),
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_workers,
-                           deterministic=True)
+                           deterministic=False)
     if ctx.data.shuffle_buffer > 0:
         dset = dset.shuffle(ctx.data.shuffle_buffer, seed=rng.randint(0, 2 ** 32))
-    dset = dset.batch(ctx.data.datasets_used_per_step, deterministic=True).map(_slice_target, deterministic=True)
+    dset = dset.batch(ctx.data.datasets_used_per_step, deterministic=False).map(_slice_target, deterministic=False)
     if ctx.data.prefetch_buffer > 0:
         dset = dset.prefetch(ctx.data.prefetch_buffer)
     options = tf.data.Options()
-    options.deterministic = True
+    options.deterministic = False
     options.experimental_optimization.apply_default_optimizations = True
     options.experimental_optimization.filter_fusion = True
     options.experimental_optimization.map_and_batch_fusion = True
@@ -89,9 +102,8 @@ def text_dataset(ctx: Context) -> NumpyIterator:
     options.experimental_optimization.noop_elimination = True
     options.experimental_optimization.parallel_batch = True
     options.experimental_optimization.shuffle_and_repeat_fusion = True
-    options.threading.max_intra_op_parallelism = 1
     options.threading.private_threadpool_size = 96
-    options.experimental_slack = False
+    options.experimental_slack = True
     options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
     dset = dset.with_options(options)
     return dset.as_numpy_iterator()

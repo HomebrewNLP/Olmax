@@ -9,34 +9,57 @@ import jax
 import jax._src.util as util
 import wandb
 import yaml
-from jax import numpy as jnp
+from jax import lax, numpy as jnp
+from jax.experimental.compilation_cache import compilation_cache
 
-from src.backend import device_id, loop, is_main
+from src.backend import device_id, loop
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
-from src.model import body_ctx, compute
+from src.model.main import body_ctx, compute
 from src.optimizer import get_current_lr, update
 from src.utils.checkpoint import read_ckpt, write_ckpt
 from src.utils.wandblog import WandbLog
 
+jax.distributed.initialize()
+
+compilation_cache.initialize_cache("compilation_cache")
+
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
+    steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
-    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters,
-                                      wctx.data[wctx.current_step % wctx.ctx.training.device_steps])
+    data_slice = wctx.data[wctx.current_step % steps]
+    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
-    wctx.loss += loss
-    wctx.top_loss += accuracy
+    wctx.loss += loss / steps  # higher numerical accuracy if we divide before summing
+    wctx.top_loss += accuracy / steps
     wctx.current_step += 1
     return wctx.serialize()
 
 
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-    training = WhileTrainContext(while_ctx_dict).ctx.training
+    wctx = WhileTrainContext(while_ctx_dict)
+    training = wctx.ctx.training
+    steps = training.device_steps * jax.process_count()
+    step_batch, sequence_p1 = wctx.data.shape
 
-    return loop(train_step, while_ctx_dict, training.device_steps, training.device_unroll)
+    # "all-to-all" / "all-concat" with jax.process_count() outputs instead of jax.device_count() outputs
+    # init sparse tensor with 0s everywhere except for local input slice
+    data = jnp.zeros((jax.process_count(), step_batch, sequence_p1), wctx.data.dtype)
+    data = data.at[jax.process_index(), :, :].set(wctx.data)
+    # same value was seen `local_device_count` times, so divide to remove implicit multiplication (int32 --> accurate)
+    data = lax.psum(data, ParallelAxes.model).astype(wctx.data.dtype) // jax.local_device_count()
+
+    # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
+    # process_count, steps * batch, sequence
+    # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
+    # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
+    data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
+    wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
+
+    return loop(train_step, wctx.serialize(), steps, training.device_unroll)
 
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):
@@ -52,7 +75,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         ctx.prng_key = initial_prng_key
         ctx.seed = initial_seed
         ctx.parameter_variance = {}
-        return params, var
+        return params, jax.tree_util.tree_map(lambda x: lax.psum(x / ctx.dims.heads, ParallelAxes.model), var)
 
     inp = jnp.broadcast_to(inp, (len(jax.local_devices()),) + inp.shape)
     pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0,), out_axes=(0, 0), donate_argnums=(0,))
@@ -98,13 +121,19 @@ def train_loop(wctx: WhileTrainContext, step: typing.Callable):
     return _fn
 
 
+def replicate(x: typing.Any) -> typing.Any:
+    return jax.device_put_replicated(x, jax.local_devices())
+
+
 def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
     print(yaml.dump(wctx.ctx.config(), indent=4))
-    total_steps = wctx.ctx.training.steps * wctx.ctx.training.device_steps
+    device_steps = wctx.ctx.training.device_steps * jax.process_count()
+    total_steps = wctx.ctx.training.steps * device_steps
     data = timeit("Initializing dataset", text_dataset, wctx.ctx)
-    inp = timeit("Enqueueing first batch", next, data)[0, 0]
+    data = map(replicate, data)
+    inp = timeit("Enqueueing first batch", next, data)[:wctx.ctx.dims.batch]
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items())
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
@@ -114,8 +143,8 @@ def run_one(wblog: WandbLog):
         read_ckpt(wctx.ctx)
 
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()},
-                 'parameter_variance': {k: None for k in wctx.ctx.parameter_variance.keys()}, 'data': None,
-                 'current_step': None, 'loss': None, 'top_loss': None
+                 'parameter_variance': {k: 0 for k in wctx.ctx.parameter_variance.keys()}, 'data': 0,
+                 'current_step': 0, 'loss': 0, 'top_loss': 0
                  }
 
     wctx.current_step += wctx.ctx.training.start_step
@@ -123,6 +152,11 @@ def run_one(wblog: WandbLog):
 
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
+
+    wctx.ctx.parameter_variance = replicate(wctx.ctx.parameter_variance)
+    wctx.current_step = replicate(wctx.current_step)
+    wctx.loss = replicate(wctx.loss)
+    wctx.top_loss = replicate(wctx.top_loss)
 
     timeit("Compiling model and performing first step", step, next(data))
     timeit("Running second step", step, next(data))
@@ -135,20 +169,20 @@ def run_one(wblog: WandbLog):
         step_start = time.time()
         wctx = step(dat)
         if idx % wctx.ctx.training.print_interval == 0:
-            millions_processed = wctx.ctx.training.device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
-            print(f'[{idx * wctx.ctx.training.device_steps:{len(str(total_steps))}d}/{total_steps}] '
-                  f'Loss: {wctx.loss / wctx.ctx.training.device_steps:6.3f} - '
-                  f'TopLoss: {wctx.top_loss / wctx.ctx.training.device_steps:8.3f} | '
-                  f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step)):.5f} | '
+            tokens_processed = device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
+            print(f'[{idx * device_steps:{len(str(total_steps))}d}/{total_steps}] '
+                  f'Loss: {wctx.loss[0]:6.3f} - '
+                  f'Accuracy: {wctx.top_loss[0]:8.3f} | '
+                  f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step[0])):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
-                  f'Rate: {millions_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
-        if jnp.isnan(wctx.loss):
+                  f'Rate: {tokens_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
+        if jnp.isnan(wctx.loss[0]):
             print("Loss is NaN")
             return wblog.loss_medians[-1]
         if wctx.ctx.wandb.use_wandb and idx % wctx.ctx.wandb.log_frequency == 0:
-            if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step)):
+            if wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step[0])):
                 pass  # return wblog.loss_medians[-1]
-        log_step = math.log2((idx + 1) * wctx.ctx.training.device_steps + 1)
+        log_step = math.log2((idx + 1) * device_steps + 1)
         el = wctx.ctx.training.early_stopping.expected_loss
         expected_loss = el.offset + el.scale * math.exp(el.exponent * log_step)
         patience = 1 + wctx.ctx.training.early_stopping.loss_patience ** log_step
@@ -161,8 +195,7 @@ def run_one(wblog: WandbLog):
                 jax.profiler.start_trace(wctx.ctx.training.trace.output_path)
             if idx == wctx.ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
-        if wctx.ctx.training.do_checkpoint \
-                and (idx + 1) % (wctx.ctx.training.checkpoint_interval // wctx.ctx.training.device_steps) == 0:
+        if wctx.ctx.training.do_checkpoint and (idx + 1) % (wctx.ctx.training.checkpoint_interval // device_steps) == 0:
             write_ckpt(wctx.ctx)
 
 
@@ -180,8 +213,8 @@ def main():
     wctx = WhileTrainContext()
     ctx = wctx.ctx
 
-    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name)
-    wblog = WandbLog(run)
+    run = wandb.init(project=ctx.wandb.project, entity=ctx.wandb.entity, config=ctx.config(), name=ctx.wandb.name,
+                     id=ctx.wandb.id)
 
     cfg = {}
     for param_name, param in run.config.items():
@@ -196,6 +229,8 @@ def main():
         inner_cfg[split_name[-1]] = param
     init_class(ctx, cfg)
     dump_ctx(ctx, run)
+
+    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count())
     return run_one(wblog)
 
 

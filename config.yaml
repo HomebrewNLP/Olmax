@@ -29,7 +29,7 @@ model:
     conv_scale: 4.0
     conv_shift: 8.0
     leaky_relu_slope: 0.02
-    norm_eps: 1.0e-12
+    norm_eps: 1.0e-16
     qrnn_frequency: 8
     rezero_lr_scale: 0.01
     storage_dtype: float32
@@ -38,7 +38,7 @@ optimizer:
     adam_beta2: 0.003
     block_size: 512
     bottleneck_scale: 1
-    epsilon: 1.0e-12
+    epsilon: 1.0e-16
     exponential_decay: 3.0e-06
     gradient_clip: 0.001
     input_scale: 1
