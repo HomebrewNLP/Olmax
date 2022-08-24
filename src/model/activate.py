@@ -5,11 +5,11 @@ from src.context import Context
 
 
 def activate_forward(inp: jnp.ndarray) -> jnp.ndarray:
-    return jax.nn.tanh(inp) + 0.1 * inp
+    return jnp.where(inp > 0, inp, inp * 0.01)
 
 
 def activate_grad(inp: jnp.ndarray) -> jnp.ndarray:
-    return 1.1 - jax.nn.tanh(inp) ** 2
+    return jnp.where(inp > 0, 1, 0.01)
 
 
 def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
