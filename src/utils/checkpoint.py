@@ -57,7 +57,7 @@ def write_ckpt(ctx: Context):
             try:
                 with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
                     f.write(structure)
-            except:
+            except:  # skipcq: FLK-E722
                 print("Failed to save structure. Traceback:")
                 traceback.print_exc()
                 continue
