@@ -123,6 +123,9 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         computation_dtype = dtype
         storage_dtype = dtype
 
+    if ctx.add_depth:
+        shape = [ctx.dims.batch] + list(shape)
+
     if prefix_name not in ctx.parameters:
         if init_val is not None:
             param = init_val * scale * post_variance_scale

@@ -48,7 +48,7 @@ def parse_args():
     parser.add_argument("--branch", type=str, default="main", help="Branch on github to use")
     parser.add_argument("--slices", default=1, type=int,
                         help="How many TPU slices each TPU should have (1=>vX-8, 4=>vX-32)")
-    parser.add_argument("--storage-prefix", type=str, help="Storage prefix to use for all runs on WandB")
+    parser.add_argument("--storage-prefix", type=str, help="Storage prefix to use for weights on gcloud bucket")
     parser.add_argument("--config-path", type=str, help="Path to config.yaml")
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")

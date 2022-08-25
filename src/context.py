@@ -219,6 +219,7 @@ class Context(DataClass):
         self.parameter_variance: typing.Dict[str, float] = {}
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
+        self.add_depth = False
 
         if config is not None:
             self.__dict__.update(config)

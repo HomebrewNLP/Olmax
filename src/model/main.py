@@ -1,7 +1,7 @@
 import typing
 
 import jax
-from jax import numpy as jnp
+from jax import lax, numpy as jnp
 
 from src.backend import get_param, with_context
 from src.context import Context
@@ -9,7 +9,7 @@ from src.model.conv import bottleneck_block, pointwise_block
 from src.model.loss import cross_entropy_loss
 from src.model.norm import scale_norm_act
 from src.model.qrnn import qrnn_block
-from src.model.reversible import reversible, revnet_out
+from src.model.reversible import REVERSIBLE_CTX, ReversibleFn, reversible, revnet_out
 
 
 @with_context()
@@ -23,17 +23,33 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.checkpoint(_fn)(inp, param)
 
 
-def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
-    src = input_embed(ctx, src)
-    zero = jnp.zeros_like(src)
-    src = (ctx.parameters, src, zero, src, zero)
-    for i in range(ctx.dims.depth):
+@with_context()
+def step(ctx: Context):
+    def _fn(carry: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+            x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> REVERSIBLE_CTX:
+        params, idx = x
+        src = [params] + list(carry)
         src = reversible(ctx, pointwise_block, src)
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, pointwise_block, src)
-        if i % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-            src = reversible(ctx, qrnn_block, src)
-    ctx.parameters = src[0]
+        # src = lax.cond(idx % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1),
+        #                lambda s: reversible(ctx, qrnn_block, s), lambda s: s, src)
+        ctx.parameters = None
+        return src[1:]
+
+    return _fn
+
+
+def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+    src = input_embed(ctx, src)
+    zero = jnp.zeros_like(src)
+    src = (src, zero, src, zero)
+    if ctx.is_initializing:
+        ctx.add_depth = True
+        src = step(ctx)(src, ({}, 0))
+        ctx.add_depth = False
+    else:
+        src = lax.scan(step, src, (ctx.parameters, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src[1:])
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
