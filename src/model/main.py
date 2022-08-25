@@ -1,3 +1,4 @@
+import copy
 import typing
 
 import jax
@@ -24,9 +25,12 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context):
+    name_cache = copy.deepcopy(ctx.name_cache)
+
     def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]
             ) -> typing.Tuple[FourArrays, None]:
         params, idx = x
+        ctx.name_cache = copy.deepcopy(name_cache)
         src = [params] + list(carry)
         src = reversible(ctx, pointwise_block, src)
         src = reversible(ctx, bottleneck_block, src)
@@ -34,6 +38,7 @@ def step(ctx: Context):
         # src = lax.cond(idx % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1),
         #                lambda s: reversible(ctx, qrnn_block, s), lambda s: s, src)
         ctx.parameters = None
+        ctx.name_cache = name_cache
         return src[1:], None
 
     return _fn
