@@ -8,8 +8,7 @@ from src.context import Context
 from src.model.conv import bottleneck_block, pointwise_block
 from src.model.loss import cross_entropy_loss
 from src.model.norm import scale_norm_act
-from src.model.qrnn import qrnn_block
-from src.model.reversible import REVERSIBLE_CTX, ReversibleFn, reversible, revnet_out
+from src.model.reversible import REVERSIBLE_CTX, reversible, revnet_out, FourArrays
 
 
 @with_context()
@@ -25,8 +24,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context):
-    def _fn(carry: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
-            x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> REVERSIBLE_CTX:
+    def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> FourArrays:
         params, idx = x
         src = [params] + list(carry)
         src = reversible(ctx, pointwise_block, src)
@@ -49,8 +47,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = step(ctx)(src, ({}, 0))
         ctx.add_depth = False
     else:
-        src = lax.scan(step, src, (ctx.parameters, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
-    out = revnet_out(src[1:])
+        src = lax.scan(step(ctx), src, (ctx.parameters, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
+    out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
                     lr_scale=ctx.optimizer.output_scale, scale=1 / ctx.dims.heads)
