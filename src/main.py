@@ -125,17 +125,28 @@ def replicate(x: typing.Any) -> typing.Any:
     return jax.device_put_replicated(x, jax.local_devices())
 
 
+def skip_samples(samples: int, data: typing.Iterator):
+    for _ in range(samples):
+        next(data)
+
+
 def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
     print(yaml.dump(wctx.ctx.config(), indent=4))
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
-    data = timeit("Initializing dataset", text_dataset, wctx.ctx)
-    data = map(replicate, data)
+    np_data = timeit("Initializing dataset", text_dataset, wctx.ctx)
+
+    data = map(replicate, np_data)
     inp = timeit("Enqueueing first batch", next, data)[:wctx.ctx.dims.batch]
+
+    samples = math.ceil(wctx.ctx.training.start_step / jax.process_count() / wctx.ctx.training.device_steps)
+    timeit(f"Skipping first {samples} samples", skip_samples, samples, np_data)
+
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items())
+
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
     buffer_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items()) - parameter_count
 

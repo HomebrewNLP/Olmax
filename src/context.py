@@ -65,6 +65,7 @@ class DataContext(DataClass):
     interleaved_datasets: int = 2
     prefetch_buffer: int = 2
     seed: int = 0
+    deterministic: bool = True
     vocab_size: int = 256  # should be divisible by 128
     datasets_used_per_step: int = 2
 
