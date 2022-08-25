@@ -45,7 +45,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (src, zero, src, zero)
     if ctx.is_initializing:
         ctx.add_depth = True
-        src = step(ctx)(src, ({}, 0))
+        src, _ = step(ctx)(src, ({}, 0))
         ctx.add_depth = False
     else:
         params = {p: k for p, k in ctx.parameters.items() if 'optimizer' not in p and k.shape[0] == ctx.dims.depth}
