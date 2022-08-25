@@ -8,7 +8,7 @@ from src.context import Context
 from src.model.conv import bottleneck_block, pointwise_block
 from src.model.loss import cross_entropy_loss
 from src.model.norm import scale_norm_act
-from src.model.reversible import REVERSIBLE_CTX, reversible, revnet_out, FourArrays
+from src.model.reversible import FourArrays, reversible, revnet_out
 
 
 @with_context()
@@ -47,7 +47,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src = step(ctx)(src, ({}, 0))
         ctx.add_depth = False
     else:
-        src = lax.scan(step(ctx), src, (ctx.parameters, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
+        params = {p: k for p, k in ctx.parameters.items() if 'optimizer' not in p and k.shape[0] == ctx.dims.depth}
+        src = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
