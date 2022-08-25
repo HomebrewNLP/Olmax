@@ -24,7 +24,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context):
-    def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]) -> FourArrays:
+    def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]
+            ) -> typing.Tuple[FourArrays, None]:
         params, idx = x
         src = [params] + list(carry)
         src = reversible(ctx, pointwise_block, src)
@@ -33,7 +34,7 @@ def step(ctx: Context):
         # src = lax.cond(idx % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1),
         #                lambda s: reversible(ctx, qrnn_block, s), lambda s: s, src)
         ctx.parameters = None
-        return src[1:]
+        return src[1:], None
 
     return _fn
 
@@ -48,7 +49,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         ctx.add_depth = False
     else:
         params = {p: k for p, k in ctx.parameters.items() if 'optimizer' not in p and k.shape[0] == ctx.dims.depth}
-        src = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
+        src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
