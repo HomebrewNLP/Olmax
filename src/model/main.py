@@ -27,16 +27,19 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def step(ctx: Context):
     name_cache = copy.deepcopy(ctx.name_cache)
 
-    def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]
-            ) -> typing.Tuple[FourArrays, None]:
+    def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         params, idx = x
         ctx.name_cache = copy.deepcopy(name_cache)
+        ctx.parameters = params
         src = [params] + list(carry)
         src = reversible(ctx, pointwise_block, src)
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, pointwise_block, src)
         # src = lax.cond(idx % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1),
         #                lambda s: reversible(ctx, qrnn_block, s), lambda s: s, src)
+        if ctx.is_initializing:
+            return params
+
         ctx.parameters = None
         ctx.name_cache = name_cache
         return src[1:], None
@@ -50,7 +53,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (src, zero, src, zero)
     if ctx.is_initializing:
         ctx.add_depth = True
-        src, _ = step(ctx)(src, ({}, 0))
+        ctx.parameters = step(ctx)(src, ({}, 0))
         ctx.add_depth = False
     else:
         params = {p: k for p, k in ctx.parameters.items() if 'optimizer' not in p and k.shape[0] == ctx.dims.depth}
