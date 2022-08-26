@@ -16,7 +16,7 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_feat
                        lr_scale=fan_in)
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,))
-    return lax_conv(inp, weight, [(weight.shape[-1] - 1, 0)], 1)
+    return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1)
 
 
 @prenorm
