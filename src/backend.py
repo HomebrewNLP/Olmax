@@ -63,8 +63,8 @@ def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
 
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
     ndim = weight.ndim
-    dimension_numbers = (0, ndim - 1) + tuple(range(1, ndim - 1))
-    dimension_numbers = lax.ConvDimensionNumbers(dimension_numbers, tuple(range(ndim)), dimension_numbers)
+    lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
+    dimension_numbers = lax.ConvDimensionNumbers(lhs, (0, ndim - 1,) + tuple(range(1, ndim - 1)), lhs)
     return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
                                     dimension_numbers=dimension_numbers, precision='fastest')
 
