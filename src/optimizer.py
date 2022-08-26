@@ -104,7 +104,7 @@ def is_stacked(ctx: Context, val: jnp.ndarray):
 def clip_norm(ctx: Context, val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
     val = lax.square(val)
     if is_stacked(ctx, val):
-        val = val.sum(tuple(range(1, val.ndim)))
+        val = val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * val.ndim)
     else:
         val = val.sum()
     return jnp.maximum(jnp.sqrt(val), min_norm)
