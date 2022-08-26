@@ -124,13 +124,18 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         storage_dtype = dtype
 
     if ctx.add_depth:
-        shape = [ctx.dims.batch] + list(shape)
+        shape = [ctx.dims.depth] + list(shape)
 
     if prefix_name not in ctx.parameters:
         if init_val is not None:
             param = init_val * scale * post_variance_scale
         elif std is None and mean is None:
-            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+            if ctx.add_depth:
+                shape = shape[1:]
+                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
+                                   range(ctx.dims.depth)], 0)
+            else:
+                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
             param *= scale * post_variance_scale
         else:
             param = normal(ctx, shape) * scale
