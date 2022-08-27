@@ -38,7 +38,7 @@ def step(ctx: Context):
             src = reversible(ctx, bottleneck_block, src)
             src = reversible(ctx, pointwise_block, src)
             if depth % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-                src = reversible(ctx, qrnn_block, s)  # lax.cond could work but requires work on the parameter store
+                src = reversible(ctx, qrnn_block, src)  # lax.cond could work but requires work on the parameter store
         if ctx.is_initializing:
             return params
 
