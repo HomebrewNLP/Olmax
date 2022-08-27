@@ -9,6 +9,7 @@ from src.context import Context
 from src.model.conv import bottleneck_block, pointwise_block
 from src.model.loss import cross_entropy_loss
 from src.model.norm import scale_norm_act
+from src.model.qrnn import qrnn_block
 from src.model.reversible import FourArrays, reversible, revnet_out
 
 
