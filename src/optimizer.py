@@ -32,15 +32,17 @@ def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
     return grad * stable_rsqrt(weight_update, ctx.optimizer.epsilon)
 
 
-def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
-    return "norm" in param_name.lower() or "rezero" in param_name.lower() or grad.ndim < 2
+def small_parameter(ctx: Context, param_name: str, grad: jnp.ndarray) -> bool:
+    is_small = "norm" in param_name.lower() or "rezero" in param_name.lower()
+    is_small |= grad.ndim < (2 + is_stacked(ctx, param_name, grad))
+    return is_small
 
 
 @with_context(count=False)
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize: typing.Optional[bool] = None,
         init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None) -> jnp.ndarray:
     if quantize is None:
-        quantize = not small_parameter(ctx.global_prefix, inp)
+        quantize = not small_parameter(ctx, ctx.global_prefix, inp)
     if heavyball is None:
         heavyball = ctx.optimizer.heavyball
     if nesterov is None:
@@ -143,11 +145,11 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
-        if small_parameter(param_name, grad) or ctx.optimizer.graft_to_adam:  # Do adam update for small parameters
+        if small_parameter(ctx, param_name, grad) or ctx.optimizer.graft_to_adam:  # Do adam update for small parameters
             weight_update = adam(ctx, grad, step)
         else:
             weight_update = sm3(ctx, grad)
-        if not small_parameter(param_name, grad):
+        if not small_parameter(ctx, param_name, grad):
             if ctx.optimizer.use_shampoo:
                 if is_stacked(ctx, param_name, grad):
                     weight_update = jnp.stack([grafted_shampoo(ctx, weight_update, grad[i], step)
