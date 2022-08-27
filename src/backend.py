@@ -99,6 +99,7 @@ def normal(ctx: Context, shape: typing.Sequence[int]):
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
+    column_axes = tuple(column_axes)
     axes = tuple([shape[c] for c in column_axes])
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
@@ -123,22 +124,18 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         computation_dtype = dtype
         storage_dtype = dtype
 
-    if ctx.add_depth:
-        shape = [ctx.dims.depth] + list(shape)
-
     if prefix_name not in ctx.parameters:
         if init_val is not None:
             param = init_val * scale * post_variance_scale
         elif std is None and mean is None:
             if ctx.add_depth:
-                shape = shape[1:]
                 param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
                                    range(ctx.dims.depth)], 0)
             else:
                 param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
             param *= scale * post_variance_scale
         else:
-            param = normal(ctx, shape) * scale
+            param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape)) * scale
             if std is not None:
                 param *= std
             if mean is not None:
