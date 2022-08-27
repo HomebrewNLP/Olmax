@@ -33,12 +33,13 @@ def step(ctx: Context):
         ctx.name_cache = copy.deepcopy(name_cache)
         ctx.parameters = params
         src = [params] + list(carry)
-        for depth in range(ctx.model.qrnn_frequency):
-            src = reversible(ctx, pointwise_block, src)
-            src = reversible(ctx, bottleneck_block, src)
-            src = reversible(ctx, pointwise_block, src)
-            if depth % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-                src = reversible(ctx, qrnn_block, src)  # lax.cond could work but requires work on the parameter store
+        for _ in range(ctx.model.unroll_depth):
+            for depth in range(ctx.model.qrnn_frequency):
+                src = reversible(ctx, pointwise_block, src)
+                src = reversible(ctx, bottleneck_block, src)
+                src = reversible(ctx, pointwise_block, src)
+                if depth % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
+                    src = reversible(ctx, qrnn_block, src)  # lax.cond could work but requires work on the parameter store
         if ctx.is_initializing:
             return params
 
