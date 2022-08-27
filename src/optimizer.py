@@ -138,25 +138,24 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         if "optimizer" in param_name:
             continue
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
-        if grad.shape[0] == ctx.dims.depth:
-            parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
-            grad = grad.astype(jnp.float64)
+        parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
+        grad = grad.astype(jnp.float64)
 
-            grad = adaptive_gradient_clipping(ctx, param_name, grad)
+        grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
-            if small_parameter(param_name, grad) or ctx.optimizer.graft_to_adam:  # Do adam update for small parameters
-                weight_update = adam(ctx, grad, step)
-            else:
-                weight_update = sm3(ctx, grad)
-            if not small_parameter(param_name, grad):
-                if ctx.optimizer.use_shampoo:
-                    if is_stacked(ctx, param_name, grad):
-                        weight_update = jnp.stack([grafted_shampoo(ctx, weight_update, grad[i], step)
-                                                   for i in range(grad.shape[0])], 0)
-                    else:
-                        weight_update = grafted_shampoo(ctx, weight_update, grad, step)
-                weight_update = ema(ctx, weight_update, step, 1 - ctx.optimizer.momentum_beta)
-                ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[
-                    param_name]
-            weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
-            ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
+        if small_parameter(param_name, grad) or ctx.optimizer.graft_to_adam:  # Do adam update for small parameters
+            weight_update = adam(ctx, grad, step)
+        else:
+            weight_update = sm3(ctx, grad)
+        if not small_parameter(param_name, grad):
+            if ctx.optimizer.use_shampoo:
+                if is_stacked(ctx, param_name, grad):
+                    weight_update = jnp.stack([grafted_shampoo(ctx, weight_update, grad[i], step)
+                                               for i in range(grad.shape[0])], 0)
+                else:
+                    weight_update = grafted_shampoo(ctx, weight_update, grad, step)
+            weight_update = ema(ctx, weight_update, step, 1 - ctx.optimizer.momentum_beta)
+            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[
+                param_name]
+        weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
+        ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
