@@ -23,10 +23,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.checkpoint(_fn)(inp, param)
 
 
-@with_context()
 def step(ctx: Context):
-    def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
-        params, idx = x
+    def _fn(carry: FourArrays, params: typing.Dict[str, jnp.ndarray]):
         src = [params] + list(carry)
         for _ in range(ctx.model.unroll_depth):
             for depth in range(ctx.model.qrnn_frequency):
@@ -49,9 +47,9 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (src, zero, src, zero)
     if ctx.is_initializing:
-        ctx.parameters = step(ctx)(src, ({}, 0))
+        ctx.parameters = step(ctx)(src, {})
     else:
-        src, _ = step(ctx)(src, (ctx.parameters, 0))
+        src, _ = step(ctx)(src, ctx.parameters)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
