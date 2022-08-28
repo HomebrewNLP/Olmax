@@ -1,4 +1,3 @@
-import copy
 import typing
 
 import jax
@@ -38,7 +37,7 @@ def step(ctx: Context):
                     src = reversible(ctx, qrnn_block, src)
                     # lax.cond could work but requires work on the parameter store
         if ctx.is_initializing:
-            return params
+            return src[0]
 
         return src[1:], None
 
