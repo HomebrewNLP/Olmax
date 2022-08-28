@@ -53,14 +53,6 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
     raise ValueError
 
 
-def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
-             padding: typing.List[typing.Tuple[int, int]]) -> jnp.ndarray:
-    strides = (1,) * (len(window_shape) + 2)
-    dims = (1,) + tuple(window_shape) + (1,)
-    padding = ((0, 0),) + tuple(padding) + ((0, 0),)
-    return lax.reduce_window(inputs, 0, lax.add, dims, strides, padding)
-
-
 def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
     return val.shape[0] == ctx.dims.depth and "/step:" in param_name and 'optimizer' not in param_name
 
