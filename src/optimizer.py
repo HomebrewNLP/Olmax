@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import assign, get_param, prefixed_name, stable_rsqrt, with_context, zero_param
+from .backend import assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param
 from .context import Context
 from .shampoo import Preconditioner, fallback_pth_root
 
@@ -97,10 +97,6 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray: 
 def grafted_shampoo(ctx: Context, weight_update: jnp.ndarray, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     shampoo_update = shampoo(ctx, grad, step)
     return graft(weight_update, shampoo_update)
-
-
-def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
-    return val.shape[0] == ctx.dims.depth and "/step:" in param_name
 
 
 def clip_norm(ctx: Context, param_name: str, val: jnp.ndarray, min_norm: float) -> jnp.ndarray:

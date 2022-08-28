@@ -4,7 +4,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, with_context
+from src.backend import get_param, with_context, is_stacked
 from src.context import Context
 from src.model.conv import bottleneck_block, pointwise_block
 from src.model.loss import cross_entropy_loss
@@ -58,7 +58,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         ctx.parameters = step(ctx)(src, ({}, 0))
         ctx.add_depth = False
     else:
-        params = {p: k for p, k in ctx.parameters.items() if 'optimizer' not in p and k.shape[0] == ctx.dims.depth}
+        params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
         src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)

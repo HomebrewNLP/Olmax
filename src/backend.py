@@ -61,6 +61,10 @@ def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
     return lax.reduce_window(inputs, 0, lax.add, dims, strides, padding)
 
 
+def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
+    return val.shape[0] == ctx.dims.depth and "/step:" in param_name and 'optimizer' not in param_name
+
+
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
     ndim = weight.ndim
     lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
