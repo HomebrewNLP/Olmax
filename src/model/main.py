@@ -26,12 +26,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context):
-    name_cache = copy.deepcopy(ctx.name_cache)
-
     def _fn(carry: FourArrays, x: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         params, idx = x
-        ctx.name_cache = copy.deepcopy(name_cache)
-        ctx.parameters = params
         src = [params] + list(carry)
         for _ in range(ctx.model.unroll_depth):
             for depth in range(ctx.model.qrnn_frequency):
@@ -39,13 +35,11 @@ def step(ctx: Context):
                 src = reversible(ctx, bottleneck_block, src)
                 src = reversible(ctx, pointwise_block, src)
                 if depth % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-                    src = reversible(ctx, qrnn_block,
-                                     src)  # lax.cond could work but requires work on the parameter store
+                    src = reversible(ctx, qrnn_block, src)
+                    # lax.cond could work but requires work on the parameter store
         if ctx.is_initializing:
             return params
 
-        ctx.parameters = None
-        ctx.name_cache = name_cache
         return src[1:], None
 
     return _fn
