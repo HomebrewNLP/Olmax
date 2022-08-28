@@ -47,7 +47,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (src, zero, src, zero)
     if ctx.is_initializing:
-        ctx.parameters = step(ctx)(src, {})
+        ctx.parameters = step(ctx)(src, ctx.parameters)
     else:
         src, _ = step(ctx)(src, ctx.parameters)
     out = revnet_out(src)
