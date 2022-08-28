@@ -1,9 +1,9 @@
 import typing
 
 import jax
-from jax import numpy as jnp
+from jax import lax, numpy as jnp
 
-from src.backend import get_param, with_context
+from src.backend import get_param, is_stacked, with_context
 from src.context import Context
 from src.model.conv import bottleneck_block, pointwise_block
 from src.model.loss import cross_entropy_loss
@@ -25,6 +25,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 def step(ctx: Context):
     def _fn(carry: FourArrays, params: typing.Dict[str, jnp.ndarray]):
+        original_parameters = ctx.parameters
+        ctx.parameters = params
         src = [params] + list(carry)
         for _ in range(ctx.model.unroll_depth):
             for depth in range(ctx.model.qrnn_frequency):
@@ -36,7 +38,7 @@ def step(ctx: Context):
                     # lax.cond could work but requires work on the parameter store
         if ctx.is_initializing:
             return src[0]
-
+        ctx.parameters = original_parameters
         return src[1:], None
 
     return _fn
@@ -47,9 +49,12 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     zero = jnp.zeros_like(src)
     src = (src, zero, src, zero)
     if ctx.is_initializing:
+        ctx.add_depth = True
         ctx.parameters = step(ctx)(src, ctx.parameters)
+        ctx.add_depth = False
     else:
-        src, _ = step(ctx)(src, ctx.parameters)
+        params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
+        src, _ = lax.scan(step(ctx), src, params, ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
