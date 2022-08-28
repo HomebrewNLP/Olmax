@@ -81,7 +81,6 @@ class Dims(DataClass):
     moe_intermediate: int = 4096
     heads: int = jax.device_count()
     sequence: int = 4096
-    one: int = 1
     depth: int = 16
 
     def __init__(self, data: DataContext):
@@ -117,13 +116,9 @@ class Optimizer(DataClass):
     nesterov: bool = True
     heavyball: bool = True
     graft_to_adam: bool = False
-    use_shampoo: bool = True
     block_size: int = 512
     epsilon: float = 1e-16
-    start_preconditioning_step: int = 16
-    preconditioning_compute_steps: int = 128
     statistics_compute_steps: int = 4
-    skip_preconditioning_dim_size_gt: int = 1024
     momentum_beta: float = 0.1
     learning_rate: float = 0.01
     gradient_clip: float = 0.001
@@ -148,9 +143,6 @@ class Model(DataClass):
     conv_shift: float = 8.
     norm_eps: float = 1e-16
     qrnn_frequency: int = 8
-    rezero_lr_scale: float = 0.01
-    leaky_relu_slope: float = 0.01
-    activation_std: float = 0.5893595616022745
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
 

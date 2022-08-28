@@ -142,13 +142,12 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         weight_update = adam(ctx, grad, step)
         if not small_parameter(ctx, param_name, grad):
-            if ctx.optimizer.use_shampoo:
-                if is_stacked(ctx, param_name, grad):
-                    shampoo_update = jnp.stack([shampoo(ctx, grad[i], step) for i in range(grad.shape[0])], 0)
-                else:
-                    shampoo_update = shampoo(ctx, grad, step)
-                shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
-                weight_update = graft(ctx, param_name, weight_update, shampoo_update)
+            if is_stacked(ctx, param_name, grad):
+                shampoo_update = jnp.stack([shampoo(ctx, grad[i], step) for i in range(grad.shape[0])], 0)
+            else:
+                shampoo_update = shampoo(ctx, grad, step)
+            shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
+            weight_update = graft(ctx, param_name, weight_update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
