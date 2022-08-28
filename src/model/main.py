@@ -26,7 +26,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
-    src = (src, zero, src, zero)
+    src = (ctx.parameters, src, zero, src, zero)
     for i in range(ctx.dims.depth):
         src = reversible(ctx, pointwise_block, src)
         src = reversible(ctx, bottleneck_block, src)
