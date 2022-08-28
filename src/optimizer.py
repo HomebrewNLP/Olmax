@@ -14,7 +14,7 @@ def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
     return base
 
 
-@with_context(count=False)
+@with_context()
 def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
     weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, grad.shape[0], 0), ctx.model.storage_dtype)
     buffer = [weight_update]
@@ -38,7 +38,7 @@ def small_parameter(ctx: Context, param_name: str, grad: jnp.ndarray) -> bool:
     return is_small
 
 
-@with_context(count=False)
+@with_context()
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize: typing.Optional[bool] = None,
         init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None) -> jnp.ndarray:
     if quantize is None:
@@ -58,18 +58,18 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
     return new_state
 
 
-@with_context(count=False)
+@with_context()
 def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
     buffer = ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2)
     return stable_rsqrt(buffer, ctx.optimizer.epsilon)
 
 
-@with_context(count=False)
+@with_context()
 def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1) * square_ema(ctx, grad, step)
 
 
-@with_context(count=False)
+@with_context()
 def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # skipcq: PYL-W0640
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
@@ -93,7 +93,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray: 
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
 
 
-@with_context(count=False)
+@with_context()
 def grafted_shampoo(ctx: Context, weight_update: jnp.ndarray, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     shampoo_update = shampoo(ctx, grad, step)
     return graft(weight_update, shampoo_update)
@@ -140,6 +140,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         if "optimizer" in param_name:
             continue
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
+        ctx.name_cache = {}
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
         grad = grad.astype(jnp.float64)
 
@@ -157,7 +158,6 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
                 else:
                     weight_update = grafted_shampoo(ctx, weight_update, grad, step)
             weight_update = ema(ctx, weight_update, step, 1 - ctx.optimizer.momentum_beta)
-            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[
-                param_name]
+            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
