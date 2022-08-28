@@ -143,6 +143,7 @@ class Optimizer(DataClass):
 
 
 class Model(DataClass):
+    unroll_depth: int = 1
     conv_scale: float = 4.
     conv_shift: float = 8.
     norm_eps: float = 1e-16
