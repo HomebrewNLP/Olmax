@@ -1,6 +1,7 @@
 import math
 
 import jax
+import numpy as np
 from jax import lax, numpy as jnp
 
 from src.backend import promote_to, with_context
@@ -11,9 +12,9 @@ from src.model.norm import prenorm, scale_norm_act
 
 def qrnn(forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     dtype = forget.dtype
-    for i in range(int(math.log2(x.shape[1]))):
-        x = x.at[:, 2 ** i:].add(x[:, :-2 ** i] * forget[:, 2 ** i:])
-        forget = forget.at[:, 2 ** i:].mul(forget[:, :-2 ** i])
+    for offset in 2 ** np.arange(int(math.log2(x.shape[1]))):
+        x = x.at[:, offset:].add(x[:, :-offset] * forget[:, offset:])
+        forget = forget.at[:, offset:].mul(forget[:, :-offset])
     return x.astype(dtype)
 
 
