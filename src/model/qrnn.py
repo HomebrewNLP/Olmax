@@ -1,6 +1,7 @@
 import math
 
 import jax
+import numpy as np
 from jax import lax, numpy as jnp
 
 from src.backend import promote_to, with_context
@@ -9,11 +10,11 @@ from src.model.conv import conv
 from src.model.norm import prenorm, scale_norm_act
 
 
-def qrnn(ctx: Context, forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+def qrnn(forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     dtype = forget.dtype
-    for i in range(int(math.log2(ctx.dims.sequence))):
-        x += jnp.concatenate([jnp.zeros((x.shape[0], 2 ** i, x.shape[2])), x[:, :-2 ** i] * forget[:, 2 ** i:]], 1)
-        forget *= jnp.concatenate([jnp.ones((x.shape[0], 2 ** i, x.shape[2])), forget[:, :-2 ** i]], 1)
+    for offset in 2 ** np.arange(int(math.log2(x.shape[1]))):
+        x = x.at[:, offset:].add(x[:, :-offset] * forget[:, offset:])
+        forget = forget.at[:, offset:].mul(forget[:, :-offset])
     return x.astype(dtype)
 
 
@@ -24,7 +25,7 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
     @jax.custom_gradient
     def _fn(fgt: jnp.ndarray, inp: jnp.ndarray):
         dtype = inp.dtype
-        out = qrnn(ctx, jax.nn.hard_sigmoid(promote_to(fgt, jnp.float32)), promote_to(inp, jnp.float32))
+        out = qrnn(jax.nn.hard_sigmoid(promote_to(fgt, jnp.float32)), promote_to(inp, jnp.float32))
         out = out.astype(dtype)
 
         def _grad(dy: jnp.ndarray):
@@ -33,7 +34,7 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
             f = lax.rev(f, (1,))
             f = jnp.concatenate([jnp.ones((x.shape[0], 1, x.shape[2])), f[:, :-1]], 1)
             dy_rev = lax.rev(dy, (1,))
-            dx = lax.rev(qrnn(ctx, f, dy_rev), (1,))
+            dx = lax.rev(qrnn(f, dy_rev), (1,))
             df = dx * promote_to(out, jnp.float32)
             df = jnp.where(jnp.logical_or(fgt > 3, fgt < -3), 0, df / 6)
             df = df.astype(dtype)

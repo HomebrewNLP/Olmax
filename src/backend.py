@@ -53,18 +53,14 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
     raise ValueError
 
 
-def sum_pool(inputs: jnp.ndarray, window_shape: typing.List[int],
-             padding: typing.List[typing.Tuple[int, int]]) -> jnp.ndarray:
-    strides = (1,) * (len(window_shape) + 2)
-    dims = (1,) + tuple(window_shape) + (1,)
-    padding = ((0, 0),) + tuple(padding) + ((0, 0),)
-    return lax.reduce_window(inputs, 0, lax.add, dims, strides, padding)
+def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
+    return val.shape[0] == ctx.dims.depth and "/step:" in param_name and '/optimizer' not in param_name
 
 
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
     ndim = weight.ndim
-    dimension_numbers = (0, ndim - 1) + tuple(range(1, ndim - 1))
-    dimension_numbers = lax.ConvDimensionNumbers(dimension_numbers, tuple(range(ndim)), dimension_numbers)
+    lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
+    dimension_numbers = lax.ConvDimensionNumbers(lhs, (0, ndim - 1,) + tuple(range(1, ndim - 1)), lhs)
     return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
                                     dimension_numbers=dimension_numbers, precision='fastest')
 
@@ -99,6 +95,7 @@ def normal(ctx: Context, shape: typing.Sequence[int]):
 
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
+    column_axes = tuple(column_axes)
     axes = tuple([shape[c] for c in column_axes])
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
@@ -127,10 +124,14 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         if init_val is not None:
             param = init_val * scale * post_variance_scale
         elif std is None and mean is None:
-            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+            if ctx.add_depth:
+                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
+                                   range(ctx.dims.depth)], 0)
+            else:
+                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
             param *= scale * post_variance_scale
         else:
-            param = normal(ctx, shape) * scale
+            param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape)) * scale
             if std is not None:
                 param *= std
             if mean is not None:
