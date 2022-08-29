@@ -54,7 +54,7 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
 
 
 def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
-    return val.shape[0] == ctx.dims.depth and "/step:" in param_name and 'optimizer' not in param_name
+    return val.shape[0] == ctx.dims.depth and "/step:" in param_name and '/optimizer' not in param_name
 
 
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
