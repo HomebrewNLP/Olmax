@@ -23,6 +23,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.checkpoint(_fn)(inp, param)
 
 
+@with_context()
 def step(ctx: Context):
     def _fn(carry: FourArrays, params: typing.Dict[str, jnp.ndarray]):
         original_parameters = ctx.parameters
