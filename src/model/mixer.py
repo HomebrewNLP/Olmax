@@ -10,6 +10,7 @@ from src.model.norm import prenorm, scale_norm_act
 @prenorm
 @with_context()
 def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    original_shape = inp.shape
     items = math.ceil(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
     max_dim = math.floor(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
     inp = inp.reshape(ctx.dims.batch, -1, *[ctx.dims.spatial_mixing_kernel] * max_dim, ctx.dims.features)
@@ -28,5 +29,5 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         inp = inp.reshape(*shape)
         inp = matmul(inp, wgt)
         if i != items - 1:
-            inp = scale_norm_act(ctx, inp, ctx.dims.features)
-    return inp.transpose(0, *range(2, 2 + items), 1).reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
+            inp = scale_norm_act(ctx, inp, ctx.dims.spatial_mixing_kernel)
+    return inp.transpose(0, *range(2, 2 + items), 1).reshape(original_shape)
