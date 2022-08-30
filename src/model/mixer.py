@@ -19,7 +19,7 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     shape = inp.shape
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
     for i in range(items):
-        mask = jnp.tril(jnp.ones(weight_shape)) if ctx.model.autoregressive else 1
+        mask = jnp.tril(jnp.ones(weight_shape, dtype=ctx.model.computation_dtype)) if ctx.model.autoregressive else 1
         wgt = get_param(ctx, f"mix_{i}", weight_shape) * mask
         if ctx.is_initializing:
             continue
