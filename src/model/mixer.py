@@ -29,4 +29,4 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         inp = matmul(inp, wgt)
         if i != items - 1:
             inp = scale_norm_act(ctx, inp, ctx.dims.features)
-    return inp.transpose(0, *range(2, 2 + items), 1)
+    return inp.transpose(0, *range(2, 2 + items), 1).reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)

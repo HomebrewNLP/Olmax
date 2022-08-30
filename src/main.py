@@ -139,7 +139,7 @@ def run_one(wblog: WandbLog):
     np_data = timeit("Initializing dataset", text_dataset, wctx.ctx)
 
     data = map(replicate, np_data)
-    inp = timeit("Enqueueing first batch", next, data)[:wctx.ctx.dims.batch]
+    inp = timeit("Enqueueing first batch", next, data)[:, :wctx.ctx.dims.batch, :wctx.ctx.dims.sequence]
 
     samples = math.ceil(wctx.ctx.training.start_step / jax.process_count() / wctx.ctx.training.device_steps)
     timeit(f"Skipping first {samples} samples", skip_samples, samples, np_data)
