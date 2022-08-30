@@ -16,7 +16,7 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     max_dim = math.floor(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
     inp = inp.reshape(ctx.dims.batch, -1, *[ctx.dims.spatial_mixing_kernel] * max_dim, ctx.dims.features)
     inp = inp.transpose(0, items + 1, *range(1, 1 + items))
-    shape = inp.shape
+    shape = list(inp.shape)
     shape[2:] = shape[2:][::-1]
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
     for i in range(items):
