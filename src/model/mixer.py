@@ -24,10 +24,10 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         wgt = get_param(ctx, f"mix_{i}", weight_shape) * mask
         if ctx.is_initializing:
             continue
-        if i != 0:
-            inp = activate(ctx, inp)
         if i != items - 1:
             inp = inp.reshape(*shape)
-        inp = inp.transpose(0, 1, 1 + items, *range(2, 1 + items))
+        if i != 0:
+            inp = inp.transpose(0, 1, 1 + items, *range(2, 1 + items))
+            inp = activate(ctx, inp)
         inp = matmul(inp, wgt)
     return inp.transpose(0, 1 + items, *range(2, 1 + items), 1).reshape(original_shape)
