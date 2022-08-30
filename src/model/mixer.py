@@ -5,6 +5,7 @@ from jax import numpy as jnp
 from src.backend import get_param, matmul, with_context
 from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
+from src.model.activate import activate
 
 
 @prenorm
@@ -18,12 +19,12 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     shape = inp.shape
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
     for i in range(items):
-        mask = jnp.tril(jnp.ones(weight_shape)) if ctx.model.autoregressive else None
+        mask = jnp.triu(jnp.ones(weight_shape)) if ctx.model.autoregressive else None
         wgt = get_param(ctx, f"mix_{i}", weight_shape, scale=mask)
+        if ctx.is_initializing:
+            continue
         inp = inp.transpose(0, 1, 1 + items, *range(2, 1 + items))
         inp = inp.reshape(*shape)
-        if not ctx.is_initializing:
-            inp = matmul(inp, wgt)
-        if i != items - 1:
-            inp = scale_norm_act(ctx, inp, ctx.dims.spatial_mixing_kernel)
+        inp = matmul(inp, wgt)
+        inp = activate(ctx, inp)
     return inp.transpose(0, *range(2, 2 + items), 1).reshape(original_shape)
