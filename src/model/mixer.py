@@ -30,4 +30,4 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
             inp = inp.reshape(*shape)
         inp = inp.transpose(0, 1, 1 + items, *range(2, 1 + items))
         inp = matmul(inp, wgt)
-    return inp.transpose(0, 2 + items, *range(2, 1 + items), 1).reshape(original_shape)
+    return inp.transpose(0, 1 + items, *range(2, 1 + items), 1).reshape(original_shape)
