@@ -12,20 +12,25 @@ from src.model.norm import prenorm
 @with_context()
 def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     original_shape = inp.shape
-    items = math.ceil(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
-    samples = 2 ** (int(math.log2(ctx.dims.sequence)) // items)
+    weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
+    mask = jnp.triu(jnp.ones(weight_shape, dtype=ctx.model.computation_dtype)) if ctx.model.autoregressive else 1
+    weights = [get_param(ctx, f"mix_{i}", weight_shape, scale=mask) for i in range(ctx.model.mixer_iterations)]
+    if ctx.is_initializing:
+        return inp
+
     inp = inp.reshape(ctx.dims.batch, -1, ctx.dims.spatial_mixing_kernel, ctx.dims.features)
     inp = inp.transpose(0, 3, 1, 2)
-    shape = [ctx.dims.batch, ctx.dims.features, -1, samples ** (items - 1)]
-    weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
-    for i in range(items):
-        mask = jnp.triu(jnp.ones(weight_shape, dtype=ctx.model.computation_dtype)) if ctx.model.autoregressive else 1
-        wgt = get_param(ctx, f"mix_{i}", weight_shape) * mask
-        if ctx.is_initializing:
-            continue
+    shape = inp.shape
+    transposed_shape = list(shape)
+    transposed_shape[3], transposed_shape[2] = transposed_shape[2], transposed_shape[3]
+    for i, wgt in enumerate(weights):
+        wgt = wgt * mask
         if i != 0:
-            inp = inp.reshape(*shape)
-            inp = inp.transpose(0, 1, 3, 2)
+            inp = inp.reshape(*transposed_shape)
             inp = activate(ctx, inp)
+            inp = inp.transpose(0, 1, 3, 2)
         inp = matmul(inp, wgt)
-    return inp.transpose(0, 1 + items, *range(2, 1 + items), 1).reshape(original_shape)
+    for _ in range(len(weights)):
+        inp = inp.transpose(0, 1, 3, 2)
+        inp = inp.reshape(*shape)
+    return inp.transpose(0, 2, 3, 1).reshape(original_shape)

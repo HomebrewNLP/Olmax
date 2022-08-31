@@ -147,6 +147,7 @@ class Model(DataClass):
     qrnn_frequency: int = 8
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
+    mixer_iterations: int = 2  # ideally spatial_mixing_kernel ** mixer_iterations > sequence_length
 
 
 class ExpectedLoss(DataClass):
