@@ -29,10 +29,10 @@ def step(ctx: Context):
         original_parameters = ctx.parameters
         ctx.parameters = params
         src = [params] + list(carry)
-        src = reversible(ctx, mix, src)
-        src = reversible(ctx, bottleneck_block, src)
-        src = reversible(ctx, mix, src)
         src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, mix, src)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
