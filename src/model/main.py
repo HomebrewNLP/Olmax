@@ -5,7 +5,7 @@ from jax import lax, numpy as jnp
 
 from src.backend import get_param, is_stacked, with_context
 from src.context import Context
-from src.model.conv import bottleneck_block, psum_block
+from src.model.conv import bottleneck_block, dense_block
 from src.model.loss import cross_entropy_loss
 from src.model.mixer import mix
 from src.model.norm import scale_norm_act
@@ -32,7 +32,7 @@ def step(ctx: Context):
         src = reversible(ctx, mix, src)
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, mix, src)
-        src = reversible(ctx, psum_block, src)
+        src = reversible(ctx, dense_block, src)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
