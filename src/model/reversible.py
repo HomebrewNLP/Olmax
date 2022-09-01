@@ -24,11 +24,11 @@ def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args) -> RE
 
     name_cache = copy.deepcopy(ctx.name_cache)
 
-    def base(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> jnp.ndarray:
+    def base(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray, *inner_args) -> jnp.ndarray:
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, inp)
+        out = fn(new_ctx, inp, *inner_args)
         ctx.name_cache = new_ctx.name_cache
         return out
 
@@ -42,7 +42,7 @@ def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args) -> RE
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
             return (d_params, dy1, y1 - x0, dx0 + dy0, y0) + (None,) * len(inner_args)
 
-        out = base(params, x1) + x0
+        out = base(params, x1, *inner_args) + x0
         return (params, x1, x1, out, out), _grad
 
     return _fn(*src, *args)
