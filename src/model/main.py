@@ -48,7 +48,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (src, zero, src, zero)
     if ctx.is_initializing:
         ctx.add_depth = True
-        ctx.parameters = step(ctx)(src, (ctx.parameters, 0))
+        ctx.parameters = step(ctx)(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
         ctx.add_depth = False
     else:
         params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
