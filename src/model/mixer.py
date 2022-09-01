@@ -12,8 +12,9 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     original_shape = inp.shape
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
     mask = jnp.triu(jnp.ones(weight_shape, dtype=ctx.model.computation_dtype)) if ctx.model.autoregressive else 1
-    weights = [get_param(ctx, f"mix_{i}", [ctx.dims.features] + weight_shape, std=ctx.dims.spatial_mixing_kernel ** -0.5)
+    weights = [get_param(ctx, f"mix_{i}", weight_shape, std=1, scale=ctx.dims.spatial_mixing_kernel ** -0.5)
                for i in range(ctx.model.mixer_iterations)]
+
     if ctx.is_initializing:
         return inp
 
@@ -24,11 +25,11 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     transposed_shape[3], transposed_shape[2] = transposed_shape[2], transposed_shape[3]
     for i, wgt in enumerate(weights):
         if i == 0:
-            inp = jnp.einsum("bfrs,fsz,sz->bfrz", inp, wgt, mask)
+            inp = jnp.einsum("bfrs,sz,sz->bfrz", inp, wgt, mask)
         else:
             inp = inp.reshape(*transposed_shape)
             inp = activate(ctx, inp)
-            inp = jnp.einsum("bfsr,fsz,sz->bfrz", inp, wgt, mask)
+            inp = jnp.einsum("bfsr,sz,sz->bfrz", inp, wgt, mask)
     for _ in range(len(weights) - 1):
         inp = inp.transpose(0, 1, 3, 2)
         inp = inp.reshape(*shape)
