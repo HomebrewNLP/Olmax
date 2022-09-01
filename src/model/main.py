@@ -37,7 +37,7 @@ def step(ctx: Context):
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
-        return src[2:], None
+        return src[1:], None
 
     return _fn
 
