@@ -23,11 +23,12 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     transposed_shape = list(shape)
     transposed_shape[3], transposed_shape[2] = transposed_shape[2], transposed_shape[3]
     for i, wgt in enumerate(weights):
-        if i != 0:
+        if i == 0:
+            inp = jnp.einsum("bfrs,fsz,sz->bfrz", inp, wgt, mask)
+        else:
             inp = inp.reshape(*transposed_shape)
             inp = activate(ctx, inp)
-            inp = inp.transpose(0, 1, 3, 2)
-        inp = jnp.einsum("bfrs,fsz,sz->bfrz", inp, wgt, mask)
+            inp = jnp.einsum("bfsr,fsz,sz->bfrz", inp, wgt, mask)
     for _ in range(len(weights) - 1):
         inp = inp.transpose(0, 1, 3, 2)
         inp = inp.reshape(*shape)
