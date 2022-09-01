@@ -22,7 +22,7 @@ def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     inp = inp.reshape(ctx.dims.batch, -1, *[ctx.dims.spatial_mixing_kernel] * max_dims, ctx.dims.features)
-    original_dims = ''.join(chr(ord('a') + i) for i in range(len(inp.ndim)))
+    original_dims = ''.join(chr(ord('a') + i) for i in range(inp.ndim))
     for i, wgt in enumerate(weights):
         new_dims = original_dims[:i + 2] + "z" + original_dims[i + 3:]
         reduced_dim = original_dims[i + 2]
