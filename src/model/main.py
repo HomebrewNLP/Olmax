@@ -29,14 +29,9 @@ def step(ctx: Context):
         original_parameters = ctx.parameters
         ctx.parameters = params
         src = [params] + list(carry)
-        for _ in range(ctx.model.unroll_depth):
-            for depth in range(ctx.model.qrnn_frequency):
-                src = reversible(ctx, pointwise_block, src)
-                src = reversible(ctx, bottleneck_block, src)
-                src = reversible(ctx, pointwise_block, src)
-                if depth % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-                    src = reversible(ctx, qrnn_block, src)
-                    # lax.cond could work but requires work on the parameter store
+        src = reversible(ctx, pointwise_block, src)
+        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, pointwise_block, src)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
