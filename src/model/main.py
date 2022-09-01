@@ -33,7 +33,7 @@ def step(ctx: Context):
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, lambda *args: mix(*args, depth), src)
+        src = reversible(ctx, mix, src, depth)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters

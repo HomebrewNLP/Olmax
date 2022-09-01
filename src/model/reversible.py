@@ -11,12 +11,12 @@ ReversibleFn = typing.Callable[[Context, jnp.ndarray], jnp.ndarray]
 FourArrays = typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 
 
-def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         params, _x00, x01, x10, x11 = src
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        out = fn(new_ctx, x10)
+        out = fn(new_ctx, x10, *args)
         ctx.parameters = new_ctx.parameters
         ctx.name_cache = new_ctx.name_cache
         ctx.prng_key = new_ctx.prng_key
@@ -34,18 +34,18 @@ def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX) -> REVERSIBL
 
     @jax.custom_gradient
     def _fn(params: typing.Dict[str, jnp.ndarray], x0: jnp.ndarray, _back_x0: jnp.ndarray, x1: jnp.ndarray,
-            _back_x1: jnp.ndarray):
-        def _grad(dy: REVERSIBLE_CTX) -> REVERSIBLE_CTX:
+            _back_x1: jnp.ndarray, *inner_args):
+        def _grad(dy):
             d_params_old, dy0, y0, dy1, y1 = dy
-            x0, grad_fn = jax.vjp(base, params, y0)
-            d_params, dx0 = grad_fn(dy1)
+            x0, grad_fn = jax.vjp(base, params, y0, *inner_args)
+            d_params, dx0, _ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
-            return d_params, dy1, y1 - x0, dx0 + dy0, y0
+            return (d_params, dy1, y1 - x0, dx0 + dy0, y0) + (None,) * len(inner_args)
 
         out = base(params, x1) + x0
         return (params, x1, x1, out, out), _grad
 
-    return _fn(*src)
+    return _fn(*src, *args)
 
 
 def revnet_out(src: FourArrays) -> jnp.ndarray:
