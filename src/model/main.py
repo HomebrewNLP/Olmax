@@ -25,18 +25,19 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context):
-    def _fn(carry: FourArrays, params: typing.Dict[str, jnp.ndarray]):
+    def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         original_parameters = ctx.parameters
-        ctx.parameters = params
-        src = [params] + list(carry)
+        ctx.parameters, depth = inp
+        depth = depth.reshape([])
+        src = [ctx.parameters] + list(carry)
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, bottleneck_block, src)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, mix, src)
+        src = reversible(ctx, lambda *args: mix(*args, depth), src)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
-        return src[1:], None
+        return src[2:], None
 
     return _fn
 
@@ -47,11 +48,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (src, zero, src, zero)
     if ctx.is_initializing:
         ctx.add_depth = True
-        ctx.parameters = step(ctx)(src, ctx.parameters)
+        ctx.parameters = step(ctx)(src, (ctx.parameters, 0))
         ctx.add_depth = False
     else:
         params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
-        src, _ = lax.scan(step(ctx), src, params, ctx.dims.depth)
+        src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
