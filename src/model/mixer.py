@@ -1,6 +1,6 @@
 import math
 
-from jax import lax, numpy as jnp
+from jax import numpy as jnp
 
 from src.backend import get_param, pattern_match, with_context
 from src.context import Context
@@ -19,15 +19,14 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
 
     original_shape = inp.shape
     max_dims = math.floor(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
-    mask = jnp.logical_not(jnp.tri(ctx.dims.spatial_mixing_kernel, k=-1)) if ctx.model.autoregressive else 1
 
     def _get_mix_fn(current_depth: int):
         def _fn(x: jnp.ndarray):
             batch = max(ctx.dims.sequence // ctx.dims.spatial_mixing_kernel ** (current_depth % max_dims + 1), 1)
             out = x.reshape(ctx.dims.batch * batch, ctx.dims.spatial_mixing_kernel, -1, ctx.dims.features)
-            out = jnp.einsum("bkrf,kg,kg->bgrf", out, wgt0, mask)
+            out = jnp.einsum("bkrf,kg->bgrf", out, jnp.triu(wgt0) if ctx.model.autoregressive else wgt0)
             out = activate(out)
-            out = jnp.einsum("bkrf,kg,kg->bgrf", out, wgt1, mask)
+            out = jnp.einsum("bkrf,kg->bgrf", out, jnp.triu(wgt1) if ctx.model.autoregressive else wgt1)
             return out.reshape(original_shape)
 
         return _fn
