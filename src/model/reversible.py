@@ -38,7 +38,7 @@ def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args) -> RE
         def _grad(dy):
             d_params_old, dy0, y0, dy1, y1 = dy
             x0, grad_fn = jax.vjp(base, params, y0, *inner_args)
-            d_params, dx0, _ = grad_fn(dy1)
+            d_params, dx0, *_ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
             return (d_params, dy1, y1 - x0, dx0 + dy0, y0) + (None,) * len(inner_args)
 
