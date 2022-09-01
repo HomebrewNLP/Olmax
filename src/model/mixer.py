@@ -13,7 +13,7 @@ from src.model.norm import prenorm
 def mix(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     original_shape = inp.shape
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
-    max_dims = math.ceil(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
+    max_dims = math.floor(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
     mask = jnp.triu(jnp.ones(weight_shape, dtype=ctx.model.computation_dtype)) if ctx.model.autoregressive else 1
     weights = [get_param(ctx, f"mix_{i}", weight_shape, std=1, scale=ctx.dims.spatial_mixing_kernel ** -0.5)
                for i in range(max_dims)]
