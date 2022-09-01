@@ -149,3 +149,11 @@ def zero_param(ctx: Context, name: str, shape: typing.List[int], dtype: typing.O
 
 def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
+
+
+def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[], jnp.ndarray]], cases: int, predicate: jnp.ndarray,
+                  base: jnp.ndarray):
+    new = base
+    for i in range(cases):
+        new = lax.cond(base == predicate, gen_fn(i), lambda: new)
+    return new
