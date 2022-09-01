@@ -14,6 +14,6 @@ def test_grad(samples: int, trials: int = 16):  # skipcq: PYL-W0640
     randn = randn_fn()
     for _ in range(trials):
         inp = randn(samples)
-        out0 = jax.grad(lambda x: activate(ctx, x).mean())(inp)
+        out0 = jax.grad(lambda x: activate(x).mean())(inp)
         out1 = jax.grad(lambda x: activate_forward(x).mean())(inp)
         assert jnp.allclose(out0, out1)
