@@ -18,7 +18,7 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     original_shape = inp.shape
-    max_dims = math.floor(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
+    max_dims = math.ceil(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
 
     def _get_mix_fn(current_depth: int):
         def _fn(x: jnp.ndarray):
