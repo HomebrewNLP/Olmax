@@ -8,21 +8,12 @@ import wandb
 from src.context import WandB
 
 CONFIGS = [("europe-west4-a", 3, 250, 1),
-           # ("europe-west4-b", 3, 15, 1),  # missing permissions
-           # ("europe-west4-c", 3, 15, 1),  # missing permissions
            ("us-central1-a", 3, 200, 1),
            ("us-central1-c", 3, 15, 1),
-           # ("europe-west4-a", 3, 25, 0),  # actively used, so not occupying
-           # ("europe-west4-b", 3, 5, 0),  # missing permissions
-           # ("europe-west4-c", 3, 5, 0),  # missing permissions
            ("us-central1-c", 3, 5, 0),
-           # ("europe-west4-b", 2, 15, 1),  # missing permissions
-           # ("europe-west4-c", 2, 15, 1),  # missing permissions
            ("us-central1-b", 2, 150, 1),
            ("us-central1-c", 2, 150, 1),
            ("us-central1-f", 2, 150, 1),
-           # ("europe-west4-b", 2, 5, 0),  # missing permissions
-           # ("europe-west4-c", 2, 5, 0),  # missing permissions
            ("us-central1-a", 2, 5, 0),
            ("us-central1-f", 2, 25, 0),
            ]
@@ -67,14 +58,13 @@ def main():
                f'screen -dmS "{prefix}" python3 {main_folder}/script/launch_multiple_runs.py --tpus {tpu_count} '
                f'--zone {zone} --tpu-version {tpu_version} '
                f'--data-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/the-token-pile/ '
-               # f'--pretrained-path gs://homebrewnlp-{"us" if us_tpu else "eu"}/input.npy '
                f'--prefix {base_prefix}-{prefix} --preemptible {preemptible} '
                f'--sweep {WandB.entity}/{WandB.project}/{sweep} --cleanup {cleanup} '
                f'--timeout-multiplier {len(CONFIGS)} --service-account {service_account} '
                f'--branch {branch}')
         print(cmd)
         if not dry:
-            os.system(cmd)
+            os.system(cmd)  # skipcq: BAN-B605
 
 
 if __name__ == '__main__':

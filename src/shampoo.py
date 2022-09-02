@@ -217,7 +217,7 @@ def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_
         new_mat_m_0 = damped_matrix * z
         new_error = jnp.max(jnp.abs(new_mat_m_0 - identity))
         new_mat_h_0 = identity * jnp.power(z, 1.0 / p)
-        init_state = tuple([0, new_mat_m_0, new_mat_h_0, new_mat_h_0, new_error, True])
+        init_state = (0, new_mat_m_0, new_mat_h_0, new_mat_h_0, new_error, True)
         _, mat_m, mat_h, old_mat_h, error, convergence = lax.while_loop(_iter_condition, _iter_body, init_state)
         error = jnp.max(jnp.abs(mat_m - identity))
         is_converged = jnp.asarray(convergence, old_mat_h.dtype)

@@ -12,8 +12,8 @@ from src.model.norm import prenorm
 @with_context()
 def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
-    wgt0 = get_param(ctx, f"mix_0", weight_shape)
-    wgt1 = get_param(ctx, f"mix_1", weight_shape)
+    wgt0 = get_param(ctx, "mix_0", weight_shape)
+    wgt1 = get_param(ctx, "mix_1", weight_shape)
     if ctx.is_initializing:
         return inp
 
