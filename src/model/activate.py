@@ -1,8 +1,6 @@
 import jax
 from jax import numpy as jnp
 
-from src.context import Context
-
 
 def activate_forward(inp: jnp.ndarray) -> jnp.ndarray:
     return inp * activate_grad(inp)
@@ -12,10 +10,7 @@ def activate_grad(inp: jnp.ndarray) -> jnp.ndarray:
     return jnp.where(inp < 0, 0.01, 1)
 
 
-def activate(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    if ctx.is_initializing:
-        return inp
-
+def activate(inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(x: jnp.ndarray):
         return activate_forward(x), lambda dy: dy * activate_grad(x)

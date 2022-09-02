@@ -72,7 +72,7 @@ def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
     sequence_length_1 = sequence_length + 1
-    assert not (full_batch % ctx.data.datasets_used_per_step)
+    assert full_batch % ctx.data.datasets_used_per_step == 0
 
     def _slice_target(x):
         """

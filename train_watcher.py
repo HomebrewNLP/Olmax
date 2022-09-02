@@ -6,10 +6,9 @@ from netrc import netrc
 
 import shortuuid
 import tpucare
+import wandb
 import yaml
 from tpucare import delete_one_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single
-
-import wandb
 
 tpucare.LOG_LEVEL = 0
 _, _, wandb_key = netrc().authenticators("api.wandb.ai")
@@ -24,10 +23,10 @@ class Context:
 
 
 def start_fn(ctx: Context, worker: int):
-    setup = f'(bash setup.sh ; mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml ; exit 0)'
+    setup = '(bash setup.sh ; mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml ; exit 0)'
     send_to_tpu(ctx.host, ctx.zone, "config.yaml", yaml.dump(ctx.config), worker)
     cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
-                       setup_command=setup, run_command=f"CONFIG=config.yaml bash run.sh", branch=ctx.branch,
+                       setup_command=setup, run_command="CONFIG=config.yaml bash run.sh", branch=ctx.branch,
                        install_python=False)
     send_to_tpu(ctx.host, ctx.zone, "setup.sh", cmd, worker)
     exec_on_tpu(ctx.host, ctx.zone, "bash setup.sh", worker)

@@ -153,7 +153,7 @@ class Inference:
 
 
 class Tokens(BaseModel):
-    tokens: typing.List[int]
+    tokens: typing.List[int]  # skipcq: PTC-W0052
 
 
 class TokenCompletion(BaseModel):
@@ -161,7 +161,7 @@ class TokenCompletion(BaseModel):
 
 
 class Completion(BaseModel):
-    completion: str
+    completion: str  # skipcq: PTC-W0052
 
 
 class SanitizedTokens(BaseModel):
@@ -243,7 +243,7 @@ def main():
         fn = getattr(rest_api, key)
         fast_api.post('/' + key, response_model=typing.get_type_hints(fn)["return"])(fn)
 
-    uvicorn.run(fast_api, host='0.0.0.0', port=62220, log_level='info', workers=1)
+    uvicorn.run(fast_api, host='0.0.0.0', port=62220, log_level='info', workers=1)  # skipcq: BAN-B104
 
 
 if __name__ == '__main__':

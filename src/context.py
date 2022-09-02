@@ -77,6 +77,7 @@ class Dims(DataClass):
     inner_bottleneck_features: int = 128
     pointwise_kernel: int = 5
     features: int = 256
+    spatial_mixing_kernel: int = 512
     pointwise_features: int = 512
     moe_intermediate: int = 4096
     heads: int = jax.device_count()
@@ -138,6 +139,7 @@ class Optimizer(DataClass):
 
 
 class Model(DataClass):
+    autoregressive: bool = True
     unroll_depth: int = 1
     conv_scale: float = 4.
     conv_shift: float = 8.
@@ -145,6 +147,7 @@ class Model(DataClass):
     qrnn_frequency: int = 8
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
+    mixer_iterations: int = 2  # ideally spatial_mixing_kernel ** mixer_iterations > sequence_length
 
 
 class ExpectedLoss(DataClass):

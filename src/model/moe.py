@@ -94,6 +94,6 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     gates = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.moe_scale, ctx.dims.features, ctx.dims.features)
     mid, indices = top1_gating(ctx, gates, inp)
     mid = matmul(mid, inp_wgt)
-    mid = activate(ctx, mid)
+    mid = activate(mid)
     out = matmul(mid, out_wgt)
     return jnp.zeros_like(inp).reshape(-1, inp.shape[-1]).at[indices].set(out).reshape(inp.shape)
