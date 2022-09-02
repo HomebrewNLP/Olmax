@@ -1,8 +1,6 @@
 import jax
 from jax import numpy as jnp
 
-from src.context import Context
-
 
 def activate_forward(inp: jnp.ndarray) -> jnp.ndarray:
     return inp * activate_grad(inp)

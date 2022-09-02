@@ -2,9 +2,9 @@ import argparse
 import os
 import pathlib
 
+import wandb
 import yaml
 
-import wandb
 from src.context import WandB
 
 CONFIGS = [("europe-west4-a", 3, 250, 1),

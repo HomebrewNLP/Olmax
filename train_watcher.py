@@ -6,10 +6,9 @@ from netrc import netrc
 
 import shortuuid
 import tpucare
+import wandb
 import yaml
 from tpucare import delete_one_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single
-
-import wandb
 
 tpucare.LOG_LEVEL = 0
 _, _, wandb_key = netrc().authenticators("api.wandb.ai")
