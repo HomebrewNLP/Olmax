@@ -159,7 +159,7 @@ def run_one(wblog: WandbLog):
                  }
 
     wctx.current_step += wctx.ctx.training.start_step
-    wblog.idx += wctx.ctx.training.start_step
+    wblog.idx += samples
 
     step = train_loop(wctx, timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
                                    in_axes=(partition,), out_axes=partition, donate_argnums=(0,)))
