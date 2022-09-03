@@ -13,7 +13,7 @@ import traceback
 import jax
 import jax.numpy as jnp
 import numpy as np
-from smart_open import open
+from smart_open import open as smart_open
 
 from src.backend import is_main
 from src.context import Context
@@ -33,7 +33,7 @@ def write(x, ckpt_dir):
     file_path = ckpt_dir + f"{idx}.npz"
     for _ in range(UPLOAD_RETRIES):
         try:
-            with open(file_path, "wb") as f:
+            with smart_open(file_path, "wb") as f:
                 np.savez(f, *i)
             return
         except:  # skipcq: FLK-E722
@@ -55,7 +55,7 @@ def write_ckpt(ctx: Context):
         success = False
         for _ in range(UPLOAD_RETRIES):
             try:
-                with open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:
+                with smart_open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:  # skipcq: PTC-W6004
                     f.write(structure)
             except:  # skipcq: FLK-E722
                 print("Failed to save structure. Traceback:")
@@ -83,7 +83,7 @@ def read_shard(ckpt_dir):
     out = []
     for idx in range(WEIGHT_PIECES):
         file_path = ckpt_dir + f"{idx}.npz"
-        with open(file_path, "rb") as f:
+        with smart_open(file_path, "rb") as f:
             buf = f.read()
             f_io = io.BytesIO(buf)
             deserialized = np.load(f_io)
@@ -105,7 +105,7 @@ def depth(param_name, name: str = 'reversible'):
 def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     ignore = re.compile(ignore)
 
-    with open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
+    with smart_open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
         new_structure = f.read()
     new_structure = json.loads(new_structure)
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
@@ -124,8 +124,8 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
         unsharded.append(x)
     params = jax.tree_util.tree_unflatten(new_structure, unsharded)
 
-    print(f"Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
-    print(f"Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
+    print("Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
+    print("Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
 
     devices = jax.local_device_count()
     for k, v in params.items():

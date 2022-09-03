@@ -26,7 +26,7 @@ from omegaconf import OmegaConf
 from sharedutils import SharedEXTQueue
 
 sys.path.append("./taming-transformers")
-from taming.models.vqgan import GumbelVQ
+from taming.models.vqgan import GumbelVQ  # skipcq: FLK-E402
 
 
 def parse_args():
@@ -50,8 +50,8 @@ def parse_args():
                              "parallel, but downloading information about too many videos in parallel can lead to "
                              "errors and slow things down.")
     args = parser.parse_args()
-    return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, \
-           args.batch, args.gpus, args.model_base_path, args.shared_memory, args.tokens_per_file, args.video_downloaders
+    return args.cpu_worker, args.bucket, args.prefix, args.tmp_dir, args.urls, args.fps, args.batch, args.gpus, \
+           args.model_base_path, args.shared_memory, args.tokens_per_file, args.video_downloaders
 
 
 def frame_encoder(frame):
@@ -66,7 +66,7 @@ def try_except(fn: typing.Callable, default=None):
     def _fn(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except Exception as exc:
+        except Exception as exc:  # skipcq: PYL-W0703
             print(r"IGNORED EXCEPTION \/\/\/")
             print(fn, exc)
             traceback.print_exc()
@@ -122,7 +122,7 @@ def get_video_urls(youtube_getter, youtube_base: str, url: str, lock: threading.
 def get_video_frames(video_urls: typing.List[dict], target_image_size: int, target_fps: int) -> np.ndarray:
     filename = uuid.uuid4()
     path = str(filename)
-    for video_url_idx, video_url in enumerate(video_urls):
+    for video_url in video_urls:
         if os.path.exists(path):
             os.remove(path)
 
@@ -132,8 +132,8 @@ def get_video_frames(video_urls: typing.List[dict], target_image_size: int, targ
         try:
             with requests.get(url, stream=True) as r, open(path, 'wb') as f:
                 shutil.copyfileobj(r.raw, f)
-        except Exception:  # Broken URL, next might work
-            continue
+        except Exception:  # skipcq: PYL-W0703
+            continue  # Broken URL, next might work
 
         width = round(video_url["width"] * video_url["height"] / target_image_size)
         try:
@@ -241,14 +241,14 @@ def worker(model: GumbelVQ, save_dir: str, download_buffer_dir: str, bucket, dev
 
 
 def main():
-    workers, bucket, prefix, tmp_dir, urls, fps, batch_size, gpus, model_path, \
-    shared_memory, chunk_size, video_downloaders = parse_args()
+    workers, bucket, prefix, tmp_dir, urls, fps, batch_size, gpus, model_path, shared_memory, chunk_size, \
+    video_downloaders = parse_args()
     config_path = f'{model_path}/vqgan.gumbelf8.config.yml'
     model_path = f'{model_path}/sber.gumbelf8.ckpt'
     if not os.path.exists(config_path):
-        gdown.download(f'https://drive.google.com/uc?id=1WP6Li2Po8xYcQPGMpmaxIlI1yPB5lF5m', model_path, quiet=True)
+        gdown.download('https://drive.google.com/uc?id=1WP6Li2Po8xYcQPGMpmaxIlI1yPB5lF5m', model_path, quiet=True)
     if not os.path.exists(config_path):
-        gdown.download(f'https://drive.google.com/uc?id=1M7RvSoiuKBwpF-98sScKng0lsZnwFebR', config_path, quiet=True)
+        gdown.download('https://drive.google.com/uc?id=1M7RvSoiuKBwpF-98sScKng0lsZnwFebR', config_path, quiet=True)
     os.makedirs(tmp_dir, exist_ok=True)
     conf = OmegaConf.load(config_path)
     padding_token = conf.model.params.n_embed
@@ -262,9 +262,8 @@ def main():
     ids = []
     for path in os.listdir(urls):
         with open(f'{urls}/{path}', 'rb') as f:
-            video_ids, _ = pickle.load(f)
+            video_ids, _ = pickle.load(f)  # skipcq: BAN-B301
             ids.extend(video_ids)
-    del video_ids
 
     ids = [ids[int(len(ids) * i / workers):int(len(ids) * (i + 1) / workers)] for i in range(workers)]
     lock = multiprocessing.Semaphore(video_downloaders)

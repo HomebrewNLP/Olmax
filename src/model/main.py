@@ -5,10 +5,10 @@ from jax import lax, numpy as jnp
 
 from src.backend import get_param, is_stacked, with_context
 from src.context import Context
-from src.model.conv import bottleneck_block, pointwise_block
+from src.model.conv import bottleneck_block, dense_block
 from src.model.loss import cross_entropy_loss
+from src.model.mixer import mix
 from src.model.norm import scale_norm_act
-from src.model.qrnn import qrnn_block
 from src.model.reversible import FourArrays, reversible, revnet_out
 
 
@@ -25,18 +25,15 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context):
-    def _fn(carry: FourArrays, params: typing.Dict[str, jnp.ndarray]):
+    def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         original_parameters = ctx.parameters
-        ctx.parameters = params
-        src = [params] + list(carry)
-        for _ in range(ctx.model.unroll_depth):
-            for depth in range(ctx.model.qrnn_frequency):
-                src = reversible(ctx, pointwise_block, src)
-                src = reversible(ctx, bottleneck_block, src)
-                src = reversible(ctx, pointwise_block, src)
-                if depth % ctx.model.qrnn_frequency == (ctx.model.qrnn_frequency // 2 - 1):
-                    src = reversible(ctx, qrnn_block, src)
-                    # lax.cond could work but requires work on the parameter store
+        ctx.parameters, depth = inp
+        depth = depth.reshape([])
+        src = [ctx.parameters] + list(carry)
+        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, mix, src, depth)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
@@ -51,11 +48,11 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (src, zero, src, zero)
     if ctx.is_initializing:
         ctx.add_depth = True
-        ctx.parameters = step(ctx)(src, ctx.parameters)
+        ctx.parameters = step(ctx)(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
         ctx.add_depth = False
     else:
         params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
-        src, _ = lax.scan(step(ctx), src, params, ctx.dims.depth)
+        src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,

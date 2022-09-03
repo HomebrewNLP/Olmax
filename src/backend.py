@@ -42,14 +42,14 @@ def stable_rsqrt(inp: jnp.ndarray, eps: float) -> jnp.ndarray:
 
 
 def pos_dim(inp: jnp.ndarray, dims: typing.Sequence[int]) -> typing.Sequence[int]:
-    return tuple([d % inp.ndim for d in dims])
+    return tuple(d % inp.ndim for d in dims)
 
 
 def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
     if isinstance(obj, (tuple, list)):
         return tuple(obj)
     if isinstance(obj, int):
-        return obj,
+        return obj,  # skipcq: PYL-R1707
     raise ValueError
 
 
@@ -96,7 +96,7 @@ def normal(ctx: Context, shape: typing.Sequence[int]):
 
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
     column_axes = tuple(column_axes)
-    axes = tuple([shape[c] for c in column_axes])
+    axes = tuple(shape[c] for c in column_axes)
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
     out, r = jnp.linalg.qr(normal(ctx, matrix_shape))
@@ -149,3 +149,11 @@ def zero_param(ctx: Context, name: str, shape: typing.List[int], dtype: typing.O
 
 def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
+
+
+def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[], jnp.ndarray]], cases: int, predicate: jnp.ndarray,
+                  base: jnp.ndarray):
+    new = base
+    for i in range(cases):
+        new = lax.cond(i == predicate, gen_fn(i), lambda _: new, base)
+    return new

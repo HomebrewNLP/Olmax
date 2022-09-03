@@ -34,9 +34,9 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @prenorm
 @with_context()
-def pointwise_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def dense_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.pointwise_scale, ctx.dims.features,
                ctx.dims.pointwise_features)
-    inp = activate(ctx, inp)
+    inp = activate(inp)
     return conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.pointwise_scale, ctx.dims.pointwise_features,
                 ctx.dims.features)
