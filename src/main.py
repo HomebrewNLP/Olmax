@@ -190,9 +190,8 @@ def run_one(wblog: WandbLog):
         if jnp.isnan(wctx.loss[0]):
             print("Loss is NaN")
             return wblog.loss_medians[-1]
-        if wctx.ctx.wandb.use_wandb and idx % wctx.ctx.wandb.log_frequency == 0 and \
-                wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step[0])):
-            return wblog.loss_medians[-1]
+        if wctx.ctx.wandb.use_wandb and idx % wctx.ctx.wandb.log_frequency == 0;
+            wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step[0]))
         log_step = math.log2((idx + 1) * device_steps + 1)
         el = wctx.ctx.training.early_stopping.expected_loss
         expected_loss = el.offset + el.scale * math.exp(el.exponent * log_step)
