@@ -127,6 +127,11 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     print(f"Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
     print(f"Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
 
+    devices = jax.local_device_count()
+    for k, v in params.items():
+        if v.shape[0] > devices:
+            params[k] = v[devices * jax.process_index():devices * (jax.process_index() + 1)]
+
     if not ctx.parameters:
         for key, param in params.items():
             if key in ctx.parameters:

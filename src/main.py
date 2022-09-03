@@ -151,7 +151,7 @@ def run_one(wblog: WandbLog):
     buffer_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items()) - parameter_count
 
     if wctx.ctx.training.checkpoint_load_path:
-        read_ckpt(wctx.ctx)
+        read_ckpt(wctx.ctx, '[0]{100}')
 
     partition = {'parameters': {k: 0 for k in wctx.ctx.parameters.keys()},
                  'parameter_variance': {k: 0 for k in wctx.ctx.parameter_variance.keys()}, 'data': 0,
