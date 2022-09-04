@@ -128,6 +128,7 @@ class Optimizer(DataClass):
     shampoo_beta2: float = 0.01
     weight_decay: float = 0.01
     warmup_end: int = 16384
+    warmup_start: int = 0
     exponential_decay: float = 3e-6
     norm_scale: float = 1
     bottleneck_scale: float = 1

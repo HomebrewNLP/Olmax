@@ -239,6 +239,7 @@ def main():
             inner_cfg = inner_cfg[s]
         inner_cfg[split_name[-1]] = param
     init_class(ctx, cfg)
+    ctx.optimizer.warmup_start = ctx.training.start_step
     dump_ctx(ctx, run)
 
     wblog = WandbLog(run, ctx.training.device_steps * jax.process_count())
