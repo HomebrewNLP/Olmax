@@ -111,9 +111,12 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
     _, new_structure = jax.tree_util.tree_flatten(new_structure)
 
+    devices = jax.local_device_count()
+    pid = jax.process_index()
     with multiprocessing.pool.ThreadPool(ctx.dims.heads) as p:
         start = time.time()
-        shards = list(p.imap(read_shard, [f"{ctx.training.checkpoint_load_path}/{i}_" for i in range(ctx.dims.heads)]))
+        paths = [f"{ctx.training.checkpoint_load_path}/{i}_" for i in range(devices * pid, devices * (pid + 1))]
+        shards = list(p.imap(read_shard, paths))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
     unsharded = []
@@ -127,15 +130,9 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     print("Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
     print("Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
 
-    devices = jax.local_device_count()
-    for k, v in params.items():
-        if v.shape[0] > devices:
-            params[k] = v[devices * jax.process_index():devices * (jax.process_index() + 1)]
-
     if not ctx.parameters:
         for key, param in params.items():
-            if key in ctx.parameters:
-                ctx.parameters[key] = param
+            ctx.parameters[key] = param
         return
 
     for key in ctx.parameters.keys():
