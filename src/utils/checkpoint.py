@@ -111,11 +111,9 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
     _, new_structure = jax.tree_util.tree_flatten(new_structure)
 
-    devices = jax.local_device_count()
-    pid = jax.process_index()
     with multiprocessing.pool.ThreadPool(ctx.dims.heads) as p:
         start = time.time()
-        paths = [f"{ctx.training.checkpoint_load_path}/{i}_" for i in range(devices * pid, devices * (pid + 1))]
+        paths = [f"{ctx.training.checkpoint_load_path}/{dev.id}_" for dev in jax.devices()]
         shards = list(p.imap(read_shard, paths))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
