@@ -113,7 +113,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
 
     with multiprocessing.pool.ThreadPool(ctx.dims.heads) as p:
         start = time.time()
-        paths = [f"{ctx.training.checkpoint_load_path}/{dev.id}_" for dev in jax.devices()]
+        paths = [f"{ctx.training.checkpoint_load_path}/{dev.id}_" for dev in jax.local_devices()]
         shards = list(p.imap(read_shard, paths))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
