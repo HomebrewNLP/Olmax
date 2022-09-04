@@ -44,9 +44,10 @@ def statistics(name: str, var: jnp.ndarray):
 
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
-@pytest.mark.parametrize("samples", [2 ** 6])
-def test_value(z_loss: float, samples: int, trials: int = 16):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("samples", [2 ** 14])
+def test_value(z_loss: float, samples: int, trials: int = 2):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
+    ctx.dims.vocab = 1024
 
     for _ in range(trials):
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
@@ -58,9 +59,10 @@ def test_value(z_loss: float, samples: int, trials: int = 16):  # skipcq: PYL-W0
 
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
-@pytest.mark.parametrize("samples", [2 ** 6])
-def test_grad(z_loss: float, samples: int, trials: int = 1):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("samples", [2 ** 14])
+def test_grad(z_loss: float, samples: int, trials: int = 2):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
+    ctx.dims.vocab = 1024
 
     for _ in range(trials):
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
