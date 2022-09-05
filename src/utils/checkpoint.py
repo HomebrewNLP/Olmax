@@ -2,6 +2,7 @@
 Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca9370576ad9d247facf6cb8e9699300e690
 /mesh_transformer/checkpoint.py
 """
+import datetime
 import functools
 import io
 import json
@@ -41,7 +42,12 @@ def write(weights, ckpt_dir):
     raise Exception("save failed")
 
 
-def write_ckpt(ctx: Context):
+def log(arg: str, verbose: bool):
+    if verbose:
+        print(datetime.datetime.now(), arg)
+
+
+def write_ckpt(ctx: Context, verbose: bool = True):
     flattened, structure = jax.tree_util.tree_flatten(ctx.parameters)
 
     structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
@@ -50,6 +56,7 @@ def write_ckpt(ctx: Context):
     structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
 
     if is_main():
+        log(f"Writing structure to {ctx.training.checkpoint_path}/structure.json", verbose)
         success = False
         for _ in range(UPLOAD_RETRIES):
             try:
@@ -66,6 +73,7 @@ def write_ckpt(ctx: Context):
 
     for device in jax.local_devices():
         shard = device.id
+        log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}.npz", verbose)
         write(index_weights(flattened, shard), f"{ctx.training.checkpoint_path}/{shard}.npz")
 
 

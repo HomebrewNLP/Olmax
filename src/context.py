@@ -200,7 +200,6 @@ class Context(DataClass):
         self.training = Training()
         self.wandb = WandB()
         self.dims = Dims(self.data)
-        self.dims.intermediate = self.dims.features * 2
 
         if 'CONFIG' in os.environ:
             with open(os.environ['CONFIG']) as f:
@@ -208,7 +207,6 @@ class Context(DataClass):
             init_class(self, yaml.safe_load(cfg))
 
         self.seed = 0
-        self.depth = 0
         self.global_prefix = ''
 
         self.name_cache: typing.Dict[str, int] = {}
@@ -245,7 +243,7 @@ class WhileContext(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.config = config
         self.ctx = Context()
-        self.current_step = jnp.ones([], dtype=jnp.uint32)
+        self.current_step = jnp.ones([], dtype=jnp.uint32)  # TODO Maybe
         self.data: typing.Optional[jnp.ndarray] = None
 
         if self.config is not None:
