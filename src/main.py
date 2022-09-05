@@ -176,7 +176,7 @@ def run_one(wblog: WandbLog):
     print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
 
     start_time = time.time()
-    checkpoint_at = wctx.ctx.training.checkpoint_interval
+    checkpoint_at = wctx.ctx.training.checkpoint_interval + wctx.ctx.training.start_step
     for idx, dat in enumerate(data):
         step_start = time.time()
         wctx = step(dat)
