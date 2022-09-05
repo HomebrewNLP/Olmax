@@ -176,23 +176,25 @@ def run_one(wblog: WandbLog):
     print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
 
     start_time = time.time()
+    checkpoint_at = wctx.ctx.training.checkpoint_interval
     for idx, dat in enumerate(data):
         step_start = time.time()
         wctx = step(dat)
+        current_step = int(wctx.current_step[0])
         if idx % wctx.ctx.training.print_interval == 0:
-            tokens_processed = device_steps * wctx.ctx.dims.sequence * wctx.ctx.dims.batch
-            print(f'[{idx * device_steps:{len(str(total_steps))}d}/{total_steps}] '
+            tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
+            print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
                   f'Loss: {wctx.loss[0]:6.3f} - '
                   f'Accuracy: {wctx.top_loss[0]:8.3f} | '
                   f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step[0])):.5f} | '
                   f'StepTime: {time.time() - step_start:10.6f}s - '
-                  f'Rate: {tokens_processed * (idx + 1) / (time.time() - start_time):9,.1f} Tokens/s')
+                  f'Rate: {tokens_processed * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')
         if jnp.isnan(wctx.loss[0]):
             print("Loss is NaN")
             return wblog.loss_medians[-1]
         if wctx.ctx.wandb.use_wandb and idx % wctx.ctx.wandb.log_frequency == 0:
             wblog(wctx, get_current_lr(wctx.ctx, wctx.current_step[0]))
-        log_step = math.log2((idx + 1) * device_steps + 1)
+        log_step = math.log2((current_step + 1) + 1)
         el = wctx.ctx.training.early_stopping.expected_loss
         expected_loss = el.offset + el.scale * math.exp(el.exponent * log_step)
         patience = 1 + wctx.ctx.training.early_stopping.loss_patience ** log_step
@@ -205,8 +207,9 @@ def run_one(wblog: WandbLog):
                 jax.profiler.start_trace(wctx.ctx.training.trace.output_path)
             if idx == wctx.ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
-        if wctx.ctx.training.do_checkpoint and (idx + 1) % (wctx.ctx.training.checkpoint_interval // device_steps) == 0:
+        if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
             write_ckpt(wctx.ctx)
+            checkpoint_at += wctx.ctx.training.checkpoint_interval
     return None
 
 
