@@ -18,7 +18,6 @@ from smart_open import open as smart_open
 from src.backend import is_main
 from src.context import Context
 
-WEIGHT_PIECES = 16  # how many files to split each shard across
 UPLOAD_RETRIES = 8
 
 
@@ -28,13 +27,12 @@ def index_weights(weights, idx):
     return jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), cpu_device)
 
 
-def write(x, ckpt_dir):
-    idx, i = x
-    file_path = ckpt_dir + f"{idx}.npz"
+def write(weights, ckpt_dir):
+    file_path = ckpt_dir
     for _ in range(UPLOAD_RETRIES):
         try:
             with smart_open(file_path, "wb") as f:
-                np.savez(f, *i)
+                np.savez(f, **{str(idx): tensor for idx, tensor in enumerate(weights)})
             return
         except:  # skipcq: FLK-E722
             print("save failed, trying again")
@@ -68,38 +66,21 @@ def write_ckpt(ctx: Context):
 
     for device in jax.local_devices():
         shard = device.id
-        cpu_flattened = index_weights(flattened, shard)
-
-        k, m = divmod(len(cpu_flattened), WEIGHT_PIECES)
-        cpu_flattened_chunked = (cpu_flattened[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in
-                                 range(WEIGHT_PIECES))
-
-        with multiprocessing.pool.ThreadPool(WEIGHT_PIECES) as p:
-            write_fn = functools.partial(write, ckpt_dir=f"{ctx.training.checkpoint_path}/{shard}_")
-            list((p.imap_unordered(write_fn, enumerate(cpu_flattened_chunked))))
+        write(index_weights(flattened, shard), f"{ctx.training.checkpoint_path}/{shard}.npz")
 
 
 def read_shard(ckpt_dir):
-    out = []
-    for idx in range(WEIGHT_PIECES):
-        file_path = ckpt_dir + f"{idx}.npz"
-        with smart_open(file_path, "rb") as f:
-            buf = f.read()
-            f_io = io.BytesIO(buf)
-            deserialized = np.load(f_io)
-            for i in deserialized:
-                out.append(deserialized[i])
-    return out
+    with smart_open(ckpt_dir, "rb") as f:
+        buf = f.read()
+    f_io = io.BytesIO(buf)
+    deserialized = list(np.load(f_io).items())
+    return [tensor for idx, tensor in sorted(deserialized, key=lambda x: int(x[0]))]
 
 
 def deep_replace(d, value):
     if isinstance(d, dict):
         return {k: deep_replace(v, value) for k, v in d.items()}
     return value
-
-
-def depth(param_name, name: str = 'reversible'):
-    return int(param_name.split(f'/{name}:')[1].split('/')[0])
 
 
 def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
@@ -111,10 +92,10 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     new_structure = deep_replace(new_structure, jnp.zeros((1,)))
     _, new_structure = jax.tree_util.tree_flatten(new_structure)
 
-    with multiprocessing.pool.ThreadPool(ctx.dims.heads) as p:
+    with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
         start = time.time()
         paths = [f"{ctx.training.checkpoint_load_path}/{dev.id}_" for dev in jax.local_devices()]
-        shards = list(p.imap(read_shard, paths))
+        shards = list(p.map(read_shard, paths))
         print(f"read from disk/gcs in {time.time() - start:.06}s")
 
     unsharded = []
@@ -122,7 +103,7 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
         x = np.stack(all_shards)
         if x.dtype == np.dtype('V2'):
             x.dtype = jnp.bfloat16
-        unsharded.append(x)
+        unsharded.append(jnp.asarray(x))
     params = jax.tree_util.tree_unflatten(new_structure, unsharded)
 
     print("Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
