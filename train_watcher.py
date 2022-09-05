@@ -58,6 +58,10 @@ def parse_args():
     return args
 
 
+def new_id():
+    return str(shortuuid.ShortUUID(alphabet=string.digits + string.ascii_lowercase).random(32))
+
+
 def main():
     args = parse_args()
     if args.cleanup:
@@ -71,7 +75,7 @@ def main():
     config["dims"]["heads"] = 8 * args.slices
     config["wandb"]["name"] = args.host
     if args.merge_runs:
-        config["wandb"]["id"] = str(shortuuid.ShortUUID(alphabet=string.digits + string.ascii_lowercase).random(32))
+        config["wandb"]["id"] = new_id()
 
     checkpoint_path = f'{config["training"]["checkpoint_path"]}-{args.storage_prefix}'
     wandb_api = wandb.Api()
@@ -88,7 +92,11 @@ def main():
         except:  # skipcq: FLK-E722
             start_step = 0
         start_step -= start_step % config["training"]["checkpoint_interval"]
-        config["training"]["checkpoint_load_path"] = checkpoint_path if start_step > 0 else ""
+        if start_step > 0:
+            config["wandb"]["id"] = new_id()
+            config["training"]["checkpoint_load_path"] = checkpoint_path
+        else:
+            config["training"]["checkpoint_load_path"] = ""
         config["training"]["start_step"] = start_step
         return Context(zone=args.zone, host=host, config=config, branch=args.branch)
 
