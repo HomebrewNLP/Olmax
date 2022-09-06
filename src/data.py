@@ -54,7 +54,7 @@ def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
         yield (np.sin(out) * multiplier * ctx.dims.vocab) % ctx.dims.vocab
 
 
-def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
+def text_dataset(ctx: Context, skipped_steps: int) -> typing.Iterator[np.ndarray]:
     if ctx.training.debug:
         return debug_generator(ctx)
 
@@ -73,6 +73,7 @@ def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
     full_batch = device_steps * batch_size
     sequence_length_1 = sequence_length + 1
     assert full_batch % ctx.data.datasets_used_per_step == 0
+    is_int64 = 'int64' in filenames[0]
 
     def _slice_target(x):
         """
@@ -83,14 +84,17 @@ def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
         x = tf.cast(x, tf.int32)
         return x
 
-    dset = dset.interleave(lambda x: decoder('int64' in filenames[0], x, rng.randint(0, 2 ** 32),
+    dset = dset.interleave(lambda x: decoder(is_int64, x, rng.randint(0, 2 ** 32),
                                              sequence_length_1, full_batch // ctx.data.datasets_used_per_step,
                                              ctx.data.deterministic),
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_workers,
                            deterministic=ctx.data.deterministic)
-    if ctx.data.shuffle_buffer > 0:
-        dset = dset.shuffle(ctx.data.shuffle_buffer, seed=rng.randint(0, 2 ** 32))
+    if ctx.data.shuffle_buffer_gb > 0:
+        buffer_size = ctx.data.shuffle_buffer_gb * 2 ** 30 // sequence_length_1
+        if is_int64:
+            buffer_size //= 4  # int32 (yes, it's not actually 64)
+        dset = dset.shuffle(buffer_size, seed=rng.randint(0, 2 ** 32))
     dset = dset.batch(ctx.data.datasets_used_per_step, deterministic=ctx.data.deterministic)
     dset = dset.map(_slice_target, deterministic=ctx.data.deterministic)
     if ctx.data.prefetch_buffer > 0:
@@ -110,4 +114,8 @@ def text_dataset(ctx: Context) -> typing.Iterator[np.ndarray]:
     options.experimental_slack = not ctx.data.deterministic
     options.experimental_distribute.auto_shard_policy = AutoShardPolicy.AUTO
     dset = dset.with_options(options)
+
+    if skipped_steps:
+        dset.skip(skipped_steps)
+
     return dset.as_numpy_iterator()

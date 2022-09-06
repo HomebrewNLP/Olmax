@@ -60,7 +60,7 @@ def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -
 
 class DataContext(DataClass):
     path: str = "gs://homebrewnlp-eu/the-char-pile/*"
-    shuffle_buffer: int = 0
+    shuffle_buffer_gb: int = 64
     parallel_workers: int = 2
     interleaved_datasets: int = 2
     prefetch_buffer: int = 2

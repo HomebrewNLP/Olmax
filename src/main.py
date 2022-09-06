@@ -136,13 +136,11 @@ def run_one(wblog: WandbLog):
     print(yaml.dump(wctx.ctx.config(), indent=4))
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
-    np_data = timeit("Initializing dataset", text_dataset, wctx.ctx)
+    samples = math.ceil(wctx.ctx.training.start_step / jax.process_count() / wctx.ctx.training.device_steps)
+    np_data = timeit("Initializing dataset", text_dataset, wctx.ctx, samples)
 
     data = map(replicate, np_data)
     inp = timeit("Enqueueing first batch", next, data)[:, :wctx.ctx.dims.batch, :wctx.ctx.dims.sequence]
-
-    samples = math.ceil(wctx.ctx.training.start_step / jax.process_count() / wctx.ctx.training.device_steps)
-    timeit(f"Skipping first {samples} samples", skip_samples, samples, np_data)
 
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     parameter_count = sum(util.prod(param.shape) for name, param in wctx.ctx.parameters.items())
