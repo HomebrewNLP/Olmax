@@ -34,7 +34,7 @@ class WandbLog:
 
         self.run.log({"Loss/Current": self.losses[-1], "Accuracy/Current": self.accuracies[-1],
                       "Speed/Batches per Second": rate, "Speed/Tokens per Day": tokens_per_day,
-                      "Optimizer/Learning Rate": current_lr.astype(float), "Optimizer/Beta1": ctx.optimizer.adam_beta1,
+                      "Optimizer/Learning Rate": current_lr, "Optimizer/Beta1": ctx.optimizer.adam_beta1,
                       "Optimizer/Beta2": ctx.optimizer.adam_beta2
                       }, step=step)
 
