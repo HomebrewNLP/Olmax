@@ -12,7 +12,7 @@ from .context import Context
 tf1 = tf.compat.v1
 
 
-def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_batch: int, deterministic: bool):
+def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, deterministic: bool):
     """
     Read a given tfrecord and windowed text dataset out of it.
     :param int_string: whether the entire dataset is in int64 or byte
@@ -23,7 +23,6 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
     :param deterministic: whether to use sloppy interleave (fast) or deterministic interleave (slow)
     :return: tensorflow dataset of tokens
     """
-    batch_prod = context_p1 * sub_batch
 
     def chunk(proto):
         if int_string:
@@ -35,10 +34,9 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, sub_b
             dat = tf.strings.unicode_decode(dat, 'UTF-8')
             dat = tf.cast(dat, tf.uint8)
         dat = tf.reshape(dat, (-1,))
-        dat = tf.slice(dat, (0,), (tf.size(dat) // batch_prod * batch_prod,))
+        dat = tf.slice(dat, (0,), (tf.size(dat) // context_p1 * context_p1,))
         dat = tf.reshape(dat, (-1, context_p1))
         dat = tf.random.shuffle(dat, seed=seed)
-        dat = tf.reshape(dat, (-1, batch_prod))
         return tf.data.Dataset.from_tensor_slices(dat)
 
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1, deterministic=deterministic)
@@ -84,18 +82,15 @@ def text_dataset(ctx: Context, skipped_steps: int) -> typing.Iterator[np.ndarray
         x = tf.cast(x, tf.int32)
         return x
 
-    dset = dset.interleave(lambda x: decoder(is_int64, x, rng.randint(0, 2 ** 32),
-                                             sequence_length_1, full_batch // ctx.data.datasets_used_per_step,
+    dset = dset.interleave(lambda x: decoder(is_int64, x, rng.randint(0, 2 ** 32), sequence_length_1,
                                              ctx.data.deterministic),
                            cycle_length=ctx.data.interleaved_datasets,
                            num_parallel_calls=ctx.data.parallel_workers,
                            deterministic=ctx.data.deterministic)
     if ctx.data.shuffle_buffer_gb > 0:
-        buffer_size = ctx.data.shuffle_buffer_gb * 2 ** 30 // sequence_length_1
-        if is_int64:
-            buffer_size //= 4  # int32 (yes, it's not actually 64)
+        buffer_size = ctx.data.shuffle_buffer_gb * 2 ** 30 // 4 // sequence_length_1  # 4 = int32
         dset = dset.shuffle(buffer_size, seed=rng.randint(0, 2 ** 32))
-    dset = dset.batch(ctx.data.datasets_used_per_step, deterministic=ctx.data.deterministic)
+    dset = dset.batch(full_batch, deterministic=ctx.data.deterministic)
     dset = dset.map(_slice_target, deterministic=ctx.data.deterministic)
     if ctx.data.prefetch_buffer > 0:
         dset = dset.prefetch(ctx.data.prefetch_buffer)
