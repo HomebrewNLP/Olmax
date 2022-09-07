@@ -135,11 +135,14 @@ def read_checkpoint(ctx: Context, ignore: str = '.*optimizer.*', load_variance: 
     with smart_open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
         structure = f.read()
     structure = json.loads(structure)
-    structure = deep_replace(structure, jnp.zeros((1,)))
-    _, structure = jax.tree_util.tree_flatten(structure)
+    py_structure = deep_replace(structure, jnp.zeros((1,)))
+    _, structure = jax.tree_util.tree_flatten(py_structure)
 
     _overwrite(_read_shards(ctx.training.checkpoint_load_path, structure, "parameters"), ctx.parameters, ignore)
+
     if load_variance:
+        py_structure = {k: v for k, v in py_structure.items() if "optimizer" not in k}  # no optimizer for param-lr
+        _, structure = jax.tree_util.tree_flatten(py_structure)
         _overwrite(_read_shards(ctx.training.checkpoint_load_path, structure, "variance"), ctx.parameter_variance,
                    ignore)
 
