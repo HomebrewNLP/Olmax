@@ -125,3 +125,4 @@ def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
     for key in ctx.parameters.keys():
         if key in params:
             ctx.parameters[key] = params[key]
+y

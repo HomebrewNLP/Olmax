@@ -207,6 +207,8 @@ def run_one(wblog: WandbLog):
                 jax.profiler.stop_trace()
         if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
             write_ckpt(wctx.ctx)
+            wctx.ctx.parameters = {}
+            read_ckpt(wctx.ctx, '[0]{100}')
             checkpoint_at += wctx.ctx.training.checkpoint_interval
     return None
 
