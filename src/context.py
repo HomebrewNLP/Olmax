@@ -241,12 +241,11 @@ class Context(DataClass):
 
 class WhileContext(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
-        self.config = config
         self.ctx = Context()
         self.current_step = jnp.ones([], dtype=jnp.uint32)
         self.data: typing.Optional[jnp.ndarray] = None
 
-        if self.config is not None:
+        if config is not None:
             self.ctx.parameters = config['parameters']
             self.ctx.parameter_variance = config['parameter_variance']
             self.current_step = config['current_step']
@@ -269,7 +268,7 @@ class WhileTrainContext(WhileContext):
         self.current_loss = jnp.zeros([])
         self.top_loss = jnp.zeros([])
 
-        if self.config is not None:
+        if config is not None:
             self.loss = config['loss']
             self.top_loss = config['top_loss']
 
@@ -299,7 +298,7 @@ class WhilePredictContext(WhileContext):
         self.adaptive_filter_scale = jnp.array([0] * batch_dim_size)
         self.adaptive_filter_power = jnp.array([1] * batch_dim_size)
 
-        if self.config is not None:
+        if config is not None:
             self.start_pos = config['start_pos']
             self.stop_pos = config['stop_pos']
             self.temperature = config['temperature']
