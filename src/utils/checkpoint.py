@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 from smart_open import open as smart_open
 
-from src.backend import is_main, deep_replace
+from src.backend import deep_replace, is_main
 from src.context import Context, WhileTrainContext
 
 UPLOAD_RETRIES = 8
@@ -93,7 +93,6 @@ def read_shard(checkpoint_dir):
     f_io = io.BytesIO(buf)
     deserialized = list(np.load(f_io).items())
     return [tensor for idx, tensor in sorted(deserialized, key=lambda x: int(x[0]))]
-
 
 
 def unshard(shards):

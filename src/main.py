@@ -138,7 +138,7 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
     Model gets loaded in-place into the `WhileTrainContext`
     """
     if wctx.ctx.training.checkpoint_load_path:
-        read_train_checkpoint(wctx.ctx, '[0]{100}')
+        read_train_checkpoint(wctx, '[0]{100}')
         skipped_samples = math.ceil(wctx.current_step / jax.process_count() / wctx.ctx.training.device_steps)
         data, _ = init_data(wctx.ctx, skipped_samples)
         return data
