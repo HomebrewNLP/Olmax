@@ -172,7 +172,7 @@ def run_one(wblog: WandbLog):
     step = TrainLoop(wctx, step)
 
     timeit("Compiling model and performing first step", step, next(data))
-    timeit("Running second step", step, next(data))
+    wctx = timeit("Running second step", step, next(data))
     print("\n")
     print(f"Parameters: {jax.process_count() * parameter_count:,}")
     print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
