@@ -242,6 +242,10 @@ class WhileContext(DataClass):
                 'parameter_variance': self.ctx.parameter_variance
                 }
 
+    @property
+    def step(self):
+        return int(self.current_step[0])
+
     def __call__(self, data: jnp.ndarray):
         self.data = data
         return self

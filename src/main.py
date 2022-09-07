@@ -139,7 +139,7 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
     """
     if wctx.ctx.training.checkpoint_load_path:
         read_train_checkpoint(wctx, '[0]{100}')
-        skipped_samples = math.ceil(wctx.current_step / jax.process_count() / wctx.ctx.training.device_steps)
+        skipped_samples = math.ceil(wctx.step / jax.process_count() / wctx.ctx.training.device_steps)
         data, _ = init_data(wctx.ctx, skipped_samples)
         return data
 
@@ -178,18 +178,19 @@ def run_one(wblog: WandbLog):
     print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
 
     start_time = time.time()
-    checkpoint_at = wctx.ctx.training.checkpoint_interval + int(wctx.current_step[0])
+    checkpoint_at = wctx.ctx.training.checkpoint_interval + wctx.step
     for idx, dat in enumerate(data):
         step_start = time.time()
         wctx = step(dat)
-        current_step = int(wctx.current_step[0])
+        current_step = wctx.step
+        lr = float(get_current_lr(wctx.ctx, wctx.current_step[0]))
         print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
               f'Loss: {wctx.loss[0]:6.3f} - '
               f'Accuracy: {wctx.accuracy[0]:8.3f} | '
-              f'LearningRate: {float(get_current_lr(wctx.ctx, wctx.current_step[0])):.5f} | '
+              f'LearningRate: {lr:.5f} | '
               f'StepTime: {time.time() - step_start:10.6f}s - '
               f'Rate: {tokens_processed * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')
-        if wblog(wctx, current_step, get_current_lr(wctx.ctx, wctx.current_step[0])):
+        if wblog(wctx, current_step, lr):
             return
         if wctx.ctx.training.trace.do_trace:
             if idx == wctx.ctx.training.trace.start_step:
