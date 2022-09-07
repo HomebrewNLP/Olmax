@@ -105,11 +105,9 @@ class TensorboardTrace(DataClass):
 class WandB(DataClass):
     name: typing.Optional[str] = None
     id: typing.Optional[str] = None
-    use_wandb: bool = True
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
     percentile: float = 25
-    log_frequency: int = 1
     median_sizes: typing.List[int] = [64, 256, 1024]
 
 
@@ -128,7 +126,6 @@ class Optimizer(DataClass):
     shampoo_beta2: float = 0.01
     weight_decay: float = 0.01
     warmup_end: int = 16384
-    warmup_start: int = 0
     exponential_decay: float = 3e-6
     norm_scale: float = 1
     bottleneck_scale: float = 1
@@ -157,12 +154,6 @@ class ExpectedLoss(DataClass):
     exponent: float = -0.3642513
 
 
-class EarlyStopping(DataClass):
-    minimum_relative_loss_change: float = 0.003
-    maximum_spike_size: float = 3
-    maximum_spike_duration: int = 24
-    expected_loss = ExpectedLoss()
-    loss_patience = 0.875  # target = expected_loss * loss_patience^log2(step)
 
 
 class Training(DataClass):
@@ -175,10 +166,7 @@ class Training(DataClass):
     device_steps: int = 4
     device_unroll: int = 1
     steps: int = 2 ** 16
-    start_step: int = 0
-    print_interval: int = 1
     trace: TensorboardTrace = TensorboardTrace()
-    early_stopping: EarlyStopping = EarlyStopping()
 
 
 class Evaluation(DataClass):
@@ -265,17 +253,16 @@ class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
         self.loss = jnp.zeros([])
-        self.current_loss = jnp.zeros([])
-        self.top_loss = jnp.zeros([])
+        self.accuracy = jnp.zeros([])
 
         if config is not None:
             self.loss = config['loss']
-            self.top_loss = config['top_loss']
+            self.accuracy = config['accuracy']
 
     def serialize(self):
         serialized = self._serialize()
         serialized['loss'] = self.loss
-        serialized['top_loss'] = self.top_loss
+        serialized['accuracy'] = self.accuracy
         return serialized
 
 

@@ -97,7 +97,6 @@ def main():
             config["training"]["checkpoint_load_path"] = checkpoint_path
         else:
             config["training"]["checkpoint_load_path"] = ""
-        config["training"]["start_step"] = start_step
         return Context(zone=args.zone, host=host, config=config, branch=args.branch)
 
     start_single(args.host, args.tpu_version, args.zone, args.preemptible, args.service_account, args.slices, start_fn,

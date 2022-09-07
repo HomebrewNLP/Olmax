@@ -14,7 +14,7 @@ from src.context import Context, WhilePredictContext
 from src.main import get_parameters
 from src.model.main import body_ctx
 from src.model.moe import one_hot
-from src.utils.checkpoint import read_ckpt
+from src.utils.checkpoint import read_checkpoint
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:
@@ -110,7 +110,7 @@ class Inference:
         ctx.is_initializing = True
         dummy_data = np.zeros((1, ctx.dims.sequence), dtype=np.int32)
         get_parameters(ctx, dummy_data)
-        read_ckpt(ctx)
+        read_checkpoint(ctx)
         self.parameters = ctx.parameters
 
         ctx.is_initializing = False
