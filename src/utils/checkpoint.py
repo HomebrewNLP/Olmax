@@ -151,6 +151,6 @@ def read_train_checkpoint(wctx: WhileTrainContext, ignore: str = '.*optimizer.*'
     read_checkpoint(wctx.ctx, ignore, load_variance=True)
 
     _, structure = jax.tree_util.tree_flatten([jnp.zeros((1,))])
-    wctx.loss = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "loss")
-    wctx.accuracy = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "accuracy")
-    wctx.current_step = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "current_step")
+    wctx.loss = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "loss")[0]
+    wctx.accuracy = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "accuracy")[0]
+    wctx.current_step = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "current_step")[0]
