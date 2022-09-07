@@ -208,6 +208,7 @@ def run_one(wblog: WandbLog):
         if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
             write_ckpt(wctx.ctx)
             wctx.ctx.parameters = {}
+            wctx.ctx.training.checkpoint_load_path = wctx.ctx.training.checkpoint_path
             read_ckpt(wctx.ctx, '[0]{100}')
             checkpoint_at += wctx.ctx.training.checkpoint_interval
     return None
