@@ -187,10 +187,12 @@ class Context(DataClass):
         self.wandb = WandB()
         self.dims = Dims(self.data)
 
-        if 'CONFIG' in os.environ:
+        if config is None and 'CONFIG' in os.environ:
             with open(os.environ['CONFIG']) as f:
                 cfg = f.read()
-            init_class(self, yaml.safe_load(cfg))
+            config = yaml.safe_load(cfg)
+        if config is not None:
+            init_class(self, config)
 
         self.seed = 0
         self.global_prefix = ''
@@ -201,9 +203,6 @@ class Context(DataClass):
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
         self.add_depth = False
-
-        if config is not None:
-            self.__dict__.update(config)
 
     def add_to_prefix(self, appended="", count=True):
         new = copy.copy(self)
@@ -223,6 +222,9 @@ class Context(DataClass):
         del cfg['name_cache'], cfg['parameters'], cfg['prng_key'], cfg['is_initializing']
         del cfg['parameter_variance']
         return serialize(cfg)
+
+    def __str__(self):
+        return yaml.dump(self.config(), indent=4)
 
 
 class WhileContext(DataClass):

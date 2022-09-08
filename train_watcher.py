@@ -10,19 +10,36 @@ import wandb
 import yaml
 from tpucare import delete_one_tpu, exec_command, exec_on_tpu, send_to_tpu, start_single
 
+from src.context import Context
+
 tpucare.LOG_LEVEL = 0
 _, _, wandb_key = netrc().authenticators("api.wandb.ai")
 
 
 @dataclasses.dataclass
-class Context:
+class TPUContext:
     zone: str
     host: str
     config: dict
     branch: str
 
 
-def start_fn(ctx: Context, worker: int):
+class Args:
+    host: str
+    tpu_version: int
+    zone: str
+    data_path: str
+    preemptible: bool
+    service_account: str
+    branch: str
+    slices: int
+    storage_prefix: str
+    config_path: str
+    cleanup: int
+    merge_runs: bool
+
+
+def start_fn(ctx: TPUContext, worker: int):
     setup = '(bash setup.sh ; mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml ; exit 0)'
     send_to_tpu(ctx.host, ctx.zone, "config.yaml", yaml.dump(ctx.config), worker)
     cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
@@ -32,7 +49,7 @@ def start_fn(ctx: Context, worker: int):
     exec_on_tpu(ctx.host, ctx.zone, "bash setup.sh", worker)
 
 
-def parse_args():
+def parse_args() -> Args:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, help="Name of the TPU")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
@@ -51,15 +68,58 @@ def parse_args():
     parser.add_argument("--config-path", type=str, help="Path to config.yaml")
     parser.add_argument("--cleanup", default=0, type=int,
                         help="Instead of running something new, kill all tpus. 1 or 0 for y/n")
-    parser.add_argument("--run-threshold", default=100, type=int, help="How many of the last runs to scan - at most.")
     parser.add_argument("--merge-runs", default=1, type=int,
                         help="Whether to merge all WandB runs into one logstream or keep one for each host.")
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 def new_id():
     return str(shortuuid.ShortUUID(alphabet=string.digits + string.ascii_lowercase).random(32))
+
+
+class CreationCallback:
+    def __init__(self, args: Args):
+        self.args = args
+        with open(args.config_path, 'r') as f:
+            txt = f.read()
+        config = yaml.safe_load(txt)
+        cfg = Context(config)
+        cfg.training.do_checkpoint = True
+        cfg.data.path = args.data_path
+        cfg.dims.heads = 8 * args.slices
+        cfg.wandb.name = args.host
+
+        if args.merge_runs:
+            cfg.wandb.id = new_id()
+
+        cfg.training.checkpoint_path = f'{cfg.training.checkpoint_path}-{args.storage_prefix}'
+        self.wandb_api = wandb.Api()
+        self.cfg = cfg
+        self.last_checkpoint_step = 0
+
+    def _prepare_config(self):  # load checkpoint if exists and avoid overwriting logs at 1000 if already up to 1500
+        try:
+            run = self.wandb_api.run(f'{self.cfg.wandb.entity}/{self.cfg.wandb.project}/{self.cfg.wandb.id}')
+            start_step = int(run.summary["_step"])
+        except:  # skipcq: FLK-E722
+            return  # no logs yet
+        if start_step < self.cfg.training.checkpoint_interval:
+            self.cfg.training.checkpoint_load_path = ""
+            return  # no checkpoint yet
+
+        self.cfg.training.checkpoint_load_path = self.cfg.training.checkpoint_path
+        new_checkpoint_step = start_step - start_step % self.cfg.training.checkpoint_interval
+        if new_checkpoint_step < self.cfg.training.checkpoint_interval + self.last_checkpoint_step:
+            return  # checkpoint, but no new checkpoint
+
+        self.last_checkpoint_step = new_checkpoint_step
+        self.cfg.wandb.id = new_id()
+
+    def __call__(self, host: str, ctx: typing.Optional[TPUContext]) -> TPUContext:
+        if ctx is not None:  # every call after 0th
+            self._prepare_config()
+        print(self.cfg)
+        return TPUContext(zone=self.args.zone, host=host, config=self.cfg.config(), branch=self.args.branch)
 
 
 def main():
@@ -67,40 +127,8 @@ def main():
     if args.cleanup:
         return delete_one_tpu("", args.host, args.zone)
 
-    with open(args.config_path, 'r') as f:
-        txt = f.read()
-    config = yaml.safe_load(txt)
-    config["training"]["do_checkpoint"] = True
-    config["data"]["path"] = args.data_path
-    config["dims"]["heads"] = 8 * args.slices
-    config["wandb"]["name"] = args.host
-    if args.merge_runs:
-        config["wandb"]["id"] = new_id()
-
-    checkpoint_path = f'{config["training"]["checkpoint_path"]}-{args.storage_prefix}'
-    wandb_api = wandb.Api()
-
-    def creation_callback(host: str, ctx: typing.Optional[Context]) -> Context:
-        config["training"]["checkpoint_path"] = checkpoint_path
-
-        if ctx is None:  # first call
-            return Context(zone=args.zone, host=host, config=config, branch=args.branch)
-
-        try:
-            run = wandb_api.run(f'{config["wandb"]["entity"]}/{config["wandb"]["project"]}/{config["wandb"]["id"]}')
-            start_step = int(run.summary["_step"])
-        except:  # skipcq: FLK-E722
-            start_step = 0
-        start_step -= start_step % config["training"]["checkpoint_interval"]
-        if start_step > 0:
-            config["wandb"]["id"] = new_id()
-            config["training"]["checkpoint_load_path"] = checkpoint_path
-        else:
-            config["training"]["checkpoint_load_path"] = ""
-        return Context(zone=args.zone, host=host, config=config, branch=args.branch)
-
     start_single(args.host, args.tpu_version, args.zone, args.preemptible, args.service_account, args.slices, start_fn,
-                 creation_callback)
+                 CreationCallback(args))
 
 
 if __name__ == '__main__':

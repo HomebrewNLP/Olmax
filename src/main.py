@@ -157,7 +157,7 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
 def run_one(wblog: WandbLog):
     wctx = WhileTrainContext()
     wctx.ctx.is_initializing = True
-    print(yaml.dump(wctx.ctx.config(), indent=4))
+    print(wctx.ctx)
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
     tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
@@ -205,7 +205,7 @@ def run_one(wblog: WandbLog):
 
 def dump_ctx(ctx: Context, run):
     with open("config.yaml", 'w') as f:
-        f.write(yaml.dump(ctx.config(), indent=4))
+        f.write(str(ctx))
     os.environ['CONFIG'] = 'config.yaml'
     run.config.update(ctx.config(), allow_val_change=True)
 
