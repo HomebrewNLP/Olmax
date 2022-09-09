@@ -32,12 +32,15 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
     if act:
         out = activate_forward(out)
     out = out.astype(original_dtype)
-    return out, norm_out
+    src_fp64 = src_fp64.astype(original_dtype)
+    return out, src_fp64, std
 
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
                    psum: bool = False, act: bool = True, init_mean: typing.Optional[float] = 1) -> jnp.ndarray:
+    # Grad is wrong for psum+act, but correct for psum, act and neither.
+
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         if init_mean is None:
@@ -53,18 +56,20 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
-        out, norm_out = norm_forward(ctx, src, wgt, psum, act)
+        out, src, std = norm_forward(ctx, src, wgt, psum, act)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            norm_out_fp64 = promote_to(norm_out, run_type)
+            src_fp64 = promote_to(src, run_type)
+            norm_out_fp64 = src_fp64 * std
             reshaped_weight = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy = promote_to(dy, run_type)
             if act:
                 dy = dy * activate_grad(norm_out_fp64 * reshaped_weight)
             d_wgt = (dy * norm_out_fp64).sum(list(range(src.ndim - 1))).reshape((-1,))
-            square = jnp.square(norm_out)
-            square = square.sum(-1, keepdims=True) - square
-            dy = dy * lax.integer_pow(std, 3) * reshaped_weight * square
+            square = jnp.square(src_fp64)
+            sqsum = square.sum(-1, keepdims=True)
+            square = sqsum - square
+            dy = dy * reshaped_weight * square * std / sqsum
             if psum:
                 dy = lax.psum(dy, axis_name=ParallelAxes.model)
             return dy.astype(original_dtype), d_wgt

@@ -10,12 +10,12 @@ from unittests.grad.backend import randn_fn
 
 @pytest.mark.parametrize("act", [True, False])
 @pytest.mark.parametrize("psum", [True, False])
-@pytest.mark.parametrize("samples", [2 ** 6, 2 ** 12])
-def test_grad(act: bool, psum: bool, samples: int, trials: int = 16):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("samples", [2 ** 16])
+def test_grad(act: bool, psum: bool, samples: int, trials: int = 2):  # skipcq: PYL-W0640
     ctx = Context()
     ctx.is_initializing = False
     randn = randn_fn()
-    for _ in range(trials):
+    for trial in range(trials):
         src = randn(samples, ctx.dims.features)
         wgt = randn(ctx.dims.features)
 
@@ -24,4 +24,7 @@ def test_grad(act: bool, psum: bool, samples: int, trials: int = 16):  # skipcq:
 
         out0 = grad(lambda x, y: norm_forward(ctx, x, y, psum, act)[0].mean())
         out1 = grad(lambda x, y: scale_norm_act(ctx, x, ctx.dims.features, y, psum, act).mean())
-        assert jnp.allclose(out0, out1)
+
+        print(trial)
+        assert jnp.allclose(out0[0], out1[0])
+        assert jnp.allclose(out0[1], out1[1])
