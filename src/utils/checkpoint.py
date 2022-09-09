@@ -10,14 +10,15 @@ import multiprocessing
 import re
 import time
 import traceback
+import typing
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from smart_open import open as smart_open
 
-from src.backend import is_main
-from src.context import Context
+from src.backend import deep_replace, is_main
+from src.context import Context, WhileTrainContext
 
 UPLOAD_RETRIES = 8
 
@@ -28,8 +29,7 @@ def index_weights(weights, idx):
     return jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), cpu_device)
 
 
-def write(weights, ckpt_dir):
-    file_path = ckpt_dir
+def write(weights: typing.List[jnp.ndarray], file_path: str):
     for _ in range(UPLOAD_RETRIES):
         try:
             with smart_open(file_path, "wb") as f:
@@ -47,8 +47,9 @@ def log(arg: str, verbose: bool):
         print(datetime.datetime.now(), arg)
 
 
-def write_ckpt(ctx: Context, verbose: bool = True):
+def write_checkpoint(ctx: Context, verbose: bool = True):
     flattened, structure = jax.tree_util.tree_flatten(ctx.parameters)
+    variance, _ = jax.tree_util.tree_flatten(ctx.parameter_variance)  # same structure
 
     structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
     structure = structure.replace('PyTreeDef', '')[1:-1]  # clean up "types"
@@ -73,55 +74,83 @@ def write_ckpt(ctx: Context, verbose: bool = True):
 
     for device in jax.local_devices():
         shard = device.id
-        log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}.npz", verbose)
-        write(index_weights(flattened, shard), f"{ctx.training.checkpoint_path}/{shard}.npz")
+        log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
+        for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
+            write(index_weights(tree, shard), f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
 
-def read_shard(ckpt_dir):
-    with smart_open(ckpt_dir, "rb") as f:
+def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
+    write_checkpoint(wctx.ctx, verbose)
+    for device in jax.local_devices():
+        shard = device.id
+        for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
+            write(index_weights([tree], shard), f"{wctx.ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
+
+
+def read_shard(checkpoint_dir):
+    with smart_open(checkpoint_dir, "rb") as f:
         buf = f.read()
     f_io = io.BytesIO(buf)
     deserialized = list(np.load(f_io).items())
     return [tensor for idx, tensor in sorted(deserialized, key=lambda x: int(x[0]))]
 
 
-def deep_replace(d, value):
-    if isinstance(d, dict):
-        return {k: deep_replace(v, value) for k, v in d.items()}
-    return value
-
-
-def read_ckpt(ctx: Context, ignore: str = '.*optimizer.*'):
-    ignore = re.compile(ignore)
-
-    with smart_open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
-        new_structure = f.read()
-    new_structure = json.loads(new_structure)
-    new_structure = deep_replace(new_structure, jnp.zeros((1,)))
-    _, new_structure = jax.tree_util.tree_flatten(new_structure)
-
-    with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
-        start = time.time()
-        paths = [f"{ctx.training.checkpoint_load_path}/{dev.id}.npz" for dev in jax.local_devices()]
-        shards = list(p.map(read_shard, paths))
-        print(f"read from disk/gcs in {time.time() - start:.06}s")
-
+def unshard(shards):
     unsharded = []
     for all_shards in zip(*shards):
         x = np.stack(all_shards)
         if x.dtype == np.dtype('V2'):
             x.dtype = jnp.bfloat16
         unsharded.append(jnp.asarray(x))
-    params = jax.tree_util.tree_unflatten(new_structure, unsharded)
+    return unsharded
 
-    print("Unknown parameters:  ", [p for p in params.keys() if p not in ctx.parameters and not ignore.match(p)])
-    print("Unfilled parameters: ", [p for p in ctx.parameters.keys() if p not in params and not ignore.match(p)])
 
-    if not ctx.parameters:
-        for key, param in params.items():
-            ctx.parameters[key] = param
+def _read_shards(path: str, structure, suffix: str):
+    with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
+        start = time.time()
+        paths = [f"{path}/{dev.id}/{suffix}.npz" for dev in jax.local_devices()]
+        shards = list(p.map(read_shard, paths))
+        print(f"Loading {suffix} took {time.time() - start:.2}s")
+
+    return jax.tree_util.tree_unflatten(structure, unshard(shards))
+
+
+def _overwrite(new: dict, old: dict, ignore: re.Pattern):
+    print("Unknown:  ", [p for p in new.keys() if p not in old and not ignore.match(p)])
+    print("Unfilled: ", [p for p in old.keys() if p not in new and not ignore.match(p)])
+
+    if not old:
+        for key, param in new.items():
+            old[key] = param
         return
 
-    for key in ctx.parameters.keys():
-        if key in params:
-            ctx.parameters[key] = params[key]
+    for key in old.keys():
+        if key in new:
+            old[key] = new[key]
+
+
+def read_checkpoint(ctx: Context, ignore: str = '.*optimizer.*', load_variance: bool = False):
+    ignore = re.compile(ignore)
+
+    with smart_open(f"{ctx.training.checkpoint_load_path}/structure.json", "r") as f:
+        structure = f.read()
+    structure = json.loads(structure)
+    py_structure = deep_replace(structure, jnp.zeros((1,)))
+    _, structure = jax.tree_util.tree_flatten(py_structure)
+
+    _overwrite(_read_shards(ctx.training.checkpoint_load_path, structure, "parameters"), ctx.parameters, ignore)
+
+    if load_variance:
+        py_structure = {k: v for k, v in py_structure.items() if "optimizer" not in k}  # no optimizer for param-lr
+        _, structure = jax.tree_util.tree_flatten(py_structure)
+        _overwrite(_read_shards(ctx.training.checkpoint_load_path, structure, "variance"), ctx.parameter_variance,
+                   ignore)
+
+
+def read_train_checkpoint(wctx: WhileTrainContext, ignore: str = '.*optimizer.*'):
+    read_checkpoint(wctx.ctx, ignore, load_variance=True)
+
+    _, structure = jax.tree_util.tree_flatten([jnp.zeros((1,))])
+    wctx.loss = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "loss")[0]
+    wctx.accuracy = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "accuracy")[0]
+    wctx.current_step = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "current_step")[0]

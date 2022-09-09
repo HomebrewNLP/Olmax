@@ -94,6 +94,12 @@ def normal(ctx: Context, shape: typing.Sequence[int]):
     return random.normal(key, shape, ctx.model.storage_dtype)
 
 
+def deep_replace(d, value):
+    if isinstance(d, dict):
+        return {k: deep_replace(v, value) for k, v in d.items()}
+    return value
+
+
 def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
     column_axes = tuple(column_axes)
     axes = tuple(shape[c] for c in column_axes)

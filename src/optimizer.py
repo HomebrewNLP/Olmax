@@ -121,7 +121,7 @@ def graft(ctx: Context, param_name: str, magnitude: jnp.ndarray, direction: jnp.
 def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
-    learning_rate *= jnp.minimum(step - opt.warmup_start, opt.warmup_end).astype(jnp.float32)
+    learning_rate *= jnp.minimum(step, opt.warmup_end).astype(jnp.float32)
     learning_rate /= opt.warmup_end
     learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(step.astype(jnp.float32))
     return learning_rate.astype(ctx.model.storage_dtype)

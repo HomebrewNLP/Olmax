@@ -105,11 +105,9 @@ class TensorboardTrace(DataClass):
 class WandB(DataClass):
     name: typing.Optional[str] = None
     id: typing.Optional[str] = None
-    use_wandb: bool = True
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
     percentile: float = 25
-    log_frequency: int = 1
     median_sizes: typing.List[int] = [64, 256, 1024]
 
 
@@ -128,7 +126,6 @@ class Optimizer(DataClass):
     shampoo_beta2: float = 0.01
     weight_decay: float = 0.01
     warmup_end: int = 16384
-    warmup_start: int = 0
     exponential_decay: float = 3e-6
     norm_scale: float = 1
     bottleneck_scale: float = 1
@@ -157,14 +154,6 @@ class ExpectedLoss(DataClass):
     exponent: float = -0.3642513
 
 
-class EarlyStopping(DataClass):
-    minimum_relative_loss_change: float = 0.003
-    maximum_spike_size: float = 3
-    maximum_spike_duration: int = 24
-    expected_loss = ExpectedLoss()
-    loss_patience = 0.875  # target = expected_loss * loss_patience^log2(step)
-
-
 class Training(DataClass):
     debug: bool = False
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
@@ -175,10 +164,7 @@ class Training(DataClass):
     device_steps: int = 4
     device_unroll: int = 1
     steps: int = 2 ** 16
-    start_step: int = 0
-    print_interval: int = 1
     trace: TensorboardTrace = TensorboardTrace()
-    early_stopping: EarlyStopping = EarlyStopping()
 
 
 class Evaluation(DataClass):
@@ -201,10 +187,12 @@ class Context(DataClass):
         self.wandb = WandB()
         self.dims = Dims(self.data)
 
-        if 'CONFIG' in os.environ:
+        if config is None and 'CONFIG' in os.environ:
             with open(os.environ['CONFIG']) as f:
                 cfg = f.read()
-            init_class(self, yaml.safe_load(cfg))
+            config = yaml.safe_load(cfg)
+        if config is not None:
+            init_class(self, config)
 
         self.seed = 0
         self.global_prefix = ''
@@ -215,9 +203,6 @@ class Context(DataClass):
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
         self.add_depth = False
-
-        if config is not None:
-            self.__dict__.update(config)
 
     def add_to_prefix(self, appended="", count=True):
         new = copy.copy(self)
@@ -238,15 +223,17 @@ class Context(DataClass):
         del cfg['parameter_variance']
         return serialize(cfg)
 
+    def __str__(self):
+        return yaml.dump(self.config(), indent=4)
+
 
 class WhileContext(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
-        self.config = config
         self.ctx = Context()
         self.current_step = jnp.ones([], dtype=jnp.uint32)
         self.data: typing.Optional[jnp.ndarray] = None
 
-        if self.config is not None:
+        if config is not None:
             self.ctx.parameters = config['parameters']
             self.ctx.parameter_variance = config['parameter_variance']
             self.current_step = config['current_step']
@@ -257,6 +244,10 @@ class WhileContext(DataClass):
                 'parameter_variance': self.ctx.parameter_variance
                 }
 
+    @property
+    def step(self):
+        return int(self.current_step[0])
+
     def __call__(self, data: jnp.ndarray):
         self.data = data
         return self
@@ -266,17 +257,16 @@ class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
         self.loss = jnp.zeros([])
-        self.current_loss = jnp.zeros([])
-        self.top_loss = jnp.zeros([])
+        self.accuracy = jnp.zeros([])
 
-        if self.config is not None:
+        if config is not None:
             self.loss = config['loss']
-            self.top_loss = config['top_loss']
+            self.accuracy = config['accuracy']
 
     def serialize(self):
         serialized = self._serialize()
         serialized['loss'] = self.loss
-        serialized['top_loss'] = self.top_loss
+        serialized['accuracy'] = self.accuracy
         return serialized
 
 
@@ -299,7 +289,7 @@ class WhilePredictContext(WhileContext):
         self.adaptive_filter_scale = jnp.array([0] * batch_dim_size)
         self.adaptive_filter_power = jnp.array([1] * batch_dim_size)
 
-        if self.config is not None:
+        if config is not None:
             self.start_pos = config['start_pos']
             self.stop_pos = config['stop_pos']
             self.temperature = config['temperature']

@@ -2,7 +2,7 @@ import time
 
 import numpy as np
 
-from src.context import WhileContext
+from src.context import WhileTrainContext
 
 
 class WandbLog:
@@ -11,18 +11,15 @@ class WandbLog:
         self.run = run
         self.losses = []
         self.accuracies = []
-        self.idx = 0
         self.loss_medians = []
         self.device_steps = device_steps
 
-    def __call__(self, wctx: WhileContext, current_lr) -> bool:
-        self.idx += 1
+    def __call__(self, wctx: WhileTrainContext, step: int, current_lr) -> bool:
         ctx = wctx.ctx
         curr_loss = wctx.loss[0]
-        step = self.idx * ctx.wandb.log_frequency * self.device_steps
         sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
         self.losses.append(curr_loss.astype(float))
-        self.accuracies.append((wctx.top_loss[0]).astype(float))
+        self.accuracies.append((wctx.accuracy[0]).astype(float))
         self.loss_medians.append(np.median(self.losses[-max(sizes):]))
         self.losses = self.losses[-max(sizes):]
         self.accuracies = self.accuracies[-max(sizes):]
@@ -37,19 +34,8 @@ class WandbLog:
 
         self.run.log({"Loss/Current": self.losses[-1], "Accuracy/Current": self.accuracies[-1],
                       "Speed/Batches per Second": rate, "Speed/Tokens per Day": tokens_per_day,
-                      "Optimizer/Learning Rate": current_lr.astype(float), "Optimizer/Beta1": ctx.optimizer.adam_beta1,
+                      "Optimizer/Learning Rate": current_lr, "Optimizer/Beta1": ctx.optimizer.adam_beta1,
                       "Optimizer/Beta2": ctx.optimizer.adam_beta2
                       }, step=step)
 
-        es = ctx.training.early_stopping
-        if self.loss_medians[0] < (self.loss_medians[-1] * (1 - es.minimum_relative_loss_change)):
-            print(f"Not Improving | Oldest Loss Median: {self.loss_medians[0]:9.6f} - "
-                  f"Current Loss Median: {self.loss_medians[-1]:9.6f}")
-            return True
-        if all(loss > (self.loss_medians[-1] * es.maximum_spike_size)
-               for loss in self.losses[-es.maximum_spike_duration // self.device_steps:]):
-            print(f"Spiking | Loss Median: {self.loss_medians[-1]:9.6f} - "
-                  f"Last Losses: {self.losses[-es.maximum_spike_duration // self.device_steps:]}")
-            return True
-
-        return False
+        return self.losses[-1] in (float("nan"), float("inf"), float("-inf"))
