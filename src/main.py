@@ -8,7 +8,6 @@ import warnings
 import jax
 import numpy as np
 import wandb
-import yaml
 from jax import lax, numpy as jnp
 from jax.experimental.compilation_cache import compilation_cache
 
