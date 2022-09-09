@@ -80,7 +80,7 @@ def new_id():
 class CreationCallback:
     def __init__(self, args: Args):
         self.args = args
-        with open(args.config_path, 'r') as f:
+        with open(args.config_path, 'r') as f:  # skipcq: PTC-W6004
             txt = f.read()
         config = yaml.safe_load(txt)
         cfg = Context(config)
@@ -125,7 +125,7 @@ class CreationCallback:
 def main():
     args = parse_args()
     if args.cleanup:
-        return delete_one_tpu("", args.host, args.zone)
+        delete_one_tpu("", args.host, args.zone)
 
     start_single(args.host, args.tpu_version, args.zone, args.preemptible, args.service_account, args.slices, start_fn,
                  CreationCallback(args))

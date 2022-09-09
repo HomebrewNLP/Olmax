@@ -134,9 +134,7 @@ def init_data(ctx: Context, skipped_samples: int) -> typing.Tuple[typing.Iterato
 
 
 def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
-    """
-    Model gets loaded in-place into the `WhileTrainContext`
-    """
+    """Model gets loaded in-place into the `WhileTrainContext`"""
     if wctx.ctx.training.checkpoint_load_path:
         read_train_checkpoint(wctx, '[0]{100}')
         skipped_samples = math.ceil(wctx.step / jax.process_count() / wctx.ctx.training.device_steps)
@@ -171,8 +169,8 @@ def run_one(wblog: WandbLog):
                   in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
     step = TrainLoop(wctx, step)
 
-    timeit("Compiling model and performing first step", step, next(data))
-    wctx = timeit("Running second step", step, next(data))
+    timeit("Compiling model and performing first step", step, next(data))  # skipcq: PTC-W0063
+    wctx = timeit("Running second step", step, next(data))  # skipcq: PTC-W0063
     print("\n")
     print(f"Parameters: {jax.process_count() * parameter_count:,}")
     print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
@@ -200,7 +198,7 @@ def run_one(wblog: WandbLog):
         if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
             write_train_checkpoint(wctx)
             checkpoint_at += wctx.ctx.training.checkpoint_interval
-    return None
+    return
 
 
 def dump_ctx(ctx: Context, run):
