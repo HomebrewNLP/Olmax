@@ -15,7 +15,7 @@ def test_grad(act: bool, psum: bool, samples: int, trials: int = 2):  # skipcq: 
     randn = randn_fn()
     for trial in range(trials):
         src = randn(samples, ctx.dims.features)
-        wgt = jnp.ones_like(randn(ctx.dims.features))
+        wgt = randn(ctx.dims.features)
         grad = grad_fn((samples, ctx.dims.features), src, wgt)
 
         out0 = grad(lambda x: norm_forward(ctx, x[0], x[1], psum, act)[0])

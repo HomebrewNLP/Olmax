@@ -31,7 +31,7 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
     out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
     if act:
         out = activate_forward(out)
-    #out = out.astype(original_dtype)
+    # out = out.astype(original_dtype)
     #   src_fp64 = src_fp64.astype(original_dtype)
     return out, src_fp64, std
 
@@ -66,8 +66,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             if act:
                 dy = dy * activate_grad(norm_out_fp64 * reshaped_weight)
             d_wgt = (dy * norm_out_fp64).sum(list(range(src.ndim - 1))).reshape((-1,))
-            sqsum = jnp.square(src_fp64).sum(-1, keepdims=True)
-            dy = dy * reshaped_weight * (sqsum - src_fp64 * src_fp64.sum(-1, keepdims=True)) * lax.pow(sqsum, -3 / 2)
+            dy = dy * reshaped_weight * std
+            dy -= (dy * norm_out_fp64).mean(-1, keepdims=True) * norm_out_fp64 * src.shape[-1]
             if psum:
                 dy = lax.psum(dy, axis_name=ParallelAxes.model)
             return dy.astype(original_dtype), d_wgt
