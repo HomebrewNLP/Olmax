@@ -26,7 +26,8 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
     src_fp64 = promote_to(src, run_type)
     if psum:
         src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
-    std = stable_rsqrt(jnp.square(src_fp64).sum(-1, keepdims=True), ctx.model.norm_eps)
+    std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm_power).sum(-1, keepdims=True), ctx.model.norm_eps,
+                       ctx.model.norm_power)
     norm_out = src_fp64 * std
     out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
     if act:
@@ -63,11 +64,18 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             if act:
                 dy = dy * activate_grad(norm_out_fp64 * reshaped_weight)
             d_wgt = (dy * norm_out_fp64).sum(list(range(src.ndim - 1))).reshape((-1,))
-            dy = dy * reshaped_weight * std
-            dy -= (dy * norm_out_fp64).sum(-1, keepdims=True) * norm_out_fp64
+            dy = dy * reshaped_weight
+            src_fp64 = norm_out_fp64 / std
+
+            dstd = (dy * src_fp64).sum(-1, keepdims=True)  # broadcast forward -> sum backward
+            dstd *= std ** (ctx.model.norm_power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
+            dstd *= src_fp64 ** (ctx.model.norm_power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
+            if ctx.model.norm_power % 2 != 0:  # x^1, x^3 need to be made non-negative; x^2, x^4 don't
+                dstd *= lax.sign(src_fp64)
+            dx = dy * std - dstd
             if psum:
-                dy = lax.psum(dy, axis_name=ParallelAxes.model)
-            return dy.astype(original_dtype), d_wgt
+                dx = lax.psum(dx, axis_name=ParallelAxes.model)
+            return dx.astype(original_dtype), d_wgt
 
         return out, _grad
 
