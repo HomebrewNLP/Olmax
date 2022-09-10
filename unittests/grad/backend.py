@@ -23,7 +23,7 @@ def randn_fn():
 
 
 def grad_fn(out_shape: typing.Iterable[int], *args):
-    dy = jnp.ones_like(randn_fn()(*out_shape))  # constant for given shape. calling grad_fn twice gives same thing
+    dy = randn_fn()(*out_shape)  # constant for given shape. calling grad_fn twice gives same thing
 
     def _fn(fn):
         return jax.pmap(jax.grad(lambda *x: (fn(*x) * dy).sum()), ParallelAxes.model)(args)
