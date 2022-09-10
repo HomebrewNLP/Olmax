@@ -33,8 +33,8 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
     if act:
         out = activate_forward(out)
     out = out.astype(original_dtype)
-    norm_out = norm_out.astype(original_dtype)
-    return out, norm_out, std
+    src_fp64 = src_fp64.astype(original_dtype) if psum else src
+    return out, src_fp64, std
 
 
 @with_context()
@@ -55,24 +55,24 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
-        out, norm_out, std = norm_forward(ctx, src, wgt, psum, act)
+        out, new_src, std = norm_forward(ctx, src, wgt, psum, act)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            norm_out_fp64 = promote_to(norm_out, run_type)
+            src_fp64 = promote_to(new_src, run_type)
+            norm_out = src_fp64 * std
             reshaped_weight = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy = promote_to(dy, run_type)
             if act:
-                dy = dy * activate_grad(norm_out_fp64 * reshaped_weight)
-            d_wgt = (dy * norm_out_fp64).sum(list(range(src.ndim - 1))).reshape((-1,))
+                dy = dy * activate_grad(norm_out * reshaped_weight)
+            d_wgt = (dy * norm_out).sum(list(range(src.ndim - 1))).reshape((-1,))
             dy = dy * reshaped_weight
-            src_fp64 = norm_out_fp64 / std
 
-            dstd = (dy * src_fp64).sum(-1, keepdims=True)  # broadcast forward -> sum backward
-            dstd *= std ** (ctx.model.norm_power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
-            dstd *= src_fp64 ** (ctx.model.norm_power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
+            d_std = (dy * src_fp64).sum(-1, keepdims=True)  # broadcast forward -> sum backward
+            d_std *= std ** (ctx.model.norm_power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
+            d_std *= src_fp64 ** (ctx.model.norm_power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
             if ctx.model.norm_power % 2 != 0:  # x^1, x^3 need to be made non-negative; x^2, x^4 don't
-                dstd *= lax.sign(src_fp64)
-            dx = dy * std - dstd
+                d_std *= lax.sign(src_fp64)
+            dx = dy * std - d_std
             if psum:
                 dx = lax.psum(dx, axis_name=ParallelAxes.model)
             return dx.astype(original_dtype), d_wgt
