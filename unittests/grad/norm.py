@@ -8,10 +8,14 @@ from unittests.grad.backend import grad_fn, randn_fn
 
 @pytest.mark.parametrize("act", [True, False])
 @pytest.mark.parametrize("psum", [True, False])
-@pytest.mark.parametrize("samples", [2 ** 10])
-def test_grad(act: bool, psum: bool, samples: int, trials: int = 2):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("zero_mean", [True, False])
+@pytest.mark.parametrize("samples", sample_sizes)
+@pytest.mark.parametrize("power", [1, 2, 3, 4])
+def test_grad(act: bool, psum: bool, zero_mean: bool, samples: int, power: int):  # skipcq: PYL-W0640
     ctx = Context()
     ctx.is_initializing = False
+    ctx.model.norm.zero_mean = zero_mean
+    ctx.model.norm.power = power
     randn = randn_fn()
     for trial in range(trials):
         src = randn(samples, ctx.dims.features)
