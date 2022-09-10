@@ -67,7 +67,8 @@ def test_grad(z_loss: float, samples: int):  # skipcq: PYL-W0640
     for _ in range(trials):
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         wgt = randn(ctx.dims.features, ctx.dims.vocab)
-        grad = grad_fn((2,), src, wgt)
+        dy = randn(2)
+        grad = grad_fn(dy, src, wgt)
 
         grad0 = grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0])
         grad1 = grad(lambda x: naive_loss(x, tgt, z_loss))

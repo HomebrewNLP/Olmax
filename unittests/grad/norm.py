@@ -20,7 +20,8 @@ def test_grad(act: bool, psum: bool, zero_mean: bool, samples: int, power: int):
     for trial in range(trials):
         src = randn(samples, ctx.dims.features)
         wgt = randn(ctx.dims.features)
-        grad = grad_fn((samples, ctx.dims.features), src, wgt)
+        dy = randn(samples, ctx.dims.features)
+        grad = grad_fn(dy, src, wgt)
 
         out0 = grad(lambda x: norm_forward(ctx, x[0], x[1], psum, act)[0])
         out1 = grad(lambda x: scale_norm_act(ctx, x[0], ctx.dims.features, x[1], psum, act))

@@ -1,5 +1,4 @@
 import random
-import typing
 
 import jax
 from jax import numpy as jnp
@@ -25,9 +24,7 @@ def randn_fn():
     return _fn
 
 
-def grad_fn(out_shape: typing.Iterable[int], *args):
-    dy = randn_fn()(*out_shape)  # constant for given shape. calling grad_fn twice gives same thing
-
+def grad_fn(dy: jnp.ndarray, *args):
     def _fn(fn):
         return jax.pmap(jax.grad(lambda *x: (fn(*x) * dy).sum()), ParallelAxes.model)(args)
 
