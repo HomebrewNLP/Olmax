@@ -67,7 +67,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
                 dy = dy * activate_grad(norm_out_fp64 * reshaped_weight)
             d_wgt = (dy * norm_out_fp64).sum(list(range(src.ndim - 1))).reshape((-1,))
             dy = dy * reshaped_weight * std
-            dy -= (dy * norm_out_fp64).mean(-1, keepdims=True) * norm_out_fp64 * src.shape[-1]
+            dy -= (dy * norm_out_fp64).sum(-1, keepdims=True) * norm_out_fp64
             if psum:
                 dy = lax.psum(dy, axis_name=ParallelAxes.model)
             return dy.astype(original_dtype), d_wgt
