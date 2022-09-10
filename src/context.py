@@ -136,15 +136,19 @@ class Optimizer(DataClass):
     output_scale: float = 1
 
 
+class Normalization(DataClass):
+    power: int = 1  # Lp-Norm, like sum(abs(x)^p). Default: 2, as in standard deviation from LayerNorm/ScaleNorm
+    zero_mean: bool = False  # A bit slower, but LayerNorm+BatchNorm do it
+    eps: float = 1e-16
+
+
 class Model(DataClass):
+    norm: Normalization = Normalization()
     autoregressive: bool = True
     unroll_depth: int = 1
     conv_scale: float = 4.
     conv_shift: float = 8.
-    norm_eps: float = 1e-16
     qrnn_frequency: int = 8
-    norm_power: int = 1  # Lp-Norm, like sum(abs(x)^p). Default: 2, as in standard deviation from LayerNorm/ScaleNorm
-    normalize_mean: bool = False  # A bit slower, but LayerNorm+BatchNorm do it
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
     mixer_iterations: int = 2  # ideally spatial_mixing_kernel ** mixer_iterations > sequence_length

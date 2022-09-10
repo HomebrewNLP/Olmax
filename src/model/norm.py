@@ -26,16 +26,16 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
     src_fp64 = promote_to(src, run_type)
     if psum:
         src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
-    if ctx.model.normalize_mean:
+    if ctx.model.norm.zero_mean:
         src_fp64 -= src_fp64.mean(-1, keepdims=True)
-    std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm_power).sum(-1, keepdims=True), ctx.model.norm_eps,
-                       ctx.model.norm_power)
+    std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm.power).sum(-1, keepdims=True), ctx.model.norm.eps,
+                       ctx.model.norm.power)
     norm_out = src_fp64 * std
     out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
     if act:
         out = activate_forward(out)
     out = out.astype(original_dtype)
-    src_fp64 = src_fp64.astype(original_dtype) if ctx.model.normalize_mean or psum else src
+    src_fp64 = src_fp64.astype(original_dtype) if ctx.model.norm.zero_mean or psum else src
     return out, src_fp64, std
 
 
@@ -70,12 +70,12 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             dy = dy * reshaped_weight
 
             d_std = (dy * src_fp64).sum(-1, keepdims=True)  # broadcast forward -> sum backward
-            d_std *= std ** (ctx.model.norm_power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
-            d_std *= src_fp64 ** (ctx.model.norm_power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
-            if ctx.model.norm_power % 2 != 0:  # x^1, x^3 need to be made non-negative; x^2, x^4 don't
+            d_std *= std ** (ctx.model.norm.power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
+            d_std *= src_fp64 ** (ctx.model.norm.power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
+            if ctx.model.norm.power % 2 != 0:  # x^1, x^3 need to be made non-negative; x^2, x^4 don't
                 d_std *= lax.sign(src_fp64)
             dx = dy * std - d_std
-            if ctx.model.normalize_mean:
+            if ctx.model.norm.zero_mean:
                 dx -= dx.mean(-1, keepdims=True)
             if psum:
                 dx = lax.psum(dx, axis_name=ParallelAxes.model)
