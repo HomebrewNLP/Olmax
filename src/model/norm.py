@@ -31,16 +31,14 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
     out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
     if act:
         out = activate_forward(out)
-    # out = out.astype(original_dtype)
-    #   src_fp64 = src_fp64.astype(original_dtype)
-    return out, src_fp64, std
+    out = out.astype(original_dtype)
+    norm_out = norm_out.astype(original_dtype)
+    return out, norm_out, std
 
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
                    psum: bool = False, act: bool = True, init_mean: typing.Optional[float] = 1) -> jnp.ndarray:
-    # Grad is wrong for psum+act, but correct for psum, act and neither.
-
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         if init_mean is None:
@@ -56,11 +54,10 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
-        out, src, std = norm_forward(ctx, src, wgt, psum, act)
+        out, norm_out, std = norm_forward(ctx, src, wgt, psum, act)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-            src_fp64 = promote_to(src, run_type)
-            norm_out_fp64 = src_fp64 * std
+            norm_out_fp64 = promote_to(norm_out, run_type)
             reshaped_weight = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy = promote_to(dy, run_type)
             if act:
