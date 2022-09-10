@@ -7,7 +7,7 @@ from src.backend import is_main, matmul
 from src.constants import ParallelAxes
 from src.context import Context
 from src.model.loss import cross_entropy_loss
-from unittests.grad.backend import randn_fn
+from unittests.grad.backend import grad_fn, randn_fn
 
 
 def mean(x: jnp.ndarray):
@@ -67,9 +67,10 @@ def test_grad(z_loss: float, samples: int, trials: int = 2):  # skipcq: PYL-W064
     for _ in range(trials):
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         wgt = randn(ctx.dims.features, ctx.dims.vocab)
+        grad = grad_fn((2,), src, wgt)
 
-        grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)((src, wgt))
-        grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt, z_loss)), ParallelAxes.model)((src, wgt))
+        grad0 = grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0])
+        grad1 = grad(lambda x: naive_loss(x, tgt, z_loss))
 
         for g0, g1 in zip(grad0, grad1):
             statistics("Grad0", g0)

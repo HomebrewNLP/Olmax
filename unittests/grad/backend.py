@@ -1,7 +1,10 @@
 import random
+import typing
 
 import jax
 from jax import numpy as jnp
+
+from src.constants import ParallelAxes
 
 
 def randn_fn():
@@ -15,5 +18,14 @@ def randn_fn():
         local_devices = jax.local_device_count()
         seeds = jnp.arange(local_devices * jax.process_index(), local_devices * (1 + jax.process_index()))
         return fn(seeds)
+
+    return _fn
+
+
+def grad_fn(out_shape: typing.Iterable[int], *args):
+    dy = jnp.ones_like(randn_fn()(*out_shape))  # constant for given shape. calling grad_fn twice gives same thing
+
+    def _fn(fn):
+        return jax.pmap(jax.grad(lambda *x: (fn(*x) * dy).sum()), ParallelAxes.model)(args)
 
     return _fn
