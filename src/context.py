@@ -141,7 +141,7 @@ class Optimizer(DataClass):
 
 
 class Normalization(DataClass):
-    power: int = 1  # Lp-Norm, like sum(abs(x)^p). Default: 2, as in standard deviation from LayerNorm/ScaleNorm
+    power: int = 2  # Lp-Norm, like sum(abs(x)^p). Default: 2, as in standard deviation from LayerNorm/ScaleNorm
     zero_mean: bool = False  # A bit slower, but LayerNorm+BatchNorm do it
     eps: float = 1e-16
 
