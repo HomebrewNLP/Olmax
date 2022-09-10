@@ -3,7 +3,7 @@ from jax import numpy as jnp
 
 from src.context import Context
 from src.model.norm import norm_forward, scale_norm_act
-from unittests.grad.backend import grad_fn, randn_fn
+from unittests.grad.backend import grad_fn, randn_fn, trials, sample_sizes
 
 
 @pytest.mark.parametrize("act", [True, False])
