@@ -51,10 +51,10 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
 def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     # 500ms at 256 features (forward pass, backward takes slightly longer)
     # While conv 256->256 with kernel_size=5 takes ~11.3ms
-    mid = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.qrnn_scale, ctx.dims.features,
+    mid = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.scale.qrnn, ctx.dims.features,
                ctx.dims.inner_bottleneck_features * 2)
     mid, forget = jnp.split(mid, 2, -1)
     out = qrnn_grad(ctx, forget, mid)
     out = scale_norm_act(ctx, out, ctx.dims.inner_bottleneck_features)
-    return conv(ctx, out, ctx.dims.pointwise_kernel, ctx.optimizer.qrnn_scale, ctx.dims.inner_bottleneck_features,
+    return conv(ctx, out, ctx.dims.pointwise_kernel, ctx.optimizer.scale.qrnn, ctx.dims.inner_bottleneck_features,
                 ctx.dims.features)

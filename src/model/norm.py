@@ -49,7 +49,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             # 1 otherwise to make sure model can learn
             init_mean = float(not bool(ctx.training.checkpoint_load_path))
         weight = get_param(ctx, "scale", [feature_dim], std=0, mean=init_mean, dtype=run_type,
-                           lr_scale=ctx.optimizer.norm_scale)
+                           lr_scale=ctx.optimizer.scale.norm)
 
     if ctx.is_initializing:
         return inp

@@ -15,7 +15,7 @@ from src.model.reversible import FourArrays, reversible, revnet_out
 @with_context()
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features,
-                      lr_scale=ctx.optimizer.input_scale)
+                      lr_scale=ctx.optimizer.scale.input)
 
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray) -> jnp.ndarray:
         return jnp.take(wgt, src, 0)
@@ -56,7 +56,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1,
-                    lr_scale=ctx.optimizer.output_scale, scale=1 / ctx.dims.heads)
+                    lr_scale=ctx.optimizer.scale.output, scale=1 / ctx.dims.heads)
     if ctx.is_initializing:
         return out
     return out, wgt
