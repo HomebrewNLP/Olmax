@@ -153,7 +153,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         param = stacked_orthogonal_init(ctx, shape, stacked_dims, tuple(range(len(shape) - column_axes, len(shape))))
         param *= scale * post_variance_scale
     else:
-        param = normal(ctx, [stacked_dims] + list(shape)) * scale
+        param = normal(ctx, stacked_dims + list(shape)) * scale
         if std is not None:
             param *= std
         if mean is not None:
