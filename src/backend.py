@@ -112,40 +112,60 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.storage_dtype)
 
 
+def stacked_orthogonal_init(ctx: Context, shape: typing.List[int], stacked_dims: typing.Optional[typing.List[int]],
+                            column_axes=(-1,)):
+    if not stacked_dims:
+        return orthogonal_init(ctx, shape, column_axes)
+    arrays = [stacked_orthogonal_init(ctx, shape, stacked_dims[1:], column_axes) for _ in range(stacked_dims[0])]
+    return jnp.stack(arrays, 0)
+
+
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
               lr_scale: float = 1, dtype: typing.Optional[jnp.float32] = None,
-              init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
+              init_val: typing.Optional[jnp.ndarray] = None,
+              in_out_axis: typing.Optional[typing.Tuple[int, int]] = None,
+              stacked_dims: typing.Optional[typing.List[int]] = None,
+              transpose: typing.Optional[typing.List[int]] = None
+              ) -> jnp.ndarray:
     prefix_name = prefixed_name(ctx, name)
 
     if dtype is None:
         computation_dtype = ctx.model.computation_dtype
         storage_dtype = ctx.model.storage_dtype
     else:
-        computation_dtype = dtype
-        storage_dtype = dtype
+        storage_dtype = computation_dtype = dtype
 
-    if prefix_name not in ctx.parameters:
-        if init_val is not None:
-            param = init_val * scale * post_variance_scale
-        elif std is None and mean is None:
-            if ctx.add_depth:
-                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
-                                   range(ctx.dims.depth)], 0)
-            else:
-                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
-            param *= scale * post_variance_scale
-        else:
-            param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape)) * scale
-            if std is not None:
-                param *= std
-            if mean is not None:
-                param += mean
-        ctx.parameter_variance[prefix_name] = lr_scale * scale
-        param = param.astype(storage_dtype)
-        assign(ctx, name, param)
-    param = ctx.parameters[prefix_name]
+    if prefix_name in ctx.parameters:
+        return ctx.parameters[prefix_name].astype(computation_dtype)
+
+    shape = list(shape)
+    if in_out_axis is not None:
+        shape[in_out_axis[0]] //= 2
+        shape[in_out_axis[1]] //= 2
+    if stacked_dims is None:
+        stacked_dims = []
+    stacked_dims = [ctx.dims.depth] * ctx.add_depth + stacked_dims
+    if init_val is not None:
+        param = init_val * scale * post_variance_scale
+    elif std is None and mean is None:
+        param = stacked_orthogonal_init(ctx, shape, stacked_dims, tuple(range(len(shape) - column_axes, len(shape))))
+        param *= scale * post_variance_scale
+    else:
+        param = normal(ctx, [stacked_dims] + list(shape)) * scale
+        if std is not None:
+            param *= std
+        if mean is not None:
+            param += mean
+    ctx.parameter_variance[prefix_name] = lr_scale * scale
+    param = param.astype(storage_dtype)
+    if in_out_axis is not None:
+        param = jnp.concatenate([param, -param], in_out_axis[0] + len(stacked_dims))
+        param = jnp.concatenate([param, -param], in_out_axis[1] + len(stacked_dims))
+    if transpose is not None:
+        param = jnp.transpose(param, [0] * ctx.add_depth + [i + ctx.add_depth for i in transpose])
+    assign(ctx, name, param)
     return param.astype(computation_dtype)
 
 
