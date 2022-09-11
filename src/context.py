@@ -66,7 +66,6 @@ class DataContext(DataClass):
     prefetch_buffer: int = 2
     seed: int = 0
     deterministic: bool = True
-    vocab_size: int = 256  # should be divisible by 128
     datasets_used_per_step: int = 2
 
 
@@ -83,9 +82,7 @@ class Dims(DataClass):
     heads: int = jax.device_count()
     sequence: int = 4096
     depth: int = 16
-
-    def __init__(self, data: DataContext):
-        self.vocab: int = data.vocab_size
+    vocab: int = 256
 
     def __getitem__(self, item: str):
         return getattr(self, item)
@@ -195,7 +192,7 @@ class Context(DataClass):
         self.model = Model()
         self.training = Training()
         self.wandb = WandB()
-        self.dims = Dims(self.data)
+        self.dims = Dims()
 
         if config is None and 'CONFIG' in os.environ:
             with open(os.environ['CONFIG']) as f:

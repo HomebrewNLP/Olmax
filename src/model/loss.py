@@ -17,7 +17,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     src, param = src_wgt
     devices = ctx.dims.heads
     total_items = ctx.dims.batch * ctx.dims.sequence
-    steps = ctx.data.vocab_size // ctx.dims.inner_bottleneck_features
+    steps = ctx.dims.vocab // ctx.dims.inner_bottleneck_features
     step_batch = total_items // steps
     local_batch = step_batch // devices
 
