@@ -101,7 +101,7 @@ def unshard(shards):
         x = np.stack(all_shards)
         if x.dtype == np.dtype('V2'):
             x.dtype = jnp.bfloat16
-        unsharded.append(jnp.asarray(x))
+        unsharded.append(x)  # manual jnp.asarray -> replicated; automatic (via jax.pmap) -> parallel (as before)
     return unsharded
 
 
