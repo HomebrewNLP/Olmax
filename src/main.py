@@ -151,55 +151,6 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
     return data
 
 
-def run_one(wblog: WandbLog):
-    wctx = WhileTrainContext()
-    wctx.ctx.is_initializing = True
-    print(wctx.ctx)
-    device_steps = wctx.ctx.training.device_steps * jax.process_count()
-    total_steps = wctx.ctx.training.steps * device_steps
-    tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
-    data = init_data_and_model(wctx)
-    parameter_count = sum(param.size for name, param in wctx.ctx.parameters.items() if "optimizer" not in name)
-    buffer_count = sum(param.size for name, param in wctx.ctx.parameters.items()) - parameter_count
-
-    partition = deep_replace(wctx.serialize(), 0)
-
-    step = timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
-                  in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
-    step = TrainLoop(wctx, step)
-
-    timeit("Compiling model and performing first step", step, next(data))  # skipcq: PTC-W0063
-    wctx = timeit("Running second step", step, next(data))  # skipcq: PTC-W0063
-    print("\n")
-    print(f"Parameters: {jax.process_count() * parameter_count:,}")
-    print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
-
-    start_time = time.time()
-    checkpoint_at = wctx.ctx.training.checkpoint_interval + wctx.step
-    for idx, dat in enumerate(data):
-        step_start = time.time()
-        wctx = step(dat)
-        current_step = wctx.step
-        lr = float(get_current_lr(wctx.ctx, wctx.current_step[0]))
-        print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
-              f'Loss: {wctx.loss[0]:6.3f} - '
-              f'Accuracy: {wctx.accuracy[0]:8.3f} | '
-              f'LearningRate: {lr:.5f} | '
-              f'StepTime: {time.time() - step_start:10.6f}s - '
-              f'Rate: {tokens_processed * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')
-        if wblog(wctx, current_step, lr):
-            return
-        if wctx.ctx.training.trace.do_trace:
-            if idx == wctx.ctx.training.trace.start_step:
-                jax.profiler.start_trace(wctx.ctx.training.trace.output_path)
-            if idx == wctx.ctx.training.trace.stop_step:
-                jax.profiler.stop_trace()
-        if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
-            write_train_checkpoint(wctx)
-            checkpoint_at += wctx.ctx.training.checkpoint_interval
-    return
-
-
 def dump_ctx(ctx: Context, run):
     with open("config.yaml", 'w') as f:
         f.write(str(ctx))
@@ -231,8 +182,53 @@ def main():
     init_class(ctx, cfg)
     dump_ctx(ctx, run)
 
-    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count())
-    return run_one(wblog)
+    wctx = WhileTrainContext()
+    wctx.ctx.is_initializing = True
+    print(wctx.ctx)
+    device_steps = wctx.ctx.training.device_steps * jax.process_count()
+    total_steps = wctx.ctx.training.steps * device_steps
+    tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
+    data = init_data_and_model(wctx)
+    parameter_count = sum(param.size for name, param in wctx.ctx.parameters.items() if "optimizer" not in name)
+    buffer_count = sum(param.size for name, param in wctx.ctx.parameters.items()) - parameter_count
+
+    partition = deep_replace(wctx.serialize(), 0)
+
+    step = timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
+                  in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
+    step = TrainLoop(wctx, step)
+
+    timeit("Compiling model and performing first step", step, next(data))  # skipcq: PTC-W0063
+    wctx = timeit("Running second step", step, next(data))  # skipcq: PTC-W0063
+    print("\n")
+    print(f"Parameters: {jax.process_count() * parameter_count:,}")
+    print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
+
+    checkpoint_at = wctx.ctx.training.checkpoint_interval + wctx.step
+    start_time = time.time()
+    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count(), parameter_count, tokens_processed)
+    for idx, dat in enumerate(data):
+        step_start = time.time()
+        wctx = step(dat)
+        current_step = wctx.step
+        lr = float(get_current_lr(wctx.ctx, wctx.current_step[0]))
+        print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
+              f'Loss: {wctx.loss[0]:6.3f} - '
+              f'Accuracy: {wctx.accuracy[0]:8.3f} | '
+              f'LearningRate: {lr:.5f} | '
+              f'StepTime: {time.time() - step_start:10.6f}s - '
+              f'Rate: {tokens_processed * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')
+        if wblog(wctx, current_step, lr):
+            return
+        if wctx.ctx.training.trace.do_trace:
+            if idx == wctx.ctx.training.trace.start_step:
+                jax.profiler.start_trace(wctx.ctx.training.trace.output_path)
+            if idx == wctx.ctx.training.trace.stop_step:
+                jax.profiler.stop_trace()
+        if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
+            write_train_checkpoint(wctx)
+            checkpoint_at += wctx.ctx.training.checkpoint_interval
+    return
 
 
 if __name__ == '__main__':
