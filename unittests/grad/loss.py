@@ -7,7 +7,7 @@ from src.backend import is_main, matmul
 from src.constants import ParallelAxes
 from src.context import Context
 from src.model.loss import cross_entropy_loss
-from unittests.grad.backend import grad_fn, randn_fn, trials, sample_sizes
+from unittests.grad.backend import grad_fn, randn_fn, sample_sizes, trials
 
 
 def mean(x: jnp.ndarray):
@@ -45,9 +45,10 @@ def statistics(name: str, var: jnp.ndarray):
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
 @pytest.mark.parametrize("samples", sample_sizes)
-def test_value(z_loss: float, samples: int):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("vocab", [256, 65536])
+def test_value(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
-    ctx.dims.vocab = 1024
+    ctx.dims.vocab = vocab
 
     for _ in range(trials):
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
@@ -60,9 +61,10 @@ def test_value(z_loss: float, samples: int):  # skipcq: PYL-W0640
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
 @pytest.mark.parametrize("samples", sample_sizes)
-def test_grad(z_loss: float, samples: int):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("vocab", [256, 65536])
+def test_grad(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
-    ctx.dims.vocab = 1024
+    ctx.dims.vocab = vocab
 
     for _ in range(trials):
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
