@@ -111,6 +111,16 @@ class WandB(DataClass):
     median_sizes: typing.List[int] = [64, 256, 1024]
 
 
+class Scale(DataClass):
+    qrnn: float = 1
+    moe: float = 1
+    input: float = 1
+    output: float = 1
+    bottleneck: float = 1
+    pointwise: float = 1
+    norm: float = 1
+
+
 class Optimizer(DataClass):
     nesterov: bool = True
     heavyball: bool = True
@@ -127,21 +137,21 @@ class Optimizer(DataClass):
     weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
-    norm_scale: float = 1
-    bottleneck_scale: float = 1
-    pointwise_scale: float = 1
-    qrnn_scale: float = 1
-    moe_scale: float = 1
-    input_scale: float = 1
-    output_scale: float = 1
+    scale: Scale = Scale()
+
+
+class Normalization(DataClass):
+    power: int = 2  # Lp-Norm, like sum(abs(x)^p). Default: 2, as in standard deviation from LayerNorm/ScaleNorm
+    zero_mean: bool = False  # A bit slower, but LayerNorm+BatchNorm do it
+    eps: float = 1e-16
 
 
 class Model(DataClass):
+    norm: Normalization = Normalization()
     autoregressive: bool = True
     unroll_depth: int = 1
     conv_scale: float = 4.
     conv_shift: float = 8.
-    norm_eps: float = 1e-16
     qrnn_frequency: int = 8
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"

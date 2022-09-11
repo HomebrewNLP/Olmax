@@ -1,27 +1,31 @@
-import jax
 import pytest
 from jax import numpy as jnp
 
-from src.constants import ParallelAxes
 from src.context import Context
 from src.model.norm import norm_forward, scale_norm_act
-from unittests.grad.backend import randn_fn
+from unittests.grad.backend import grad_fn, randn_fn, trials, sample_sizes
 
 
 @pytest.mark.parametrize("act", [True, False])
 @pytest.mark.parametrize("psum", [True, False])
-@pytest.mark.parametrize("samples", [2 ** 6, 2 ** 12])
-def test_grad(act: bool, psum: bool, samples: int, trials: int = 16):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("zero_mean", [True, False])
+@pytest.mark.parametrize("samples", sample_sizes)
+@pytest.mark.parametrize("power", [1, 2, 3, 4])
+def test_grad(act: bool, psum: bool, zero_mean: bool, samples: int, power: int):  # skipcq: PYL-W0640
     ctx = Context()
     ctx.is_initializing = False
+    ctx.model.norm.zero_mean = zero_mean
+    ctx.model.norm.power = power
     randn = randn_fn()
-    for _ in range(trials):
+    for trial in range(trials):
         src = randn(samples, ctx.dims.features)
         wgt = randn(ctx.dims.features)
+        dy = randn(samples, ctx.dims.features)
+        grad = grad_fn(dy, src, wgt)
 
-        def grad(fn):
-            return jax.pmap(jax.grad(fn), ParallelAxes.model)(src, wgt)
+        out0 = grad(lambda x: norm_forward(ctx, x[0], x[1], psum, act)[0])
+        out1 = grad(lambda x: scale_norm_act(ctx, x[0], ctx.dims.features, x[1], psum, act))
 
-        out0 = grad(lambda x, y: norm_forward(ctx, x, y, psum, act)[0].mean())
-        out1 = grad(lambda x, y: scale_norm_act(ctx, x, ctx.dims.features, y, psum, act).mean())
-        assert jnp.allclose(out0, out1)
+        print(trial)
+        assert jnp.allclose(out0[0], out1[0])
+        assert jnp.allclose(out0[1], out1[1])

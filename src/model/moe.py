@@ -87,11 +87,11 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
 @with_context()
 def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features, ctx.dims.moe_intermediate],
-                        lr_scale=ctx.optimizer.moe_scale)
+                        lr_scale=ctx.optimizer.scale.moe)
     out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features],
-                        lr_scale=ctx.optimizer.moe_scale)
+                        lr_scale=ctx.optimizer.scale.moe)
 
-    gates = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.moe_scale, ctx.dims.features, ctx.dims.features)
+    gates = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.scale.moe, ctx.dims.features, ctx.dims.features)
     mid, indices = top1_gating(ctx, gates, inp)
     mid = matmul(mid, inp_wgt)
     mid = activate(mid)

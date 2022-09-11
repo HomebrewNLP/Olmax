@@ -7,7 +7,7 @@ from src.backend import is_main, matmul
 from src.constants import ParallelAxes
 from src.context import Context
 from src.model.loss import cross_entropy_loss
-from unittests.grad.backend import randn_fn
+from unittests.grad.backend import grad_fn, randn_fn, trials, sample_sizes
 
 
 def mean(x: jnp.ndarray):
@@ -44,8 +44,8 @@ def statistics(name: str, var: jnp.ndarray):
 
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
-@pytest.mark.parametrize("samples", [2 ** 14])
-def test_value(z_loss: float, samples: int, trials: int = 2):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("samples", sample_sizes)
+def test_value(z_loss: float, samples: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
     ctx.dims.vocab = 1024
 
@@ -59,17 +59,19 @@ def test_value(z_loss: float, samples: int, trials: int = 2):  # skipcq: PYL-W06
 
 
 @pytest.mark.parametrize("z_loss", [1, 0.01, 0])
-@pytest.mark.parametrize("samples", [2 ** 14])
-def test_grad(z_loss: float, samples: int, trials: int = 2):  # skipcq: PYL-W0640
+@pytest.mark.parametrize("samples", sample_sizes)
+def test_grad(z_loss: float, samples: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
     ctx.dims.vocab = 1024
 
     for _ in range(trials):
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         wgt = randn(ctx.dims.features, ctx.dims.vocab)
+        dy = randn(2)
+        grad = grad_fn(dy, src, wgt)
 
-        grad0 = jax.pmap(jax.grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0]), ParallelAxes.model)((src, wgt))
-        grad1 = jax.pmap(jax.grad(lambda x: naive_loss(x, tgt, z_loss)), ParallelAxes.model)((src, wgt))
+        grad0 = grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0])
+        grad1 = grad(lambda x: naive_loss(x, tgt, z_loss))
 
         for g0, g1 in zip(grad0, grad1):
             statistics("Grad0", g0)

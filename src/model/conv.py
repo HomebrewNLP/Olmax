@@ -22,21 +22,21 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_feat
 @prenorm
 @with_context()
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale,
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.scale.bottleneck,
                ctx.dims.features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
-    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, ctx.optimizer.bottleneck_scale,
+    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, ctx.optimizer.scale.bottleneck,
                ctx.dims.inner_bottleneck_features, ctx.dims.inner_bottleneck_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features)
-    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.bottleneck_scale,
+    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.optimizer.scale.bottleneck,
                 ctx.dims.inner_bottleneck_features, ctx.dims.features)
 
 
 @prenorm
 @with_context()
 def dense_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.pointwise_scale, ctx.dims.features,
+    inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.scale.pointwise, ctx.dims.features,
                ctx.dims.pointwise_features)
     inp = activate(inp)
-    return conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.pointwise_scale, ctx.dims.pointwise_features,
+    return conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.optimizer.scale.pointwise, ctx.dims.pointwise_features,
                 ctx.dims.features)
