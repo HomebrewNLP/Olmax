@@ -149,17 +149,25 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         stacked_dims = []
     stacked_dims = [ctx.dims.depth] * ctx.add_depth + stacked_dims
     if init_val is not None:
-        param = init_val * scale * post_variance_scale
+        param = init_val
     elif std is None and mean is None:
         param = stacked_orthogonal_init(ctx, shape, stacked_dims, tuple(range(len(shape) - column_axes, len(shape))))
-        param *= scale * post_variance_scale
     else:
         param = normal(ctx, stacked_dims + list(shape)) * scale
         if std is not None:
             param *= std
         if mean is not None:
             param += mean
-    ctx.parameter_variance[prefix_name] = lr_scale * scale
+    param_scale = scale * post_variance_scale
+    if isinstance(param_scale, jnp.ndarray):
+        param_scale = param_scale.reshape(*(1,) * (param.ndim - param_scale.ndim), *param_scale.shape)
+    lr_scale = lr_scale * scale
+    if isinstance(param_scale, jnp.ndarray):
+        lr_scale = lr_scale.reshape(*(1,) * (param.ndim - lr_scale.ndim), *lr_scale.shape)
+        if transpose is not None:
+            lr_scale = jnp.transpose(lr_scale, [0] * ctx.add_depth + [i + ctx.add_depth for i in transpose])
+    param *= param_scale
+    ctx.parameter_variance[prefix_name] = lr_scale * scale  # TODO: seems to be ignored
     param = param.astype(storage_dtype)
     if in_out_axis is not None:
         param /= math.sqrt(2)
