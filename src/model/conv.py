@@ -12,8 +12,8 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_feat
     fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
     fan_in = fan_in / fan_in.sum()
     fan_in = fan_in.reshape(1, 1, -1)
-    weight = get_param(ctx, "weight", [out_features, in_features], column_axes=2, scale=scale,
-                       scale=fan_in, stacked_dims=[conv_kernel], transpose=[1, 0, 2], in_out_axis=(0, 1))
+    weight = get_param(ctx, "weight", [out_features, in_features], column_axes=2, scale=scale * fan_in,
+                       stacked_dims=[conv_kernel], transpose=[1, 0, 2], in_out_axis=(0, 1))
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,))
     return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1)
