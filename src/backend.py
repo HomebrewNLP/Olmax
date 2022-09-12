@@ -162,7 +162,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     if isinstance(param_scale, jnp.ndarray):
         param_scale = param_scale.reshape(*(1,) * (param.ndim - param_scale.ndim), *param_scale.shape)
     lr_scale = lr_scale * scale
-    if isinstance(param_scale, jnp.ndarray):
+    if isinstance(lr_scale, jnp.ndarray):
         lr_scale = lr_scale.reshape(*(1,) * (param.ndim - lr_scale.ndim), *lr_scale.shape)
         if transpose is not None:
             lr_scale = jnp.transpose(lr_scale, [0] * ctx.add_depth + [i + ctx.add_depth for i in transpose])
