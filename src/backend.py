@@ -1,4 +1,5 @@
 import typing
+import math
 
 import jax
 import jax._src.util as util
@@ -161,6 +162,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     ctx.parameter_variance[prefix_name] = lr_scale * scale
     param = param.astype(storage_dtype)
     if in_out_axis is not None:
+        param /= math.sqrt(2)
         param = jnp.concatenate([param, -param], in_out_axis[0] + len(stacked_dims))
         param = jnp.concatenate([param, -param], in_out_axis[1] + len(stacked_dims))
     if transpose is not None:
