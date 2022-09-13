@@ -135,12 +135,12 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         else:
             param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
     else:
-        param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape)) * scale
+        param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape))
         if std is not None:
             param *= std
         if mean is not None:
             param += mean
-    param *= scale
+    param = (param - param.mean()) * scale + param.mean()
     ctx.parameter_variance[prefix_name] = scale
     param = param.astype(storage_dtype)
     assign(ctx, name, param)
