@@ -115,7 +115,7 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
               scale: float = 1., init_val: typing.Optional[jnp.ndarray] = None,
-              dtype: typing.Optional[jnp.dtype] = None) -> jnp.ndarray:
+              dtype: typing.Optional[jnp.dtype] = None, lr_scale: float = 1.) -> jnp.ndarray:
     prefix_name = prefixed_name(ctx, name)
 
     if dtype is None:
@@ -141,7 +141,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         if mean is not None:
             param += mean
     param = (param - param.mean()) * scale + param.mean()
-    ctx.parameter_variance[prefix_name] = scale
+    ctx.parameter_variance[prefix_name] = scale * lr_scale
     param = param.astype(storage_dtype)
     assign(ctx, name, param)
     return param
