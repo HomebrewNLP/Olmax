@@ -114,9 +114,8 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
 
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
-              scale: float = 1., post_variance_scale: float = 1,
-              lr_scale: float = 1, dtype: typing.Optional[jnp.float32] = None,
-              init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
+              scale: float = 1., init_val: typing.Optional[jnp.ndarray] = None,
+              dtype: typing.Optional[jnp.dtype] = None) -> jnp.ndarray:
     prefix_name = prefixed_name(ctx, name)
 
     if dtype is None:
@@ -125,28 +124,27 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     else:
         computation_dtype = dtype
         storage_dtype = dtype
-
-    if prefix_name not in ctx.parameters:
-        if init_val is not None:
-            param = init_val * scale * post_variance_scale
-        elif std is None and mean is None:
-            if ctx.add_depth:
-                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
-                                   range(ctx.dims.depth)], 0)
-            else:
-                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
-            param *= scale * post_variance_scale
+    if prefix_name in ctx.parameters:
+        return ctx.parameters[prefix_name].astype(computation_dtype)
+    if init_val is not None:
+        param = init_val
+    elif std is None and mean is None:
+        if ctx.add_depth:
+            param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
+                               range(ctx.dims.depth)], 0)
         else:
-            param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape)) * scale
-            if std is not None:
-                param *= std
-            if mean is not None:
-                param += mean
-        ctx.parameter_variance[prefix_name] = lr_scale * scale
-        param = param.astype(storage_dtype)
-        assign(ctx, name, param)
-    param = ctx.parameters[prefix_name]
-    return param.astype(computation_dtype)
+            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+    else:
+        param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape)) * scale
+        if std is not None:
+            param *= std
+        if mean is not None:
+            param += mean
+    param *= scale
+    ctx.parameter_variance[prefix_name] = scale
+    param = param.astype(storage_dtype)
+    assign(ctx, name, param)
+    return param
 
 
 def zero_param(ctx: Context, name: str, shape: typing.List[int], dtype: typing.Optional[jnp.dtype]) -> jnp.ndarray:

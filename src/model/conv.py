@@ -8,12 +8,7 @@ from src.model.norm import prenorm, scale_norm_act
 
 @with_context()
 def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, scale: float, in_features: int, out_features: int):
-    fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
-    fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
-    fan_in = fan_in / fan_in.sum()
-    fan_in = fan_in.reshape(1, 1, -1)
-    weight = get_param(ctx, "weight", [out_features, conv_kernel, in_features], column_axes=2, scale=scale,
-                       lr_scale=fan_in)
+    weight = get_param(ctx, "weight", [out_features, conv_kernel, in_features], column_axes=2)
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,))
     return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1)

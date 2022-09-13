@@ -12,7 +12,7 @@ from src.model.activate import activate_forward, activate_grad
 def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
     def _fn(ctx: Context, inp: jnp.ndarray, *args) -> jnp.ndarray:
         ctx = ctx.add_to_prefix("prenorm")
-        inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False, init_mean=None)
+        inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
         out = fn(ctx, inp, *args)
         return scale_norm_act(ctx, out, ctx.dims.features, act=False)
 
@@ -28,7 +28,8 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
         src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
     if ctx.model.norm.zero_mean:
         src_fp64 -= src_fp64.mean(-1, keepdims=True)
-    std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm.power).sum(-1, keepdims=True), ctx.model.norm.eps,
+    pow_src = src_fp64 if ctx.model.norm.power % 2 == 0 else jnp.abs(src_fp64)
+    std = stable_rsqrt(jnp.power(pow_src, ctx.model.norm.power).sum(-1, keepdims=True), ctx.model.norm.eps,
                        ctx.model.norm.power)
     norm_out = src_fp64 * std
     out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
@@ -41,15 +42,10 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
-                   psum: bool = False, act: bool = True, init_mean: typing.Optional[float] = 1) -> jnp.ndarray:
+                   psum: bool = False, act: bool = True) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        if init_mean is None:
-            # init to 0 if checkpoint so, new layers get learned slowly (-> rezero but input)
-            # 1 otherwise to make sure model can learn
-            init_mean = float(not bool(ctx.training.checkpoint_load_path))
-        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=init_mean, dtype=run_type,
-                           lr_scale=ctx.optimizer.scale.norm)
+        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
 
     if ctx.is_initializing:
         return inp
