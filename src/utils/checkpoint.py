@@ -15,6 +15,7 @@ import typing
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.tree_util import PyTreeDef
 from smart_open import open as smart_open
 
 from src.backend import deep_replace, is_main
@@ -53,10 +54,10 @@ def log(arg: str, verbose: bool):
 
 
 def write_checkpoint(ctx: Context, step: int, wblog: WandbLog, verbose: bool = True):
-    flattened, structure = jax.tree_util.tree_flatten(ctx.parameters)
+    flattened, jax_structure = jax.tree_util.tree_flatten(ctx.parameters)
     variance, _ = jax.tree_util.tree_flatten(ctx.parameter_variance)  # same structure
 
-    structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
+    structure = str(jax_structure)  # like "PyTreeDef({'2': {'a': *}})"
     structure = structure.replace('PyTreeDef', '')[1:-1]  # clean up "types"
     structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')
     structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
@@ -82,7 +83,7 @@ def write_checkpoint(ctx: Context, step: int, wblog: WandbLog, verbose: bool = T
         log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
             local_weights = index_weights(tree, shard)
-            wblog.log_params(shard, jax.tree_util.tree_unflatten(structure, local_weights), step)
+            wblog.log_params(shard, jax_structure.unflatten(local_weights), step)
             write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
 
@@ -112,14 +113,14 @@ def unshard(shards):
     return unsharded
 
 
-def _read_shards(path: str, structure, suffix: str):
+def _read_shards(path: str, structure: PyTreeDef, suffix: str):
     with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
         start = time.time()
         paths = [f"{path}/{dev.id}/{suffix}.npz" for dev in jax.local_devices()]
         shards = list(p.map(read_shard, paths))
         print(f"Loading {suffix} took {time.time() - start:.2}s")
 
-    return jax.tree_util.tree_unflatten(structure, unshard(shards))
+    return structure.unflatten(unshard(shards))
 
 
 def _overwrite(new: dict, old: dict, ignore: re.Pattern):
