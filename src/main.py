@@ -226,7 +226,7 @@ def main():
             if idx == wctx.ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
         if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
-            write_train_checkpoint(wctx)
+            write_train_checkpoint(wctx, wblog)
             checkpoint_at += wctx.ctx.training.checkpoint_interval
     return
 
