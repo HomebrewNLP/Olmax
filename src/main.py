@@ -188,7 +188,7 @@ def main():
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
     tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
-    data = init_data_and_model(wctx, WandbLog(run, ctx.training.device_steps * jax.process_count(), parameter_count, tokens_processed))
+    data = init_data_and_model(wctx, WandbLog(run, 0, 0, 0))
     parameter_count = sum(param.size for name, param in wctx.ctx.parameters.items() if "optimizer" not in name)
     buffer_count = sum(param.size for name, param in wctx.ctx.parameters.items()) - parameter_count
 
