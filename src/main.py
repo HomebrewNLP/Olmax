@@ -194,8 +194,7 @@ def main():
 
     partition = deep_replace(wctx.serialize(), 0)
 
-    step = timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
-                  in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
+    step = jax.pmap(jitless_step, ParallelAxes.model, in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
     step = TrainLoop(wctx, step)
 
     print("\n")
