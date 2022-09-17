@@ -83,7 +83,8 @@ def write_checkpoint(ctx: Context, step: int, wblog: WandbLog, verbose: bool = T
         log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
             local_weights = index_weights(tree, shard)
-            wblog.log_params(shard, jax_structure.unflatten(local_weights), step)
+            if suffix == "parameters":
+                wblog.log_params(shard, jax_structure.unflatten(local_weights), step)
             write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
 
