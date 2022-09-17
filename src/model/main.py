@@ -54,7 +54,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=ctx.dims.heads ** -0.5)
+    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1/ctx.dims.heads)
     if ctx.is_initializing:
         return out
     return out, wgt
