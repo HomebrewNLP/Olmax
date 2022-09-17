@@ -34,10 +34,6 @@ def index_weights(weights, idx):
 def write(weights: typing.List[jnp.ndarray], file_path: str):
     for _ in range(UPLOAD_RETRIES):
         try:
-            print({str(idx): tensor.mean() for idx, tensor in enumerate(weights)})
-            print({str(idx): tensor.std() for idx, tensor in enumerate(weights)})
-            print({str(idx): tensor.min() for idx, tensor in enumerate(weights)})
-            print({str(idx): tensor.max() for idx, tensor in enumerate(weights)})
             with smart_open(file_path, "wb") as f:
                 np.savez(f, **{str(idx): tensor for idx, tensor in enumerate(weights)})
             return
