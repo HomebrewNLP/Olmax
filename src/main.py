@@ -198,8 +198,6 @@ def main():
                   in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
     step = TrainLoop(wctx, step)
 
-    timeit("Compiling model and performing first step", step, next(data))  # skipcq: PTC-W0063
-    wctx = timeit("Running second step", step, next(data))  # skipcq: PTC-W0063
     print("\n")
     print(f"Parameters: {jax.process_count() * parameter_count:,}")
     print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
