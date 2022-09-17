@@ -132,10 +132,10 @@ def init_data(ctx: Context, skipped_samples: int) -> typing.Tuple[typing.Iterato
     return data, inp
 
 
-def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
+def init_data_and_model(wctx: WhileTrainContext, wblog: WandbLog) -> typing.Iterator[np.ndarray]:
     """Model gets loaded in-place into the `WhileTrainContext`"""
     if wctx.ctx.training.checkpoint_load_path:
-        read_train_checkpoint(wctx, '[0]{100}')
+        read_train_checkpoint(wctx, wblog, '[0]{100}')
         skipped_samples = math.ceil(wctx.step / jax.process_count() / wctx.ctx.training.device_steps)
         data, _ = init_data(wctx.ctx, skipped_samples)
         return data
@@ -188,7 +188,7 @@ def main():
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
     tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
-    data = init_data_and_model(wctx)
+    data = init_data_and_model(wctx, WandbLog(run, ctx.training.device_steps * jax.process_count(), parameter_count, tokens_processed))
     parameter_count = sum(param.size for name, param in wctx.ctx.parameters.items() if "optimizer" not in name)
     buffer_count = sum(param.size for name, param in wctx.ctx.parameters.items()) - parameter_count
 
