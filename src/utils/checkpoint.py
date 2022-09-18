@@ -115,7 +115,7 @@ def _read_shards(path: str, structure: PyTreeDef, suffix: str):
         start = time.time()
         paths = [f"{path}/{dev.id}/{suffix}.npz" for dev in jax.local_devices()]
         shards = list(p.map(read_shard, paths))
-        print(f"Loading {suffix} took {time.time() - start:.2}s")
+        print(f"Loading {suffix} took {time.time() - start:.2f}s")
 
     return structure.unflatten(unshard(shards))
 

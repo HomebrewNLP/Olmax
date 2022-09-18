@@ -132,15 +132,20 @@ def init_data(ctx: Context, skipped_samples: int) -> typing.Tuple[typing.Iterato
     return data, inp
 
 
+def read_checkpoint(wctx: WhileTrainContext, wblog: WandbLog) -> typing.Iterator[np.ndarray]:
+    read_train_checkpoint(wctx, wblog, '[0]{100}')
+    skipped_samples = math.ceil(wctx.step / jax.process_count() / wctx.ctx.training.device_steps)
+    data, _ = init_data(wctx.ctx, skipped_samples)
+    return data
+
+
 def init_data_and_model(wctx: WhileTrainContext, wblog: WandbLog) -> typing.Iterator[np.ndarray]:
     """Model gets loaded in-place into the `WhileTrainContext`"""
     if wctx.ctx.training.checkpoint_load_path:
-        read_train_checkpoint(wctx, wblog, '[0]{100}')
-        skipped_samples = math.ceil(wctx.step / jax.process_count() / wctx.ctx.training.device_steps)
-        data, _ = init_data(wctx.ctx, skipped_samples)
-        return data
+        return read_checkpoint(wctx, wblog)
 
-    data, inp = init_data(wctx.ctx, 0)
+    wctx.ctx.training.checkpoint_load_path = wctx.ctx.training.checkpoint_path
+    _, inp = init_data(wctx.ctx, 0)
     wctx.ctx.is_initializing = True
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
@@ -149,8 +154,8 @@ def init_data_and_model(wctx: WhileTrainContext, wblog: WandbLog) -> typing.Iter
     wctx.current_step = replicate(wctx.current_step)
     wctx.loss = replicate(wctx.loss)
     wctx.accuracy = replicate(wctx.accuracy)
-
-    return data
+    write_train_checkpoint(wctx, wblog)
+    return read_checkpoint(wctx, wblog)
 
 
 def dump_ctx(ctx: Context, run):
