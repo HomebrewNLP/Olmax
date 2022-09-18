@@ -141,8 +141,10 @@ def init_data_and_model(wctx: WhileTrainContext, wblog: WandbLog) -> typing.Iter
         return data
 
     data, inp = init_data(wctx.ctx, 0)
+    wctx.ctx.is_initializing = True
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
+    wctx.ctx.is_initializing = False
     wctx.ctx.parameter_variance = replicate(wctx.ctx.parameter_variance)
     wctx.current_step = replicate(wctx.current_step)
     wctx.loss = replicate(wctx.loss)
@@ -183,7 +185,6 @@ def main():
     dump_ctx(ctx, run)
 
     wctx = WhileTrainContext()
-    wctx.ctx.is_initializing = True
     print(wctx.ctx)
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
