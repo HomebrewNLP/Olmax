@@ -121,13 +121,14 @@ def _read_shards(path: str, structure: PyTreeDef, suffix: str):
 
 
 def _overwrite(new: dict, old: dict, ignore: re.Pattern):
-    print("Unknown:  ", [p for p in new.keys() if p not in old and not ignore.match(p)])
-    print("Unfilled: ", [p for p in old.keys() if p not in new and not ignore.match(p)])
-
     if not old:
+        print("No entries in old dict. Using new dict.")
         for key, param in new.items():
             old[key] = param
         return
+
+    print("Unknown:  ", [p for p in new.keys() if p not in old and not ignore.match(p)])
+    print("Unfilled: ", [p for p in old.keys() if p not in new and not ignore.match(p)])
 
     for key in old.keys():
         if key in new:
