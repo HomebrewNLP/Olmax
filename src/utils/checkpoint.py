@@ -15,10 +15,12 @@ import typing
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.tree_util import PyTreeDef
 from smart_open import open as smart_open
 
 from src.backend import deep_replace, is_main
 from src.context import Context, WhileTrainContext
+from src.utils.wandblog import WandbLog
 
 UPLOAD_RETRIES = 8
 
@@ -47,11 +49,11 @@ def log(arg: str, verbose: bool):
         print(datetime.datetime.now(), arg)
 
 
-def write_checkpoint(ctx: Context, verbose: bool = True):
-    flattened, structure = jax.tree_util.tree_flatten(ctx.parameters)
+def write_checkpoint(ctx: Context, step: int, wblog: WandbLog, verbose: bool = True):
+    flattened, jax_structure = jax.tree_util.tree_flatten(ctx.parameters)
     variance, _ = jax.tree_util.tree_flatten(ctx.parameter_variance)  # same structure
 
-    structure = str(structure)  # like "PyTreeDef({'2': {'a': *}})"
+    structure = str(jax_structure)  # like "PyTreeDef({'2': {'a': *}})"
     structure = structure.replace('PyTreeDef', '')[1:-1]  # clean up "types"
     structure = structure.replace(': *', ': null').replace("{'", '{"').replace("':", '":')
     structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
@@ -76,11 +78,14 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
         shard = device.id
         log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
-            write(index_weights(tree, shard), f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
+            local_weights = index_weights(tree, shard)
+            if suffix == "parameters":
+                wblog.log_params(shard, jax_structure.unflatten(local_weights), step)
+            write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
 
-def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
-    write_checkpoint(wctx.ctx, verbose)
+def write_train_checkpoint(wctx: WhileTrainContext, wblog: WandbLog, verbose: bool = True):
+    write_checkpoint(wctx.ctx, wctx.step, wblog, verbose)
     for device in jax.local_devices():
         shard = device.id
         for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
@@ -105,24 +110,25 @@ def unshard(shards):
     return unsharded
 
 
-def _read_shards(path: str, structure, suffix: str):
+def _read_shards(path: str, structure: PyTreeDef, suffix: str):
     with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
         start = time.time()
         paths = [f"{path}/{dev.id}/{suffix}.npz" for dev in jax.local_devices()]
         shards = list(p.map(read_shard, paths))
-        print(f"Loading {suffix} took {time.time() - start:.2}s")
+        print(f"Loading {suffix} took {time.time() - start:.2f}s")
 
-    return jax.tree_util.tree_unflatten(structure, unshard(shards))
+    return structure.unflatten(unshard(shards))
 
 
 def _overwrite(new: dict, old: dict, ignore: re.Pattern):
-    print("Unknown:  ", [p for p in new.keys() if p not in old and not ignore.match(p)])
-    print("Unfilled: ", [p for p in old.keys() if p not in new and not ignore.match(p)])
-
     if not old:
+        print("No entries in old dict. Using new dict.")
         for key, param in new.items():
             old[key] = param
         return
+
+    print("Unknown:  ", [p for p in new.keys() if p not in old and not ignore.match(p)])
+    print("Unfilled: ", [p for p in old.keys() if p not in new and not ignore.match(p)])
 
     for key in old.keys():
         if key in new:
@@ -147,10 +153,12 @@ def read_checkpoint(ctx: Context, ignore: str = '.*optimizer.*', load_variance: 
                    ignore)
 
 
-def read_train_checkpoint(wctx: WhileTrainContext, ignore: str = '.*optimizer.*'):
-    read_checkpoint(wctx.ctx, ignore, load_variance=True)
-
+def read_train_checkpoint(wctx: WhileTrainContext, wblog: WandbLog, ignore: str = '.*optimizer.*'):
     _, structure = jax.tree_util.tree_flatten([jnp.zeros((1,))])
     wctx.loss = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "loss")[0]
     wctx.accuracy = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "accuracy")[0]
     wctx.current_step = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "current_step")[0]
+    read_checkpoint(wctx.ctx, ignore, load_variance=True)
+
+    for idx, dev in enumerate(jax.local_devices()):
+        wblog.log_params(dev.id, {key: val[idx] for key, val in wctx.ctx.parameters.items()}, wctx.step)
