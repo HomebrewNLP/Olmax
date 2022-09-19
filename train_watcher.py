@@ -80,6 +80,8 @@ def new_id():
 class CreationCallback:
     def __init__(self, args: Args):
         self.args = args
+        self.restarts = 0
+
         with open(args.config_path, 'r') as f:  # skipcq: PTC-W6004
             txt = f.read()
         config = yaml.safe_load(txt)
@@ -87,7 +89,7 @@ class CreationCallback:
         cfg.training.do_checkpoint = True
         cfg.data.path = args.data_path
         cfg.dims.heads = 8 * args.slices
-        cfg.wandb.name = args.host
+        cfg.wandb.group = args.host
 
         if args.merge_runs:
             cfg.wandb.id = new_id()
@@ -112,12 +114,14 @@ class CreationCallback:
         if new_checkpoint_step < self.cfg.training.checkpoint_interval + self.last_checkpoint_step:
             return  # checkpoint, but no new checkpoint
 
+        self.restarts += 1
         self.last_checkpoint_step = new_checkpoint_step
         self.cfg.wandb.id = new_id()
 
     def __call__(self, host: str, ctx: typing.Optional[TPUContext]) -> TPUContext:
         if ctx is not None:  # every call after 0th
             self._prepare_config()
+        self.cfg.wandb.name = f'{self.args.host}-{self.restarts}'
         print(self.cfg)
         return TPUContext(zone=self.args.zone, host=host, config=self.cfg.config(), branch=self.args.branch)
 
