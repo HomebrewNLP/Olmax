@@ -44,8 +44,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
                    psum: bool = False, act: bool = True) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type,
-                           lr_scale=ctx.optimizer.scale.norm)
+        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
 
     if ctx.is_initializing:
         return inp

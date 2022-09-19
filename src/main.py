@@ -132,22 +132,29 @@ def init_data(ctx: Context, skipped_samples: int) -> typing.Tuple[typing.Iterato
     return data, inp
 
 
-def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
+def init_data_and_model(wctx: WhileTrainContext, wblog: WandbLog) -> typing.Iterator[np.ndarray]:
     """Model gets loaded in-place into the `WhileTrainContext`"""
     if wctx.ctx.training.checkpoint_load_path:
-        read_train_checkpoint(wctx, '[0]{100}')
+        read_train_checkpoint(wctx, wblog, '[0]{100}')
         skipped_samples = math.ceil(wctx.step / jax.process_count() / wctx.ctx.training.device_steps)
         data, _ = init_data(wctx.ctx, skipped_samples)
         return data
 
+    wctx.ctx.training.checkpoint_load_path = wctx.ctx.training.checkpoint_path
     data, inp = init_data(wctx.ctx, 0)
+    wctx.ctx.is_initializing = True
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
     timeit("Acquiring optimizer parameters", get_optimizer_state, wctx.ctx)
+    wctx.ctx.is_initializing = False
     wctx.ctx.parameter_variance = replicate(wctx.ctx.parameter_variance)
     wctx.current_step = replicate(wctx.current_step)
     wctx.loss = replicate(wctx.loss)
     wctx.accuracy = replicate(wctx.accuracy)
 
+    write_train_checkpoint(wctx, wblog)
+    wctx.ctx.parameters = {}
+    wctx.ctx.parameter_variance = {}
+    read_train_checkpoint(wctx, wblog, '[0]{100}')
     return data
 
 
@@ -183,23 +190,19 @@ def main():
     dump_ctx(ctx, run)
 
     wctx = WhileTrainContext()
-    wctx.ctx.is_initializing = True
     print(wctx.ctx)
     device_steps = wctx.ctx.training.device_steps * jax.process_count()
     total_steps = wctx.ctx.training.steps * device_steps
     tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
-    data = init_data_and_model(wctx)
+    data = init_data_and_model(wctx, WandbLog(run, 0, 0, 0))
     parameter_count = sum(param.size for name, param in wctx.ctx.parameters.items() if "optimizer" not in name)
     buffer_count = sum(param.size for name, param in wctx.ctx.parameters.items()) - parameter_count
 
     partition = deep_replace(wctx.serialize(), 0)
 
-    step = timeit(f"PMapping across {ParallelAxes.model}", jax.pmap, jitless_step, ParallelAxes.model,
-                  in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
+    step = jax.pmap(jitless_step, ParallelAxes.model, in_axes=(partition,), out_axes=partition, donate_argnums=(0,))
     step = TrainLoop(wctx, step)
 
-    timeit("Compiling model and performing first step", step, next(data))  # skipcq: PTC-W0063
-    wctx = timeit("Running second step", step, next(data))  # skipcq: PTC-W0063
     print("\n")
     print(f"Parameters: {jax.process_count() * parameter_count:,}")
     print(f"Buffers:    {jax.process_count() * buffer_count:,}\n\n")
@@ -226,7 +229,7 @@ def main():
             if idx == wctx.ctx.training.trace.stop_step:
                 jax.profiler.stop_trace()
         if wctx.ctx.training.do_checkpoint and current_step > checkpoint_at:
-            write_train_checkpoint(wctx)
+            write_train_checkpoint(wctx, wblog)
             checkpoint_at += wctx.ctx.training.checkpoint_interval
     return
 
