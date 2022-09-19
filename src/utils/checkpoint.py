@@ -49,7 +49,7 @@ def log(arg: str, verbose: bool):
         print(datetime.datetime.now(), arg)
 
 
-def write_checkpoint(ctx: Context, step: int, wblog: WandbLog, verbose: bool = True):
+def write_checkpoint(ctx: Context, verbose: bool = True):
     flattened, jax_structure = jax.tree_util.tree_flatten(ctx.parameters)
     variance, _ = jax.tree_util.tree_flatten(ctx.parameter_variance)  # same structure
 
@@ -79,13 +79,11 @@ def write_checkpoint(ctx: Context, step: int, wblog: WandbLog, verbose: bool = T
         log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
             local_weights = index_weights(tree, shard)
-            if suffix == "parameters":
-                wblog.log_params(shard, jax_structure.unflatten(local_weights), step)
             write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
 
-def write_train_checkpoint(wctx: WhileTrainContext, wblog: WandbLog, verbose: bool = True):
-    write_checkpoint(wctx.ctx, wctx.step, wblog, verbose)
+def write_train_checkpoint(wctx: WhileTrainContext,  verbose: bool = True):
+    write_checkpoint(wctx.ctx, verbose)
     for device in jax.local_devices():
         shard = device.id
         for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
@@ -153,12 +151,9 @@ def read_checkpoint(ctx: Context, ignore: str = '.*optimizer.*', load_variance: 
                    ignore)
 
 
-def read_train_checkpoint(wctx: WhileTrainContext, wblog: WandbLog, ignore: str = '.*optimizer.*'):
+def read_train_checkpoint(wctx: WhileTrainContext, ignore: str = '.*optimizer.*'):
     _, structure = jax.tree_util.tree_flatten([jnp.zeros((1,))])
     wctx.loss = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "loss")[0]
     wctx.accuracy = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "accuracy")[0]
     wctx.current_step = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "current_step")[0]
     read_checkpoint(wctx.ctx, ignore, load_variance=True)
-
-    for idx, dev in enumerate(jax.local_devices()):
-        wblog.log_params(dev.id, {key: val[idx] for key, val in wctx.ctx.parameters.items()}, wctx.step)

@@ -49,9 +49,3 @@ class WandbLog:
                       }, step=step)
 
         return self.losses[-1] in (float("nan"), float("inf"), float("-inf"))
-
-    def log_params(self, device: int, params: typing.Dict[str, jnp.ndarray], step: int,
-                   functions: typing.Tuple[types.FunctionType] = (jnp.mean, jnp.std, jnp.max, jnp.min)):
-        for fn in functions:
-            self.run.log({f"Weight Statistics/Device={device} Fn={fn.__name__} Param={key.replace('/', '-')}": float(fn(val))
-                          for key, val in params.items()}, step=step)
