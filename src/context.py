@@ -100,6 +100,7 @@ class TensorboardTrace(DataClass):
 
 
 class WandB(DataClass):
+    group: typing.Optional[str] = None
     name: typing.Optional[str] = None
     id: typing.Optional[str] = None
     project: str = 'gpt'
