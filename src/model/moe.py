@@ -8,7 +8,7 @@ from src.constants import ParallelAxes
 from src.context import Context
 from src.model.activate import activate
 from src.model.conv import conv
-from src.model.norm import prenorm
+from src.model.norm import prenorm, scale_norm_act
 
 
 def z_loss(ctx: Context, src: jnp.ndarray, use_previous_grad: bool = True) -> jnp.ndarray:
@@ -111,11 +111,13 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = lax.squeeze(inp, (2,))
 
     # Devices^2 more parameters than normal bottleneck block but only Devices-times more flops due to sparsity above
+    inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features)
     inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, big_params, big_params)
+    inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features)
 
     # [Batch, Sequence // Devices, Features * Devices]  ->  [Batch, Sequence, Features]  (PixelShuffle across devices)
     inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence // devices, 1, big_params)
     inp = lax.all_to_all(inp, ParallelAxes.model, 3, 2, tiled=True)
     inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.inner_bottleneck_features)
 
-    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features, ctx.dims.inner_bottleneck_features)
+    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, ctx.dims.features)
