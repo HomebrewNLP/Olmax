@@ -95,3 +95,27 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     mid = activate(mid)
     out = matmul(mid, out_wgt)
     return jnp.zeros_like(inp).reshape(-1, inp.shape[-1]).at[indices].set(out).reshape(inp.shape)
+
+
+@prenorm
+@with_context()
+def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    devices = ctx.dims.heads
+    big_params = devices * ctx.dims.inner_bottleneck_features
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features, ctx.dims.inner_bottleneck_features)
+
+    # [Batch, Sequence, Features]  ->  [Batch, Sequence // Devices, Features * Devices]
+    # In essence, 1) Collect features from all devices + 2) Drop unused sequence elements
+    inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence // devices, devices, ctx.dims.inner_bottleneck_features)
+    inp = lax.all_to_all(inp, ParallelAxes.model, 2, 3, tiled=True)
+    inp = lax.squeeze(inp, (2,))
+
+    # Devices^2 more parameters than normal bottleneck block but only Devices-times more flops due to sparsity above
+    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, big_params, big_params)
+
+    # [Batch, Sequence // Devices, Features * Devices]  ->  [Batch, Sequence, Features]  (PixelShuffle across devices)
+    inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence // devices, 1, big_params)
+    inp = lax.all_to_all(inp, ParallelAxes.model, 3, 2, tiled=True)
+    inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.inner_bottleneck_features)
+
+    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features, ctx.dims.inner_bottleneck_features)

@@ -5,10 +5,11 @@ from jax import lax, numpy as jnp
 
 from src.backend import get_param, is_stacked, with_context
 from src.context import Context
-from src.model.conv import bottleneck_block, dense_block
+from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
 from src.model.mixer import mix
 from src.model.norm import scale_norm_act
+from src.model.moe import dense_moe
 from src.model.reversible import FourArrays, reversible, revnet_out
 
 
@@ -30,7 +31,7 @@ def step(ctx: Context):
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, dense_moe, src)
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, mix, src, depth)
         if ctx.is_initializing:
