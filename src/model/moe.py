@@ -114,7 +114,7 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     # [Batch, Sequence, Features]  ->  [Batch, SequenceSlice, Features * Devices]
     # In essence, 1) Collect features from all devices + 2) Drop unused sequence elements
-    if ctx.is_initializing:
+    if not ctx.is_initializing:
         inp = inp.reshape(ctx.dims.batch, sequence_slice, devices, ctx.dims.inner_bottleneck_features)
         inp = all_to_all(ctx, inp, 2, 3)
         inp = inp.reshape(ctx.dims.batch, sequence_slice, big_params)
@@ -125,7 +125,7 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = scale_norm_act(ctx, inp, ctx.dims.big_params)
 
     # [Batch, SequenceSlice, Features * Devices]  ->  [Batch, Sequence, Features]  (PixelShuffle across devices)
-    if ctx.is_initializing:
+    if not ctx.is_initializing:
         inp = inp.reshape(ctx.dims.batch, sequence_slice, 1, big_params)
         inp = all_to_all(ctx, inp, 3, 2)
         inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.inner_bottleneck_features)
