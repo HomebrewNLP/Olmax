@@ -100,7 +100,15 @@ def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 def all_to_all(ctx: Context, x: jnp.ndarray, split_axis: int, concat_axis: int) -> jnp.ndarray:
     if ctx.is_initializing:
         return x
-    return lax.all_to_all(x, ParallelAxes.model, split_axis, concat_axis, tiled=True)
+
+    @jax.custom_gradient
+    def _fn(inp: jnp.ndarray):
+        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+            return lax.all_to_all(dy, ParallelAxes.model, concat_axis, split_axis, tiled=True)
+
+        return lax.all_to_all(inp, ParallelAxes.model, split_axis, concat_axis, tiled=True), _grad
+
+    return _fn(x)
 
 
 @prenorm
