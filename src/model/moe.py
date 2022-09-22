@@ -1,3 +1,4 @@
+import math
 import typing
 
 import jax
@@ -31,8 +32,9 @@ def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
     return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
 
 
-def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def top1_gating(ctx: Context, x: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     # prepare shapes
+    gate = conv(ctx, x, ctx.dims.pointwise_kernel, ctx.dims.features, ctx.dims.heads)
     batch, sequence, experts = gate.shape
     features = x.shape[-1]
     tokens = batch * sequence
@@ -83,14 +85,27 @@ def top1_gating(ctx: Context, gate: jnp.ndarray, x: jnp.ndarray) -> typing.Tuple
     return x, own_indices
 
 
+def binary_tree_gating(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+    gates = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, int(math.log2(ctx.dims.heads)))
+    gates = lax.psum(gates, ParallelAxes.model)
+    if ctx.is_initializing:
+        return inp, None
+    indices = jnp.argsort(gates, 1)
+    gates *= (indices > ctx.dims.sequence // 2) * 2 - 1
+    gates = (1 + gates - lax.stop_gradient(gates)).prod(-1, keepdims=True)
+    for i in range(indices.shape[-1] - 1):
+        indices = jnp.take_along_axis(indices[:, :, 1:], indices[:, :, 0], 1)
+    indices = lax.squeeze(indices, (2,))
+    return jnp.take_along_axis(inp, indices, 1) * gates, indices
+
+
 @prenorm
 @with_context()
 def moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp_wgt = get_param(ctx, "ff_input", [ctx.dims.features, ctx.dims.moe_intermediate])
     out_wgt = get_param(ctx, "ff_output", [ctx.dims.moe_intermediate, ctx.dims.features])
 
-    gates = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, ctx.dims.features)
-    mid, indices = top1_gating(ctx, gates, inp)
+    mid, indices = top1_gating(ctx, inp)
     mid = matmul(mid, inp_wgt)
     mid = activate(mid)
     out = matmul(mid, out_wgt)
@@ -120,6 +135,8 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features, ctx.dims.inner_bottleneck_features)
 
+    inp, indices = binary_tree_gating(ctx, inp)
+
     # [Batch, Sequence, Features]  ->  [Batch, SequenceSlice, Features * Devices]
     # In essence, 1) Collect features from all devices + 2) Drop unused sequence elements
     if not ctx.is_initializing:
@@ -137,5 +154,6 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
         inp = inp.reshape(ctx.dims.batch, sequence_slice, 1, big_params)
         inp = all_to_all(ctx, inp, 3, 2)
         inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.inner_bottleneck_features)
+        inp = jnp.take_along_axis(inp, jnp.argsort(indices, -1), 1)
 
     return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, ctx.dims.features)
