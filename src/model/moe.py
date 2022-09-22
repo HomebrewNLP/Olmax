@@ -86,7 +86,7 @@ def top1_gating(ctx: Context, x: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.n
 
 
 def binary_tree_gating(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
-    gates = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, int(math.log2(ctx.dims.heads)))
+    gates = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.inner_bottleneck_features, int(math.log2(ctx.dims.heads)))
     gates = lax.psum(gates, ParallelAxes.model)
     if ctx.is_initializing:
         return inp, None
