@@ -95,7 +95,6 @@ def binary_tree_gating(ctx: Context, inp: jnp.ndarray) -> typing.Tuple[jnp.ndarr
     gates = (1 + gates - lax.stop_gradient(gates)).prod(-1, keepdims=True)
     for i in range(indices.shape[-1] - 1):
         indices = jnp.take_along_axis(indices[:, :, 1:], indices[:, :, 0], 1)
-    indices = lax.squeeze(indices, (2,))
     return jnp.take_along_axis(inp, indices, 1) * gates, indices
 
 
