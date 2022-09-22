@@ -6,7 +6,6 @@ import datetime
 import functools
 import io
 import json
-import multiprocessing
 import re
 import time
 import traceback
@@ -20,7 +19,6 @@ from smart_open import open as smart_open
 
 from src.backend import deep_replace, is_main
 from src.context import Context, WhileTrainContext
-from src.utils.wandblog import WandbLog
 
 UPLOAD_RETRIES = 8
 
@@ -82,20 +80,12 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
             write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
 
-def write_train_checkpoint(wctx: WhileTrainContext,  verbose: bool = True):
+def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
     write_checkpoint(wctx.ctx, verbose)
     for device in jax.local_devices():
         shard = device.id
         for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
             write(index_weights([tree], shard), f"{wctx.ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
-
-
-def read_shard(checkpoint_dir):
-    with smart_open(checkpoint_dir, "rb") as f:
-        buf = f.read()
-    f_io = io.BytesIO(buf)
-    deserialized = list(np.load(f_io).items())
-    return [tensor for idx, tensor in sorted(deserialized, key=lambda x: int(x[0]))]
 
 
 def unshard(shards):
@@ -109,11 +99,16 @@ def unshard(shards):
 
 
 def _read_shards(path: str, structure: PyTreeDef, suffix: str):
-    with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
-        start = time.time()
-        paths = [f"{path}/{dev.id}/{suffix}.npz" for dev in jax.local_devices()]
-        shards = list(p.map(read_shard, paths))
-        print(f"Loading {suffix} took {time.time() - start:.2f}s")
+    start = time.time()
+    shards = []
+    for dev in jax.local_devices():
+        checkpoint_dir = f"{path}/{dev.id}/{suffix}.npz"
+        with smart_open(checkpoint_dir, "rb") as f:
+            buf = f.read()
+        f_io = io.BytesIO(buf)
+        deserialized = list(np.load(f_io).items())
+        shards.append([tensor for idx, tensor in sorted(deserialized, key=lambda x: int(x[0]))])
+    print(f"Loading {suffix} took {time.time() - start:.2f}s")
 
     return structure.unflatten(unshard(shards))
 
