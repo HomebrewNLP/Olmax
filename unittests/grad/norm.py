@@ -1,9 +1,10 @@
+import jax
 import pytest
 from jax import numpy as jnp
 
 from src.context import Context
 from src.model.norm import norm_forward, scale_norm_act
-from unittests.grad.backend import grad_fn, randn_fn, trials, sample_sizes
+from unittests.grad.backend import grad_fn, randn_fn, sample_sizes, trials
 
 
 @pytest.mark.parametrize("act", [True, False])
@@ -19,8 +20,8 @@ def test_grad(act: bool, psum: bool, zero_mean: bool, samples: int, power: int):
     randn = randn_fn()
     for trial in range(trials):
         src = randn(samples, ctx.dims.features)
-        wgt = randn(ctx.dims.features)
-        dy = randn(samples, ctx.dims.features)
+        wgt = randn(ctx.dims.features * (jax.device_count() if psum else 1))
+        dy = randn(samples, ctx.dims.features * (jax.device_count() if psum else 1))
         grad = grad_fn(dy, src, wgt)
 
         out0 = grad(lambda x: norm_forward(ctx, x[0], x[1], psum, act)[0])
