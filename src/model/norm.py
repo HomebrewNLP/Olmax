@@ -23,9 +23,9 @@ def all_gather(inp: jnp.ndarray) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(x):
         def _grad(dy):
-            return lax.psum_scatter(dy, axis_name=ParallelAxes.model, scatter_dimension=-1, tiled=True)
+            return lax.psum_scatter(dy, axis_name=ParallelAxes.model, scatter_dimension=2, tiled=True)
 
-        return lax.all_gather(x, axis_name=ParallelAxes.model, axis=-1, tiled=True), _grad
+        return lax.all_gather(x, axis_name=ParallelAxes.model, axis=2, tiled=True), _grad
 
     return _fn(inp)
 
@@ -85,7 +85,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             if ctx.model.norm.zero_mean:
                 dx -= dx.mean(-1, keepdims=True)
             if psum:
-                dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=-1, tiled=True)
+                dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=2, tiled=True)
             return dx.astype(original_dtype), d_wgt
 
         return out, _grad
