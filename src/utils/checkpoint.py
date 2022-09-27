@@ -15,12 +15,12 @@ import typing
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax import lax
 from jax.tree_util import PyTreeDef
 from smart_open import open as smart_open
 
 from src.backend import deep_replace, is_main
 from src.context import Context, WhileTrainContext
-from src.utils.wandblog import WandbLog
 
 UPLOAD_RETRIES = 8
 
@@ -49,6 +49,14 @@ def log(arg: str, verbose: bool):
         print(datetime.datetime.now(), arg)
 
 
+def device_ids():
+    def _inner(_):
+        aggregated = lax.psum_scatter(jnp.arange(jax.device_count()), scatter_dimension=0, axis_name='i')
+        return (aggregated // jax.device_count()).astype(jnp.int32)
+
+    return jax.pmap(_inner, 'i')(jnp.arange(jax.local_device_count())).tolist()
+
+
 def write_checkpoint(ctx: Context, verbose: bool = True):
     flattened, jax_structure = jax.tree_util.tree_flatten(ctx.parameters)
     variance, _ = jax.tree_util.tree_flatten(ctx.parameter_variance)  # same structure
@@ -74,18 +82,16 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
         if not success:
             raise ValueError("Couldn't save structure")
 
-    for device in jax.local_devices():
-        shard = device.id
+    for shard in device_ids():
         log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
             local_weights = index_weights(tree, shard)
             write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
 
-def write_train_checkpoint(wctx: WhileTrainContext,  verbose: bool = True):
+def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
     write_checkpoint(wctx.ctx, verbose)
-    for device in jax.local_devices():
-        shard = device.id
+    for shard in device_ids():
         for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
             write(index_weights([tree], shard), f"{wctx.ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
 
@@ -111,7 +117,7 @@ def unshard(shards):
 def _read_shards(path: str, structure: PyTreeDef, suffix: str):
     with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
         start = time.time()
-        paths = [f"{path}/{dev.id}/{suffix}.npz" for dev in jax.local_devices()]
+        paths = [f"{path}/{shard}/{suffix}.npz" for shard in device_ids()]
         shards = list(p.map(read_shard, paths))
         print(f"Loading {suffix} took {time.time() - start:.2f}s")
 
