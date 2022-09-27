@@ -9,7 +9,6 @@ import jax
 import numpy as np
 import wandb
 from jax import lax, numpy as jnp
-from jax.experimental.compilation_cache import compilation_cache
 
 from src.backend import deep_replace, device_id, loop
 from src.constants import ParallelAxes
@@ -21,8 +20,6 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 jax.distributed.initialize()
-
-compilation_cache.initialize_cache("compilation_cache")
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
