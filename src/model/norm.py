@@ -19,13 +19,24 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
     return _fn
 
 
+def all_gather(inp: jnp.ndarray) -> jnp.ndarray:
+    @jax.custom_gradient
+    def _fn(x):
+        def _grad(dy):
+            return lax.psum_scatter(dy, axis_name=ParallelAxes.model, scatter_dimension=2, tiled=True)
+
+        return lax.all_gather(x, axis_name=ParallelAxes.model, axis=2, tiled=True), _grad
+
+    return _fn(inp)
+
+
 def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarray] = None, psum: bool = False,
                  act: bool = True):
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     original_dtype = src.dtype
     src_fp64 = promote_to(src, run_type)
     if psum:
-        src_fp64 = lax.psum(src_fp64, axis_name=ParallelAxes.model)
+        src_fp64 = all_gather(src_fp64)
     if ctx.model.norm.zero_mean:
         src_fp64 -= src_fp64.mean(-1, keepdims=True)
     std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm.power).sum(-1, keepdims=True), ctx.model.norm.eps,
@@ -44,7 +55,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
                    psum: bool = False, act: bool = True) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
+        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1,
+                           dtype=run_type)
 
     if ctx.is_initializing:
         return inp
@@ -73,7 +85,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
             if ctx.model.norm.zero_mean:
                 dx -= dx.mean(-1, keepdims=True)
             if psum:
-                dx = lax.psum(dx, axis_name=ParallelAxes.model)
+                dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=2, tiled=True)
             return dx.astype(original_dtype), d_wgt
 
         return out, _grad
