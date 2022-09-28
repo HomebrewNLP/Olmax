@@ -62,7 +62,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
     def _fn(x: jnp.ndarray):
         initial_seed = ctx.seed
         initial_prng_key = ctx.prng_key
-        ctx.seed += device_id(ctx)
+        ctx.seed += device_id()
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
         body_ctx(ctx, x)
         params = ctx.parameters

@@ -65,8 +65,8 @@ def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tupl
                                     dimension_numbers=dimension_numbers, precision='fastest')
 
 
-def device_id(ctx: Context):
-    return (lax.psum_scatter(jnp.arange(ctx.dims.heads), ParallelAxes.model) / ctx.dims.heads).astype(jnp.int32)
+def device_id():
+    return (lax.psum_scatter(jnp.arange(jax.device_count()), ParallelAxes.model) / jax.device_count()).astype(jnp.int32)
 
 
 def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
