@@ -137,7 +137,6 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
         data, _ = init_data(wctx.ctx, skipped_samples)
         return data
 
-    wctx.ctx.training.checkpoint_load_path = wctx.ctx.training.checkpoint_path
     data, inp = init_data(wctx.ctx, 0)
     wctx.ctx.is_initializing = True
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
@@ -148,10 +147,6 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
     wctx.loss = replicate(wctx.loss)
     wctx.accuracy = replicate(wctx.accuracy)
 
-    write_train_checkpoint(wctx)
-    wctx.ctx.parameters = {}
-    wctx.ctx.parameter_variance = {}
-    read_train_checkpoint(wctx, '[0]{100}')
     return data
 
 
