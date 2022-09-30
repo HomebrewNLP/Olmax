@@ -114,7 +114,7 @@ def all_to_all(ctx: Context, x: jnp.ndarray, split_axis: int, concat_axis: int) 
 @prenorm
 @with_context()
 def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    devices = ctx.dims.heads
+    devices = jax.device_count()
     big_params = devices * ctx.dims.inner_bottleneck_features
     sequence_slice = ctx.dims.sequence // devices
 
