@@ -3,7 +3,6 @@ Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca93705
 /mesh_transformer/checkpoint.py
 """
 import datetime
-import functools
 import io
 import json
 import multiprocessing
@@ -15,7 +14,6 @@ import typing
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax
 from jax.tree_util import PyTreeDef
 from smart_open import open as smart_open
 
@@ -25,35 +23,23 @@ from src.context import Context, WhileTrainContext
 UPLOAD_RETRIES = 8
 
 
-def index_weights(weights, idx):
-    cpu_device = jax.devices("cpu")[0]
-    return jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), cpu_device)
-
-
-def write(weights: typing.List[jnp.ndarray], file_path: str):
+def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str):
+    shard = jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), jax.devices("cpu")[0])
     for _ in range(UPLOAD_RETRIES):
         try:
-            with smart_open(file_path, "wb") as f:
-                np.savez(f, **{str(idx): tensor for idx, tensor in enumerate(weights)})
+            with smart_open(f"{prefix}/{jax.process_index()}/{idx}/{filename}", "wb") as f:
+                np.savez(f, **{str(idx): tensor for idx, tensor in enumerate(shard)})
             return
         except:  # skipcq: FLK-E722
             print("save failed, trying again")
 
-    print("save failed 3 times, exiting")
-    raise Exception("save failed")
+    print(f"save failed {UPLOAD_RETRIES} times, exiting")
+    raise ValueError("save failed")
 
 
 def log(arg: str, verbose: bool):
     if verbose:
         print(datetime.datetime.now(), arg)
-
-
-def device_ids():
-    def _inner(_):
-        aggregated = lax.psum_scatter(jnp.arange(jax.device_count()), scatter_dimension=0, axis_name='i')
-        return (aggregated // jax.device_count()).astype(jnp.int32)
-
-    return jax.pmap(_inner, 'i')(jnp.arange(jax.local_device_count())).tolist()
 
 
 def write_checkpoint(ctx: Context, verbose: bool = True):
@@ -81,18 +67,17 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
         if not success:
             raise ValueError("Couldn't save structure")
 
-    for shard in device_ids():
+    for shard in range(jax.local_device_count()):
         log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
-            local_weights = index_weights(tree, shard)
-            write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
+            write_shard(tree, shard, ctx.training.checkpoint_path, f"{suffix}.npz")
 
 
 def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
     write_checkpoint(wctx.ctx, verbose)
-    for shard in device_ids():
+    for shard in range(jax.local_device_count()):
         for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
-            write(index_weights([tree], shard), f"{wctx.ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
+            write_shard([tree], shard, wctx.ctx.training.checkpoint_path, f"{suffix}.npz")
 
 
 def read_shard(checkpoint_dir):
@@ -116,7 +101,7 @@ def unshard(shards):
 def _read_shards(path: str, structure: PyTreeDef, suffix: str):
     with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
         start = time.time()
-        paths = [f"{path}/{shard}/{suffix}.npz" for shard in device_ids()]
+        paths = [f"{path}/{jax.process_index()}/{shard}/{suffix}.npz" for shard in range(jax.local_device_count())]
         shards = list(p.map(read_shard, paths))
         print(f"Loading {suffix} took {time.time() - start:.2f}s")
 
