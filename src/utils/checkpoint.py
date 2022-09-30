@@ -25,7 +25,6 @@ from src.context import Context, WhileTrainContext
 UPLOAD_RETRIES = 8
 
 
-@functools.partial(jax.jit, backend="cpu")
 def index_weights(weights, idx):
     cpu_device = jax.devices("cpu")[0]
     return jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), cpu_device)
