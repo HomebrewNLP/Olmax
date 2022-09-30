@@ -30,9 +30,7 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, deter
             dat = tf.cast(tf.sparse.to_dense(dat['text']), tf.int32)
         else:
             text_slice = tf1.parse_single_example(proto, {'text': tf1.FixedLenFeature([], tf.string)})['text']
-            dat = tf.strings.reduce_join(tf.strings.bytes_split(text_slice))
-            dat = tf.strings.unicode_decode(dat, 'UTF-8')
-            dat = tf.cast(dat, tf.uint8)
+            dat = tf.io.decode_raw(text_slice, tf.uint8)
         dat = tf.reshape(dat, (-1,))
         dat = tf.slice(dat, (0,), (tf.size(dat) // context_p1 * context_p1,))
         dat = tf.reshape(dat, (-1, context_p1))
