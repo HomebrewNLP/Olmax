@@ -79,7 +79,6 @@ class Dims(DataClass):
     spatial_mixing_kernel: int = 512
     pointwise_features: int = 512
     moe_intermediate: int = 4096
-    heads: int = jax.device_count()
     sequence: int = 4096
     depth: int = 16
     vocab: int = 256

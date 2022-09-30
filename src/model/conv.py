@@ -1,3 +1,4 @@
+import jax
 from jax import numpy as jnp
 
 from src.backend import conv as lax_conv, get_param, with_context
@@ -21,7 +22,8 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out
 @prenorm
 @with_context()
 def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features, ctx.dims.inner_bottleneck_features)
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features,
+               ctx.dims.inner_bottleneck_features // jax.device_count())
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
     inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, ctx.dims.inner_bottleneck_features,
                ctx.dims.inner_bottleneck_features)

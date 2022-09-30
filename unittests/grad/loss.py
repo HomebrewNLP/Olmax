@@ -43,10 +43,8 @@ def statistics(name: str, var: jnp.ndarray):
         print(f"{name}: max={vmax}, min={vmin}, mean={vmean}, std={vstd}")
 
 
-@pytest.mark.parametrize("z_loss", [1, 0.01, 0])
 @pytest.mark.parametrize("samples", sample_sizes)
-@pytest.mark.parametrize("vocab", [256, 65536])
-def test_value(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
+def general_value_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
     ctx.dims.vocab = vocab
 
@@ -59,10 +57,8 @@ def test_value(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
         assert np.isclose(grad0, grad1)
 
 
-@pytest.mark.parametrize("z_loss", [1, 0.01, 0])
 @pytest.mark.parametrize("samples", sample_sizes)
-@pytest.mark.parametrize("vocab", [256, 65536])
-def test_grad(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
+def general_grad_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
     ctx.dims.vocab = vocab
 
@@ -84,3 +80,25 @@ def test_grad(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
             if is_main():
                 print(f'{allclose=}/{jax.device_count()}\n')
             assert allclose == jax.device_count()
+
+
+@pytest.mark.parametrize("z_loss", [1, 0.01, 0])
+@pytest.mark.parametrize("samples", sample_sizes)
+def test_z_loss_value(z_loss: float, samples: int):
+    general_value_test(z_loss, samples, 65536)
+
+
+@pytest.mark.parametrize("vocab", [256, 65536])
+def test_z_loss_value(vocab: int, samples: int):
+    general_value_test(0.01, samples, vocab)
+
+
+@pytest.mark.parametrize("z_loss", [1, 0.01, 0])
+@pytest.mark.parametrize("samples", sample_sizes)
+def test_z_loss_grad(z_loss: float, samples: int):
+    general_grad_test(z_loss, samples, 65536)
+
+
+@pytest.mark.parametrize("vocab", [256, 65536])
+def test_z_loss_grad(vocab: int, samples: int):
+    general_grad_test(0.01, samples, vocab)

@@ -88,7 +88,6 @@ class CreationCallback:
         cfg = Context(config)
         cfg.training.do_checkpoint = True
         cfg.data.path = args.data_path
-        cfg.dims.heads = 8 * args.slices
         cfg.wandb.group = args.host
 
         if args.merge_runs:

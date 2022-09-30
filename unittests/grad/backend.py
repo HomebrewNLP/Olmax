@@ -5,8 +5,8 @@ from jax import numpy as jnp
 
 from src.constants import ParallelAxes
 
-trials = 8
-sample_sizes = [2 ** 10, 2 ** 14]
+trials = 4
+sample_sizes = [2 ** 10, 2**14]
 
 
 def randn_fn():

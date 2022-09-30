@@ -15,9 +15,9 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - one_hot(target) + softmax(x) * logsumexp(x) * z_loss
     src, param = src_wgt
-    devices = ctx.dims.heads
+    devices = jax.device_count()
     total_items = ctx.dims.batch * ctx.dims.sequence
-    steps = ctx.dims.vocab // ctx.dims.inner_bottleneck_features
+    steps = ctx.dims.vocab // 128
     step_batch = total_items // steps
     local_batch = step_batch // devices
 
@@ -52,7 +52,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
     def _fn(inp: jnp.ndarray, tgt: jnp.ndarray, wgt: jnp.ndarray):
         inp = inp.reshape(steps, devices, local_batch, ctx.dims.features)
         tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
-        tgt = lax.dynamic_slice_in_dim(tgt, device_id(ctx) * local_batch, local_batch, 1)  # [Steps, LocalBatch]
+        tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
 
         def _slice_fn(carry, x):
             return _xent_slice(carry, x, wgt)

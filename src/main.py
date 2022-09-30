@@ -9,7 +9,6 @@ import jax
 import numpy as np
 import wandb
 from jax import lax, numpy as jnp
-from jax.experimental.compilation_cache import compilation_cache
 
 from src.backend import deep_replace, device_id, loop
 from src.constants import ParallelAxes
@@ -21,8 +20,6 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 jax.distributed.initialize()
-
-compilation_cache.initialize_cache("compilation_cache")
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -65,7 +62,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
     def _fn(x: jnp.ndarray):
         initial_seed = ctx.seed
         initial_prng_key = ctx.prng_key
-        ctx.seed += device_id(ctx)
+        ctx.seed += device_id()
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
         body_ctx(ctx, x)
         params = ctx.parameters
@@ -140,7 +137,6 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
         data, _ = init_data(wctx.ctx, skipped_samples)
         return data
 
-    wctx.ctx.training.checkpoint_load_path = wctx.ctx.training.checkpoint_path
     data, inp = init_data(wctx.ctx, 0)
     wctx.ctx.is_initializing = True
     timeit("Acquiring forward parameters", get_parameters, wctx.ctx, inp)
@@ -151,10 +147,6 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
     wctx.loss = replicate(wctx.loss)
     wctx.accuracy = replicate(wctx.accuracy)
 
-    write_train_checkpoint(wctx)
-    wctx.ctx.parameters = {}
-    wctx.ctx.parameter_variance = {}
-    read_train_checkpoint(wctx, '[0]{100}')
     return data
 
 

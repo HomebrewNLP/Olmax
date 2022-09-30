@@ -3,12 +3,11 @@ Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca93705
 /mesh_transformer/checkpoint.py
 """
 import datetime
-import functools
 import io
 import json
+import multiprocessing
 import re
 import time
-import traceback
 import typing
 
 import jax
@@ -23,28 +22,24 @@ from src.context import Context, WhileTrainContext
 UPLOAD_RETRIES = 8
 
 
-@functools.partial(jax.jit, backend="cpu")
-def index_weights(weights, idx):
-    cpu_device = jax.devices("cpu")[0]
-    return jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), cpu_device)
-
-
-def write(weights: typing.List[jnp.ndarray], file_path: str):
-    for _ in range(UPLOAD_RETRIES):
-        try:
-            with smart_open(file_path, "wb") as f:
-                np.savez(f, **{str(idx): tensor for idx, tensor in enumerate(weights)})
-            return
-        except:  # skipcq: FLK-E722
-            print("save failed, trying again")
-
-    print("save failed 3 times, exiting")
-    raise Exception("save failed")
-
-
 def log(arg: str, verbose: bool):
     if verbose:
         print(datetime.datetime.now(), arg)
+
+
+def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str, verbose: bool):
+    path = f"{prefix}/{jax.process_index()}/{idx}/{filename}"
+    shard = jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), jax.devices("cpu")[0])
+    log(f"Uploading {len(shard)} objects to {path}", verbose)
+    for _ in range(UPLOAD_RETRIES):
+        try:
+            with smart_open(path, "wb") as f:
+                np.savez(f, **{str(idx): tensor for idx, tensor in enumerate(shard)})
+            return
+        except:  # skipcq: FLK-E722
+            log(f"Couldn't save to {path}. Retrying now.", verbose)
+
+    log(f"Saving to {path} failed {UPLOAD_RETRIES} times. Skipping this checkpoint.", True)
 
 
 def write_checkpoint(ctx: Context, verbose: bool = True):
@@ -57,35 +52,33 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
     structure = structure.replace("', ", '", ').replace(", '", ', "')  # to valid JSON
 
     if is_main():
-        log(f"Writing structure to {ctx.training.checkpoint_path}/structure.json", verbose)
-        success = False
+        log(f"Saving structure to {ctx.training.checkpoint_path}/structure.json", verbose)
         for _ in range(UPLOAD_RETRIES):
             try:
                 with smart_open(f"{ctx.training.checkpoint_path}/structure.json", "w") as f:  # skipcq: PTC-W6004
                     f.write(structure)
+                break
             except:  # skipcq: FLK-E722
-                print("Failed to save structure. Traceback:")
-                traceback.print_exc()
-                continue
-            success = True
-            break
-        if not success:
-            raise ValueError("Couldn't save structure")
+                log(f"Couldn't save structure. Retrying now.", verbose)
 
-    for device in jax.local_devices():
-        shard = device.id
-        log(f"Uploading {shard=} to {ctx.training.checkpoint_path}/{shard}/", verbose)
+    for shard in range(jax.local_device_count()):
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
-            local_weights = index_weights(tree, shard)
-            write(local_weights, f"{ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
+            write_shard(tree, shard, ctx.training.checkpoint_path, f"{suffix}.npz", verbose)
 
 
 def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
     write_checkpoint(wctx.ctx, verbose)
-    for device in jax.local_devices():
-        shard = device.id
+    for shard in range(jax.local_device_count()):
         for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
-            write(index_weights([tree], shard), f"{wctx.ctx.training.checkpoint_path}/{shard}/{suffix}.npz")
+            write_shard([tree], shard, wctx.ctx.training.checkpoint_path, f"{suffix}.npz", verbose)
+
+
+def read_shard(checkpoint_dir):
+    with smart_open(checkpoint_dir, "rb") as f:
+        buf = f.read()
+    f_io = io.BytesIO(buf)
+    deserialized = list(np.load(f_io).items())
+    return [tensor for idx, tensor in sorted(deserialized, key=lambda x: int(x[0]))]
 
 
 def unshard(shards):
@@ -99,16 +92,11 @@ def unshard(shards):
 
 
 def _read_shards(path: str, structure: PyTreeDef, suffix: str):
-    start = time.time()
-    shards = []
-    for dev in jax.local_devices():
-        checkpoint_dir = f"{path}/{dev.id}/{suffix}.npz"
-        with smart_open(checkpoint_dir, "rb") as f:
-            buf = f.read()
-        f_io = io.BytesIO(buf)
-        deserialized = list(np.load(f_io).items())
-        shards.append([tensor for idx, tensor in sorted(deserialized, key=lambda x: int(x[0]))])
-    print(f"Loading {suffix} took {time.time() - start:.2f}s")
+    with multiprocessing.pool.ThreadPool(jax.local_device_count()) as p:
+        start = time.time()
+        paths = [f"{path}/{jax.process_index()}/{shard}/{suffix}.npz" for shard in range(jax.local_device_count())]
+        shards = list(p.map(read_shard, paths))
+        print(f"Loading {suffix} took {time.time() - start:.2f}s")
 
     return structure.unflatten(unshard(shards))
 
