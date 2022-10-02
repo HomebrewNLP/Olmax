@@ -3,13 +3,13 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, is_stacked, with_context, is_model
+from src.backend import get_param, is_model, is_stacked, with_context
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
 from src.model.mixer import mix
-from src.model.norm import scale_norm_act
 from src.model.moe import dense_moe
+from src.model.norm import scale_norm_act
 from src.model.reversible import FourArrays, reversible, revnet_out
 
 
@@ -54,12 +54,12 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     else:
         params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
         shared_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and not is_stacked(ctx, p, k)}
-        print("params keys", list(params.keys()))
-        print("shared_params keys", list(shared_params.keys()))
+        print("params keys", {p: k.shape for p, k in params.items()})
+        print("shared_params keys", {p: k.shape for p, k in shared_params.items()})
         src, _ = lax.scan(step(ctx, shared_params), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1/jax.device_count())
+    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
     if ctx.is_initializing:
         return out
     return out, wgt
