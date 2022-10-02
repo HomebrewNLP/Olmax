@@ -57,8 +57,8 @@ def is_model(param_name: str):
     return "/step:" in param_name and '/optimizer' not in param_name
 
 
-def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
-    return val.shape[0] == ctx.dims.depth and is_model(param_name)
+def is_stacked(param_name: str):
+    return param_name.endswith('_stacked') and is_model(param_name)
 
 
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
@@ -122,6 +122,11 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
               lr_scale: float = 1, dtype: typing.Optional[jnp.float32] = None,
               init_val: typing.Optional[jnp.ndarray] = None,
               tied: bool = False) -> jnp.ndarray:
+
+    add_depth = ctx.add_depth and not tied
+    if add_depth:
+        name = name + '_stacked'
+
     prefix_name = prefixed_name(ctx, name)
 
     if dtype is None:
@@ -130,8 +135,6 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     else:
         computation_dtype = dtype
         storage_dtype = dtype
-
-    add_depth = ctx.add_depth and not tied
 
     if prefix_name not in ctx.parameters:
         if init_val is not None:

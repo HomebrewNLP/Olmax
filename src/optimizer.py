@@ -34,7 +34,7 @@ def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
 
 def small_parameter(ctx: Context, param_name: str, grad: jnp.ndarray) -> bool:
     is_small = "norm" in param_name.lower() or "rezero" in param_name.lower()
-    is_small |= grad.ndim < (2 + is_stacked(ctx, param_name, grad))
+    is_small |= grad.ndim < (2 + is_stacked(param_name))
     return is_small
 
 
@@ -95,7 +95,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray: 
 
 def norm(ctx: Context, param_name: str, val: jnp.ndarray):
     val = lax.square(val)
-    if is_stacked(ctx, param_name, val):
+    if is_stacked(param_name):
         val = val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
     else:
         val = val.sum()
@@ -143,7 +143,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         weight_update = adam(ctx, grad, step)
         if not small_parameter(ctx, param_name, grad):
-            if is_stacked(ctx, param_name, grad):
+            if is_stacked(param_name):
                 shampoo_update = jnp.stack([shampoo(ctx, grad[i], step) for i in range(grad.shape[0])], 0)
             else:
                 shampoo_update = shampoo(ctx, grad, step)
