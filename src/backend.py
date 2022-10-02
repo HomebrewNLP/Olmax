@@ -123,9 +123,9 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
               init_val: typing.Optional[jnp.ndarray] = None,
               tied: bool = False) -> jnp.ndarray:
 
-    add_depth = ctx.add_depth and not tied
-    if add_depth:
+    if not tied:
         name = name + '_stacked'
+    add_depth = ctx.add_depth and not tied
 
     prefix_name = prefixed_name(ctx, name)
 
