@@ -40,7 +40,7 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
     # Devices^2 more parameters than normal bottleneck block but only Devices-times more flops due to sparsity above
     inp = scale_norm_act(ctx, inp, big_params)
-    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, big_params, big_params)
+    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, big_params, big_params, tied=True)
     inp = scale_norm_act(ctx, inp, big_params)
 
     # [Batch, SequenceSlice, Features * Devices]  ->  [Batch, Sequence, Features]  (PixelShuffle across devices)

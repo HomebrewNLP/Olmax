@@ -8,7 +8,7 @@ from src.model.norm import prenorm, scale_norm_act
 
 
 @with_context()
-def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out_features: int):
+def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out_features: int, tied: bool = False):
     fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
     fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
     fan_in = fan_in / fan_in.sum()
