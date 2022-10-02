@@ -54,8 +54,6 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     else:
         params = {p: k for p, k in ctx.parameters.items() if is_stacked(p)}
         shared_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and not is_stacked(p)}
-        print("params keys", {p: k.shape for p, k in params.items()})
-        print("shared_params keys", {p: k.shape for p, k in shared_params.items()})
         src, _ = lax.scan(step(ctx, shared_params), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
