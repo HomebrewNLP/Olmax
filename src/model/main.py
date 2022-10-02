@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, is_stacked, with_context
+from src.backend import get_param, is_stacked, with_context, is_model
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
@@ -24,10 +24,11 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def step(ctx: Context):
+def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
     def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         original_parameters = ctx.parameters
         ctx.parameters, depth = inp
+        ctx.parameters.update(shared_params)
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
         src = reversible(ctx, dense_block, src)
@@ -48,11 +49,12 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (src, zero, src, zero)
     if ctx.is_initializing:
         ctx.add_depth = True
-        ctx.parameters = step(ctx)(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
+        ctx.parameters = step(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
         ctx.add_depth = False
     else:
         params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
-        src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
+        shared_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and not is_stacked(ctx, p, k)}
+        src, _ = lax.scan(step(ctx, shared_params), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1/jax.device_count())
