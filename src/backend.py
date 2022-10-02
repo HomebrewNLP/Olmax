@@ -58,7 +58,7 @@ def is_model(param_name: str):
 
 
 def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
-    return val.shape[0] == ctx.dims.depth and not is_model(param_name)
+    return val.shape[0] == ctx.dims.depth and is_model(param_name)
 
 
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
