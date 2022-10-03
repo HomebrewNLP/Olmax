@@ -169,4 +169,4 @@ def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1)
 
 def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[], jnp.ndarray]], cases: int, predicate: jnp.ndarray,
                   base: jnp.ndarray):
-    return lax.switch(predicate, [gen_fn(i) for i in range(cases)], base)
+    return lax.switch(predicate % cases, [gen_fn(i) for i in range(cases)], base)
