@@ -22,7 +22,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.checkpoint(_fn)(inp, param)
 
 
-@with_context
+@with_context()
 def double_reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args):
     out = reversible(ctx, fn, src, *args)
 
