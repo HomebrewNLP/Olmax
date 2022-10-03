@@ -9,7 +9,7 @@ from src.model.conv import bottleneck_block, dense_block
 from src.model.loss import cross_entropy_loss
 from src.model.mixer import mix
 from src.model.norm import scale_norm_act
-from src.model.reversible import FourArrays, reversible, revnet_out
+from src.model.reversible import FourArrays, REVERSIBLE_CTX, ReversibleFn, reversible, revnet_out
 
 
 @with_context()
@@ -22,6 +22,16 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     return jax.checkpoint(_fn)(inp, param)
 
 
+@with_context
+def double_reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args):
+    out = reversible(ctx, fn, src, *args)
+
+    def norm(inner_ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+        return scale_norm_act(inner_ctx, inp, feature_dim=inner_ctx.dims.features)
+
+    return reversible(ctx, norm, out)
+
+
 @with_context()
 def step(ctx: Context):
     def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
@@ -29,10 +39,9 @@ def step(ctx: Context):
         ctx.parameters, depth = inp
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
-        src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, bottleneck_block, src)
-        src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, mix, src, depth)
+        src = double_reversible(ctx, dense_block, src)
+        src = double_reversible(ctx, bottleneck_block, src)
+        src = double_reversible(ctx, dense_block, src)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
@@ -54,7 +63,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1/jax.device_count())
+    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
     if ctx.is_initializing:
         return out
     return out, wgt
