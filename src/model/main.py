@@ -24,6 +24,8 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context):
+    name_cache = ctx.name_cache
+
     def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         original_parameters = ctx.parameters
         ctx.parameters, depth = inp
@@ -36,6 +38,7 @@ def step(ctx: Context):
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
+        name_cache.update(ctx.name_cache)
         return src[1:], None
 
     return _fn
@@ -54,7 +57,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
         src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1/jax.device_count())
+    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
     if ctx.is_initializing:
         return out
     return out, wgt
