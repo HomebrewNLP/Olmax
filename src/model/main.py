@@ -35,9 +35,7 @@ def step(ctx: Context):
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, norm, src)
         src = reversible(ctx, bottleneck_block, src)
-        src = reversible(ctx, norm, src)
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, norm, src)
         if ctx.is_initializing:
