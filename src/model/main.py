@@ -23,15 +23,10 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def double_reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args):
-    out = reversible(ctx, fn, src, *args)
+def norm(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+    return scale_norm_act(ctx, inp, feature_dim=ctx.dims.features)
 
-    def norm(inner_ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-        return scale_norm_act(inner_ctx, inp, feature_dim=inner_ctx.dims.features)
-
-    return reversible(ctx, norm, out)
-
-
+    
 @with_context()
 def step(ctx: Context):
     def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
@@ -39,9 +34,12 @@ def step(ctx: Context):
         ctx.parameters, depth = inp
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
-        src = double_reversible(ctx, dense_block, src)
-        src = double_reversible(ctx, bottleneck_block, src)
-        src = double_reversible(ctx, dense_block, src)
+        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, norm, src)
+        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, norm, src)
+        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, norm, src)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
