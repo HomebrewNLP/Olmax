@@ -77,7 +77,6 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     out_token = jnp.argmax(out_token, -1)
     wctx.data = jnp.where(one_hot(wctx.current_step, wctx.ctx.dims.sequence).reshape(1, -1), out_token, wctx.data)
     wctx.current_step += 1
-    wctx.ctx.parameter_variance = {}
     return wctx.serialize()
 
 
