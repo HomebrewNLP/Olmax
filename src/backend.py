@@ -130,7 +130,7 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         return ctx.parameters[prefix_name].astype(computation_dtype)
 
     if not ctx.is_initializing:
-        raise ValueError(f"Couldn't find parameter {prefix_name}")
+        raise ValueError(f"Couldn't find parameter {prefix_name}. {ctx.name_cache=}")
 
     if init_val is not None:
         param = init_val * scale * post_variance_scale

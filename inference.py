@@ -107,12 +107,10 @@ def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp
 
 class Inference:
     def __init__(self, ctx: Context):
-        ctx.is_initializing = True
         dummy_data = np.zeros((1, ctx.dims.sequence), dtype=np.int32)
         read_checkpoint(ctx)
         self.parameters = ctx.parameters
 
-        ctx.is_initializing = False
         partition = {k: 0 for k in ctx.parameters.keys()}
         self.step = jax.pmap(jitless_prediction_step, axis_name=ParallelAxes.model,
                              in_axes=(partition, None, None, None, None, None, None, None, None, None, None, None),
