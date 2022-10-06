@@ -53,8 +53,12 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
     raise ValueError
 
 
-def is_stacked(ctx: Context, param_name: str, val: jnp.ndarray):
-    return val.shape[0] == ctx.dims.depth and "/step:" in param_name and '/optimizer' not in param_name
+def is_model(param_name: str):
+    return "/step:" in param_name and '/optimizer' not in param_name
+
+
+def is_stacked(param_name: str):
+    return param_name.endswith('_stacked') and is_model(param_name)
 
 
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
@@ -116,7 +120,13 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
               lr_scale: float = 1, dtype: typing.Optional[jnp.float32] = None,
-              init_val: typing.Optional[jnp.ndarray] = None) -> jnp.ndarray:
+              init_val: typing.Optional[jnp.ndarray] = None,
+              tied: bool = False) -> jnp.ndarray:
+
+    if not tied:
+        name = name + '_stacked'
+    add_depth = ctx.add_depth and not tied
+
     prefix_name = prefixed_name(ctx, name)
 
     if dtype is None:
@@ -130,14 +140,14 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         if init_val is not None:
             param = init_val * scale * post_variance_scale
         elif std is None and mean is None:
-            if ctx.add_depth:
+            if add_depth:
                 param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
                                    range(ctx.dims.depth)], 0)
             else:
                 param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
             param *= scale * post_variance_scale
         else:
-            param = normal(ctx, [ctx.dims.depth] * ctx.add_depth + list(shape)) * scale
+            param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
             if std is not None:
                 param *= std
             if mean is not None:
@@ -159,7 +169,4 @@ def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1)
 
 def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[], jnp.ndarray]], cases: int, predicate: jnp.ndarray,
                   base: jnp.ndarray):
-    new = base
-    for i in range(cases):
-        new = lax.cond(i == predicate, gen_fn(i), lambda _: new, base)
-    return new
+    return lax.switch(predicate % cases, [gen_fn(i) for i in range(cases)], base)
