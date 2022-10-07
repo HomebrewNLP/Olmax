@@ -19,11 +19,12 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
 
     original_shape = inp.shape
     max_dims = math.ceil(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
+    original_batch = inp.shape[0]
 
     def _get_mix_fn(current_depth: int):
         def _fn(x: jnp.ndarray):
             batch = max(ctx.dims.sequence // ctx.dims.spatial_mixing_kernel ** (current_depth % max_dims + 1), 1)
-            out = x.reshape(ctx.dims.batch * batch, ctx.dims.spatial_mixing_kernel, -1, ctx.dims.features)
+            out = x.reshape(original_batch * batch, ctx.dims.spatial_mixing_kernel, -1, ctx.dims.features)
             out = jnp.einsum("bkrf,kg->bgrf", out, jnp.triu(wgt0) if ctx.model.autoregressive else wgt0)
             out = activate(out)
             out = jnp.einsum("bkrf,kg->bgrf", out, jnp.triu(wgt1) if ctx.model.autoregressive else wgt1)

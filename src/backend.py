@@ -136,26 +136,29 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         computation_dtype = dtype
         storage_dtype = dtype
 
-    if prefix_name not in ctx.parameters:
-        if init_val is not None:
-            param = init_val * scale * post_variance_scale
-        elif std is None and mean is None:
-            if add_depth:
-                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
-                                   range(ctx.dims.depth)], 0)
-            else:
-                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
-            param *= scale * post_variance_scale
+    if prefix_name in ctx.parameters:
+        return ctx.parameters[prefix_name].astype(computation_dtype)
+
+    if not ctx.is_initializing:
+        raise ValueError(f"Couldn't find parameter {prefix_name}. {ctx.name_cache=}")
+
+    if init_val is not None:
+        param = init_val * scale * post_variance_scale
+    elif std is None and mean is None:
+        if add_depth:
+            param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
+                               range(ctx.dims.depth)], 0)
         else:
-            param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
-            if std is not None:
-                param *= std
-            if mean is not None:
-                param += mean
-        ctx.parameter_variance[prefix_name] = lr_scale * scale
-        param = param.astype(storage_dtype)
-        assign(ctx, name, param)
-    param = ctx.parameters[prefix_name]
+            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+        param *= scale * post_variance_scale
+    else:
+        param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
+        if std is not None:
+            param *= std
+        if mean is not None:
+            param += mean
+    ctx.parameter_variance[prefix_name] = lr_scale * scale
+    assign(ctx, name, param.astype(storage_dtype))
     return param.astype(computation_dtype)
 
 

@@ -25,6 +25,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @with_context()
 def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
+    name_cache = ctx.name_cache
     def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         original_parameters = ctx.parameters
         ctx.parameters, depth = inp
@@ -38,6 +39,7 @@ def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
+        name_cache.update(ctx.name_cache)
         return src[1:], None
 
     return _fn

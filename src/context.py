@@ -231,14 +231,11 @@ class WhileContext(DataClass):
 
         if config is not None:
             self.ctx.parameters = config['parameters']
-            self.ctx.parameter_variance = config['parameter_variance']
             self.current_step = config['current_step']
             self.data = config['data']
 
     def _serialize(self) -> dict:
-        return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'data': self.data,
-                'parameter_variance': self.ctx.parameter_variance
-                }
+        return {'parameters': self.ctx.parameters, 'current_step': self.current_step, 'data': self.data}
 
     @property
     def step(self):
@@ -258,11 +255,13 @@ class WhileTrainContext(WhileContext):
         if config is not None:
             self.loss = config['loss']
             self.accuracy = config['accuracy']
+            self.ctx.parameter_variance = config['parameter_variance']
 
     def serialize(self):
         serialized = self._serialize()
         serialized['loss'] = self.loss
         serialized['accuracy'] = self.accuracy
+        serialized['parameter_variance'] = self.ctx.parameter_variance
         return serialized
 
 
