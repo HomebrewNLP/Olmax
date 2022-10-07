@@ -32,9 +32,9 @@ def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
     return grad * stable_rsqrt(weight_update, ctx.optimizer.epsilon)
 
 
-def small_parameter(ctx: Context, param_name: str, grad: jnp.ndarray) -> bool:
+def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
     is_small = "norm" in param_name.lower() or "rezero" in param_name.lower()
-    is_small |= grad.ndim < (2 + is_stacked(ctx, param_name, grad))
+    is_small |= grad.ndim < (2 + is_stacked(param_name))
     return is_small
 
 
@@ -42,13 +42,13 @@ def small_parameter(ctx: Context, param_name: str, grad: jnp.ndarray) -> bool:
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize: typing.Optional[bool] = None,
         init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None) -> jnp.ndarray:
     if quantize is None:
-        quantize = not small_parameter(ctx, ctx.global_prefix, inp)
+        quantize = not small_parameter(ctx.global_prefix, inp)
     if heavyball is None:
         heavyball = ctx.optimizer.heavyball
     if nesterov is None:
         heavyball = ctx.optimizer.nesterov
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else inp.dtype,
-                      init_val=jnp.zeros_like(inp) if init_val is None else init_val)
+                      init_val=jnp.zeros_like(inp) if init_val is None else init_val, tied=True)
     new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
     if not heavyball:  # non-heavyball momentum needs to be debiased
@@ -77,7 +77,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray: 
         eye = jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype)
         new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
                        nesterov=False, heavyball=False)
-        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye)
+        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
         if ctx.is_initializing:
             continue
 
@@ -93,28 +93,28 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray: 
     return preconditioner.preconditioned_grad(grad, new_preconditioners)
 
 
-def norm(ctx: Context, param_name: str, val: jnp.ndarray):
+def norm(param_name: str, val: jnp.ndarray):
     val = lax.square(val)
-    if is_stacked(ctx, param_name, val):
+    if is_stacked(param_name):
         val = val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
     else:
         val = val.sum()
     return val
 
 
-def clip_norm(ctx: Context, param_name: str, val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
-    return jnp.maximum(jnp.sqrt(norm(ctx, param_name, val)), min_norm)
+def clip_norm(param_name: str, val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
+    return jnp.maximum(jnp.sqrt(norm(param_name, val)), min_norm)
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    grd_norm = clip_norm(ctx, param_name, grad, ctx.optimizer.epsilon)
-    wgt_norm = clip_norm(ctx, param_name, ctx.parameters[param_name], 1e-3)
+    grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon)
+    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3)
     grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
     return grad * grad_scale
 
 
-def graft(ctx: Context, param_name: str, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
-    scale = jnp.sqrt(norm(ctx, param_name, magnitude) / jnp.maximum(norm(ctx, param_name, direction), 1e-16))
+def graft(param_name: str, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
+    scale = jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
     return scale * direction
 
 
@@ -142,13 +142,13 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
         weight_update = adam(ctx, grad, step)
-        if not small_parameter(ctx, param_name, grad):
-            if is_stacked(ctx, param_name, grad):
+        if not small_parameter(param_name, grad):
+            if is_stacked(param_name):
                 shampoo_update = jnp.stack([shampoo(ctx, grad[i], step) for i in range(grad.shape[0])], 0)
             else:
                 shampoo_update = shampoo(ctx, grad, step)
             shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
-            weight_update = graft(ctx, param_name, weight_update, shampoo_update)
+            weight_update = graft(param_name, weight_update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]

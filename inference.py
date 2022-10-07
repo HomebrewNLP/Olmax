@@ -13,8 +13,11 @@ from src.constants import ParallelAxes
 from src.context import Context, WhilePredictContext
 from src.main import get_parameters
 from src.model.main import body_ctx
-from src.model.moe import one_hot
 from src.utils.checkpoint import read_checkpoint
+
+
+def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
+    return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
 
 
 def cond_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> bool:

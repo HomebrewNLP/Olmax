@@ -3,11 +3,12 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, is_stacked, with_context
+from src.backend import get_param, is_model, is_stacked, with_context
 from src.context import Context
-from src.model.conv import bottleneck_block, dense_block
+from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
 from src.model.mixer import mix
+from src.model.moe import dense_moe
 from src.model.norm import scale_norm_act
 from src.model.reversible import FourArrays, reversible, revnet_out
 
@@ -23,16 +24,17 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def step(ctx: Context):
+def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
     name_cache = ctx.name_cache
 
     def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
         original_parameters = ctx.parameters
         ctx.parameters, depth = inp
+        ctx.parameters.update(shared_params)
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, bottleneck_block, src)
+        src = reversible(ctx, dense_moe, src)
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, mix, src, depth)
         if ctx.is_initializing:
@@ -50,11 +52,12 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     src = (src, zero, src, zero)
     if ctx.is_initializing:
         ctx.add_depth = True
-        ctx.parameters = step(ctx)(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
+        ctx.parameters = step(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
         ctx.add_depth = False
     else:
-        params = {p: k for p, k in ctx.parameters.items() if is_stacked(ctx, p, k)}
-        src, _ = lax.scan(step(ctx), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
+        params = {p: k for p, k in ctx.parameters.items() if is_stacked(p)}
+        shared_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and not is_stacked(p)}
+        src, _ = lax.scan(step(ctx, shared_params), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
