@@ -34,7 +34,7 @@ def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, dense_moe, src)
+        src = reversible(ctx, dense_moe, src, depth)
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, mix, src, depth)
         if ctx.is_initializing:

@@ -22,9 +22,16 @@ def all_to_all(ctx: Context, x: jnp.ndarray, split_axis: int, concat_axis: int) 
     return _fn(x)
 
 
+def roll(x: jnp.ndarray, amount: jnp.ndarray, axis: int):
+    """
+    https://github.com/google/jax/blob/2693afa263ed651404098fd98ea15b2a8c605a9e/jax/_src/numpy/lax_numpy.py#L3349-L3368
+    """
+    return lax.dynamic_slice_in_dim(lax.concatenate((x, x), axis), x.shape[axis] - amount, x.shape[axis], axis=axis)
+
+
 @prenorm
 @with_context()
-def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def dense_moe(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
     devices = jax.device_count()
     big_params = devices * ctx.dims.inner_bottleneck_features
     sequence_slice = ctx.dims.sequence // devices
@@ -35,6 +42,7 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     # In essence, 1) Collect features from all devices + 2) Drop unused sequence elements
     if not ctx.is_initializing:
         inp = inp.reshape(ctx.dims.batch, sequence_slice, devices, ctx.dims.inner_bottleneck_features)
+        inp = roll(inp, depth % devices, 2)
         inp = all_to_all(ctx, inp, 2, 3)
         inp = inp.reshape(ctx.dims.batch, sequence_slice, big_params)
 
@@ -47,6 +55,7 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if not ctx.is_initializing:
         inp = inp.reshape(ctx.dims.batch, sequence_slice, 1, big_params)
         inp = all_to_all(ctx, inp, 3, 2)
+        inp = roll(inp, (-depth) % devices, 2)
         inp = inp.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.inner_bottleneck_features)
 
     return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, ctx.dims.features)
