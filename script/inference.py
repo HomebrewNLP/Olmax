@@ -1,8 +1,8 @@
 import argparse
 
-import requests
+import grequests
 
-URL = "https://orbscale.com/"
+addresses = ["34.91.235.192", "35.204.237.144", "34.90.213.16", "34.90.251.78"]
 
 
 def main():
@@ -17,12 +17,13 @@ def main():
     parser.add_argument("--length", type=int, default=128)
     parser.add_argument("--seed", type=int, default=128)
     args = parser.parse_args()
-    out = requests.post(URL,
-                        json={"prompt": args.prompt, "temperature": args.temperature, "max_probability_mass": args.mass,
-                              "max_tokens": args.k, "length": args.length, 'seed': args.seed,
-                              "max_probability_to_filter": args.max_prob,
-                              "adaptive_filter_power": args.power, "adaptive_filter_scale": args.scale
-                              })
+    args = {"prompt": args.prompt, "temperature": args.temperature, "max_probability_mass": args.mass,
+            "max_tokens": args.k, "length": args.length, 'seed': args.seed,
+            "max_probability_to_filter": args.max_prob,
+            "adaptive_filter_power": args.power, "adaptive_filter_scale": args.scale
+            }
+    outs = grequests.map(grequests.post(f'http://{addr}:62220/completion', json=args) for addr in addresses)
+    out = list(outs)[0]
     response = out.json()["completion"]
     print(response)
 
