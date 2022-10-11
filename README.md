@@ -2,12 +2,14 @@
 
 Optimized Language-Model (in jax)
 
-## Model
+## Techniques
 
 Olmax is a collection of various techniques otherwise rarely used in language modeling. The sections below will describe
 their purpose.
 
-### Convolution
+### Model
+
+#### Convolution
 
 Most modern language models use attention as their core building block. However, works such
 as [Conformer](https://arxiv.org/abs/2005.08100) and noticed that combining attention with convolution, instead of
@@ -29,7 +31,7 @@ intermediate states.\
 In summary, convolutions provide a memory-efficient way of adding a locality bias to any model. As most domains, such as
 text, image and video, have a strong locality bias, their usage is sensible.
 
-### Axial MLP-Mixer
+#### Axial MLP-Mixer
 
 Unfortunately, replacing global attention with local convolution does not yield the best performance in most cases. Some
 papers, such as [ConvBERT](https://arxiv.org/abs/2008.02496) illustrated that it is possible to achieve competitive
@@ -46,7 +48,7 @@ running quickly and with a small memory footprint of O(N^1.5) instead of O(N^2).
 Therefore, an axial mlp-mixer needs less memory and compute than a standard transformer while providing better
 performance at scale.
 
-### Reversible
+#### Reversible
 
 Most commonly, large transformers use [activation checkpointing](https://arxiv.org/abs/1604.06174v2), which saves the
 input to a function and recomputes its intermediate values. While activation checkpointing means not all intermediate
@@ -61,11 +63,36 @@ Using reversible layers, the network can be scaled to any depth, without increas
 increased number of parameters. This way, architectures such as [DeepNarrow](https://arxiv.org/abs/2109.10686) can be
 used efficiently.
 
-### Normalization
+#### Normalization
 
-Usually LayerNorm + PreNorm, we do RMSNorm + SandwichNorm. Each decreases loss by 7%+. RMSNorm is 2x+ faster, which is
-crucial as it was expensive as a 512x512 matmul.\
-TODO: Extend
+For a long time, people have discussed whether the BERT-style PostNorm or GPT-style PreNorm is best. However, recent
+research, such as [CogView's SandwichLN](https://arxiv.org/abs/2105.13290)
+and [NormFormer](https://openreview.net/pdf?id=GMYWzWztDx5) showed that using both PostNorm and PreNorm improves
+stability and with that convergence.
+![paper_cogview_sandwich.png](images/paper_cogview_sandwich.png)
+![normformer.png](images/normformer.png)
+
+Testing it in this codebase gives similar results to those of NormFormer, showing that SandwichLN converges
+significantly better than PreNorm, reaching lower losses in less time.
+![sandwich.png](images/sandwich.png)
+
+Additionally, [RMSNorm](https://arxiv.org/abs/1910.07467), as used by
+DeepMind's [Gopher-280B](https://arxiv.org/abs/2112.11446), decreases the loss by another
+3% when comparing step by step. ![rmsnorm_loss.png](images/rmsnorm_loss.png)
+Additionally, RMSNorm is significantly simpler and less expensive than LayerNorm,
+as `RMSNorm(x, scale) = x / Sqrt(Sum(Square(x))) * scale` and
+`LayerNorm(x, scale, shift) = (x - Mean(x)) / (Mean(Square(x)) - Square(Mean(x))) * scale + shift`. So, even though
+normalization takes up only a small fraction of the total runtime, replacing it with RMSNorm yields an immediate 27%
+speedup for both training and inference.
+![rmsnorm_speed.png](images/rmsnorm_speed.png)
+
+#### MoE
+
+### Optimizer
+
+#### Shampoo
+
+#### Adaptive Gradient Clipping
 
 ## Getting Started
 
