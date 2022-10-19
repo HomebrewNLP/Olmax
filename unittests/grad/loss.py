@@ -43,7 +43,6 @@ def statistics(name: str, var: jnp.ndarray):
         print(f"{name}: max={vmax}, min={vmin}, mean={vmean}, std={vstd}")
 
 
-@pytest.mark.parametrize("samples", sample_sizes)
 def general_value_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
     ctx.dims.vocab = vocab
@@ -57,7 +56,6 @@ def general_value_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-
         assert np.isclose(grad0, grad1)
 
 
-@pytest.mark.parametrize("samples", sample_sizes)
 def general_grad_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W0640
     ctx, tgt, randn = initialize(z_loss, samples)
     ctx.dims.vocab = vocab
@@ -100,5 +98,6 @@ def test_z_loss_grad(z_loss: float, samples: int):
 
 
 @pytest.mark.parametrize("vocab", [256, 65536])
+@pytest.mark.parametrize("samples", sample_sizes)
 def test_z_loss_grad(vocab: int, samples: int):
     general_grad_test(0.01, samples, vocab)
