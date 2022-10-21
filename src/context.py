@@ -1,8 +1,8 @@
+import collections
 import copy
 import os
 import typing
 
-import jax
 import yaml
 from jax import numpy as jnp, random
 
@@ -196,8 +196,10 @@ class Context(DataClass):
         self.name_cache: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_variance: typing.Dict[str, float] = {}
+        self.parameter_usages: typing.Dict[str, int] = collections.defaultdict(int)
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
+        self.fail_on_missing_parameter = True
         self.add_depth = False
 
     def add_to_prefix(self, appended="", count=True):

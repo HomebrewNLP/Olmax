@@ -52,7 +52,7 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
-                   weight: typing.Union[bool, None, jnp.ndarray] = False,
+                   weight: typing.Union[bool, None, jnp.ndarray] = None,
                    psum: bool = False, act: bool = True) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:

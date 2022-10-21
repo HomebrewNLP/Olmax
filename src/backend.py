@@ -136,10 +136,11 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         computation_dtype = dtype
         storage_dtype = dtype
 
+    ctx.parameter_usages[prefix_name] += 1
     if prefix_name in ctx.parameters:
         return ctx.parameters[prefix_name].astype(computation_dtype)
 
-    if not ctx.is_initializing:
+    if not ctx.is_initializing and ctx.fail_on_missing_parameter:
         raise ValueError(f"Couldn't find parameter {prefix_name}. {ctx.name_cache=}")
 
     if init_val is not None:
