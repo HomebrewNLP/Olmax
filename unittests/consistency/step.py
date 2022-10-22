@@ -29,7 +29,7 @@ def replicate(x: typing.Any) -> typing.Any:
 
 
 def pmap(config: typing.Optional[typing.Dict[str, typing.Any]]):
-    wctx, ctx = get_wctx()
+    _, ctx = get_wctx()
     src = replicate(jnp.zeros((ctx.dims.batch, ctx.dims.sequence), dtype=jnp.int32))
     name_cache = {}
     parameter_usages = {}
@@ -52,7 +52,8 @@ class BaseTest:
         self.export1, self.name_cache1, self.usages1 = pmap(None)
         self.export2, self.name_cache2, self.usages2 = pmap(self.export1.serialize())
 
-    def check(self, dict1: typing.Dict[str, typing.Any], dict2: typing.Dict[str, typing.Any],
+    @staticmethod
+    def check(dict1: typing.Dict[str, typing.Any], dict2: typing.Dict[str, typing.Any],
               cond: typing.Callable[[str, typing.Any, typing.Dict[str, typing.Any]], bool]):
         wrong_in_1 = [k for k, v in dict1.items() if cond(k, v, dict2)]
         wrong_in_2 = [k for k, v in dict2.items() if cond(k, v, dict1)]

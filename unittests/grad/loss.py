@@ -87,7 +87,7 @@ def test_z_loss_value(z_loss: float, samples: int):
 
 
 @pytest.mark.parametrize("vocab", [256, 65536])
-def test_z_loss_value(vocab: int, samples: int):
+def test_vocab_value(vocab: int, samples: int):
     general_value_test(0.01, samples, vocab)
 
 
@@ -99,5 +99,5 @@ def test_z_loss_grad(z_loss: float, samples: int):
 
 @pytest.mark.parametrize("vocab", [256, 65536])
 @pytest.mark.parametrize("samples", sample_sizes)
-def test_z_loss_grad(vocab: int, samples: int):
+def test_vocab_grad(vocab: int, samples: int):
     general_grad_test(0.01, samples, vocab)
