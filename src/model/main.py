@@ -37,10 +37,10 @@ def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
         src = reversible(ctx, dense_moe, src)
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, mix, src, depth)
+        name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src[0]
         ctx.parameters = original_parameters
-        name_cache.update(ctx.name_cache)
         return src[1:], None
 
     return _fn

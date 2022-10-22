@@ -42,7 +42,7 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
     std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm.power).sum(-1, keepdims=True), ctx.model.norm.eps,
                        ctx.model.norm.power)
     norm_out = src_fp64 * std
-    out = norm_out * wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+    out = norm_out * wgt
     if act:
         out = activate_forward(out)
     out = out.astype(original_dtype)
@@ -51,11 +51,14 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
 
 
 @with_context()
-def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typing.Optional[jnp.ndarray] = None,
+def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
+                   weight: typing.Union[bool, None, jnp.ndarray] = None,
                    psum: bool = False, act: bool = True) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
+    elif weight is False:
+        weight = 1
 
     if ctx.is_initializing:
         return inp
@@ -63,16 +66,23 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int, weight: typ
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
-        out, new_src, std = norm_forward(ctx, src, wgt, psum, act)
+        if isinstance(wgt, jnp.ndarray):
+            reshaped_weight = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+        else:
+            reshaped_weight = wgt
+
+        out, new_src, std = norm_forward(ctx, src, reshaped_weight, psum, act)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             src_fp64 = promote_to(new_src, run_type)
             norm_out = src_fp64 * std
-            reshaped_weight = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
             dy = promote_to(dy, run_type)
             if act:
                 dy = dy * activate_grad(norm_out * reshaped_weight)
-            d_wgt = (dy * norm_out).sum(list(range(src.ndim - 1))).reshape((-1,))
+            if isinstance(wgt, jnp.ndarray):
+                d_wgt = (dy * norm_out).sum(list(range(src.ndim - 1))).reshape((-1,))
+            else:
+                d_wgt = None
             dy = dy * reshaped_weight
 
             d_std = (dy * src_fp64).sum(-1, keepdims=True)  # broadcast forward -> sum backward
