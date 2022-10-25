@@ -73,7 +73,7 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
         original_src = src
         src: FourArrays = tuple(c[:, ::pool] for c in src)
         if ctx.is_initializing:
-            ctx.parameters = pooled_block(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.in32)))
+            ctx.parameters = pooled_block(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
         else:
             own_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and p.startswith(ctx.global_prefix)}
             params = {p: k for p, k in own_params.items() if is_stacked(p)}
