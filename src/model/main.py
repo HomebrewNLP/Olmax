@@ -1,4 +1,5 @@
 import typing
+import warnings
 
 import jax
 from jax import lax, numpy as jnp
@@ -24,7 +25,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
+def pooled_block(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
     name_cache = ctx.name_cache
 
     def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
@@ -46,18 +47,49 @@ def step(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
     return _fn
 
 
+@with_context()
+def stem(ctx: Context, src: FourArrays) -> FourArrays:
+    cases = ctx.dims.depth // 2
+    original_kernel = ctx.dims.spatial_mixing_kernel
+    original_depth = ctx.dims.depth
+    ctx.add_depth = ctx.is_initializing
+    for i in range(-cases, cases):
+        i = cases - 1 - (abs(i) + int(i < 0))  # range(-2, 2) == [-2, -1, 0, 1]  ->  [0, 1, 1, 0]
+        ctx = ctx.add_to_prefix(f"group_type{i}")
+        pool = ctx.dims.depth = 2 ** i
+        pooled = ctx.dims.sequence // pool
+
+        if pooled < 128:
+            warnings.warn(f"Pooled sequence length ({pooled}) with {ctx.dims.sequence=}, {pool=} and {i=} is below "
+                          f"minimum (128). Increasing pooling, but perhaps increase sequence length?")
+            pool = ctx.dims.depth = ctx.dims.sequence // 128
+            pooled = 128
+        if pooled < ctx.dims.spatial_mixing_kernel:
+            warnings.warn(f"Pooled sequence length ({pooled}) with {ctx.dims.sequence=}, {pool=} and {i=} is below "
+                          f"{ctx.dims.spatial_mixing_kernel=}. Decreasing spatial_mixing_kernel, but perhaps increase "
+                          f"sequence length?")
+            ctx.dims.spatial_mixing_kernel = pooled
+
+        original_src = src
+        src: FourArrays = tuple(c[:, ::pool] for c in src)
+        if ctx.is_initializing:
+            ctx.parameters = pooled_block(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.in32)))
+        else:
+            own_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and p.startswith(ctx.global_prefix)}
+            params = {p: k for p, k in own_params.items() if is_stacked(p)}
+            shared = {p: k for p, k in own_params.items() if not is_stacked(p)}
+            src, _ = lax.scan(pooled_block(ctx, shared), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
+        src: FourArrays = tuple(oc.at[:, ::pool].add(c) for c, oc in zip(src, original_src))
+        ctx.dims.spatial_mixing_kernel = original_kernel
+    ctx.dims.depth = original_depth
+    ctx.add_depth = False
+    return src
+
+
 def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
-    src = (src, zero, src, zero)
-    if ctx.is_initializing:
-        ctx.add_depth = True
-        ctx.parameters = step(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
-        ctx.add_depth = False
-    else:
-        params = {p: k for p, k in ctx.parameters.items() if is_stacked(p)}
-        shared_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and not is_stacked(p)}
-        src, _ = lax.scan(step(ctx, shared_params), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
+    src = stem(ctx, (src, zero, src, zero))
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False, weight=False)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())

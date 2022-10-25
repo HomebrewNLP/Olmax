@@ -133,6 +133,7 @@ class Normalization(DataClass):
 
 
 class Model(DataClass):
+    maximum_pool_factor: int = 1024
     norm: Normalization = Normalization()
     autoregressive: bool = True
     unroll_depth: int = 1

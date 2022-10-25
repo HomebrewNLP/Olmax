@@ -116,7 +116,6 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.storage_dtype)
 
 
-
 def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None,
               std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
@@ -168,6 +167,9 @@ def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1)
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
 
 
-def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[], jnp.ndarray]], cases: int, predicate: jnp.ndarray,
-                  base: jnp.ndarray):
+input = typing.TypeVar("input")
+
+
+def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[input], jnp.ndarray]], cases: int,
+                  predicate: jnp.ndarray, base: input):
     return lax.switch(predicate % cases, [gen_fn(i) for i in range(cases)], base)
