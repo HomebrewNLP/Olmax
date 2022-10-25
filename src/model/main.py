@@ -54,7 +54,7 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
     original_depth = ctx.dims.depth
     ctx.add_depth = ctx.is_initializing
     for i in range(-cases, cases):
-        i = cases - 1 - (abs(i) + int(i < 0))  # range(-2, 2) == [-2, -1, 0, 1]  ->  [0, 1, 1, 0]
+        i = cases - 1 - (abs(i) - int(i < 0))  # range(-2, 2) == [-2, -1, 0, 1]  ->  [0, 1, 1, 0]
         ctx = ctx.add_to_prefix(f"group_type{i}")
         pool = ctx.dims.depth = 2 ** i
         pooled = ctx.dims.sequence // pool
