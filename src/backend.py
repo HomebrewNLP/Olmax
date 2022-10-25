@@ -140,11 +140,9 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         if init_val is not None:
             param = init_val * scale * post_variance_scale
         elif std is None and mean is None:
+            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
             if add_depth:
-                param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
-                                   range(ctx.dims.depth)], 0)
-            else:
-                param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+                param = jnp.stack([param for _ in range(ctx.dims.depth)], 0)
             param *= scale * post_variance_scale
         else:
             param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
