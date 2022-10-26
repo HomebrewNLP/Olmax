@@ -194,4 +194,4 @@ input = typing.TypeVar("input")
 
 def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[input], jnp.ndarray]], cases: int,
                   predicate: jnp.ndarray, base: input):
-    return lax.switch(predicate % cases, [gen_fn(i) for i in range(cases)], base)
+    return lax.switch(predicate.astype(jnp.int32) % cases, [gen_fn(i) for i in range(cases)], base)
