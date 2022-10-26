@@ -47,51 +47,81 @@ def pooled_block(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
     return _fn
 
 
-@with_context()
-def stem(ctx: Context, src: FourArrays) -> FourArrays:
-    cases = ctx.dims.depth // 2
-    original_kernel = ctx.dims.spatial_mixing_kernel
-    original_depth = ctx.dims.depth
-    ctx.add_depth = ctx.is_initializing
+def pool_schedule(ctx: Context):
+    cases = ctx.dims.up_down // 2
+    schedule = []
     for i in range(-cases, cases):
         i = cases - 1 - (abs(i) - int(i < 0))  # range(-2, 2) == [-2, -1, 0, 1]  ->  [0, 1, 1, 0]
-        pool = ctx.dims.depth = 2 ** i
+        pool = 2 ** i
         pooled = ctx.dims.sequence // pool
 
         if jax.default_backend() == "tpu" and pooled < 128:
             warnings.warn(f"Pooled sequence length ({pooled}) with {ctx.dims.sequence=}, {pool=} and {i=} is below "
                           f"minimum (128). Decreasing pooling, but perhaps increase sequence length?")
-            pool = ctx.dims.depth = ctx.dims.sequence // 128
+            pool = ctx.dims.up_down = ctx.dims.sequence // 128
             pooled = 128
         if pooled < jax.device_count():
             warnings.warn(f"Pooled sequence length ({pooled}) with {ctx.dims.sequence=}, {pool=} and {i=} is below "
                           f"the number of devices ({jax.device_count()}), which is necessary for MoE's all-to-all."
                           f"Decreasing pooling, but perhaps increase sequence length?")
-            pool = ctx.dims.depth = ctx.dims.sequence // jax.device_count()
+            pool = ctx.dims.up_down = ctx.dims.sequence // jax.device_count()
             pooled = jax.device_count()
         if pooled < ctx.dims.spatial_mixing_kernel:
             warnings.warn(f"Pooled sequence length ({pooled}) with {ctx.dims.sequence=}, {pool=} and {i=} is below "
                           f"{ctx.dims.spatial_mixing_kernel=}. Decreasing spatial_mixing_kernel, but perhaps increase "
                           f"sequence length?")
             ctx.dims.spatial_mixing_kernel = pooled
+        schedule.append(pool)
+    return schedule
 
-        original_src = src
-        src: FourArrays = tuple(c[:, ::pool] for c in src)
+
+@with_context()
+def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
+    def _fn(src: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
+        ctx.parameters, depth = inp
+        original_kernel = ctx.dims.spatial_mixing_kernel
+        original_depth = ctx.dims.up_down
+        ctx.add_depth = ctx.is_initializing
+        for i, pool in enumerate(pool_schedule(ctx)):
+            ctx.dims.up_down = pool
+            original_src = src
+            src: FourArrays = tuple(c[:, ::pool] for c in src)
+            if ctx.is_initializing:
+                ctx.parameters, *src = pooled_block(ctx, shared)(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
+                if i == 0:
+                    ctx.name_cache_offsets = ctx.name_cache.copy()
+            else:
+                params = {p: k for p, k in ctx.parameters.items() if is_stacked(p) and k.shape[0] == ctx.dims.up_down}
+                src, _ = lax.scan(pooled_block(ctx, shared), src, (params, jnp.arange(ctx.dims.up_down)),
+                                  ctx.dims.up_down)
+                if i == 0:
+                    ctx.name_cache_offsets = ctx.name_cache.copy()
+            src: FourArrays = tuple(oc.at[:, ::pool].add(c.astype(oc.dtype)) for c, oc in zip(src, original_src))
+            ctx.dims.spatial_mixing_kernel = original_kernel
+        ctx.dims.up_down = original_depth
+        ctx.add_depth = False
         if ctx.is_initializing:
-            ctx.parameters, *src = pooled_block(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
-            if i == 0:
-                ctx.name_cache_offsets = ctx.name_cache.copy()
-        else:
-            own_params = {p: k for p, k in ctx.parameters.items() if is_model(p)}
-            params = {p: k for p, k in own_params.items() if is_stacked(p) and k.shape[0] == ctx.dims.depth}
-            shared = {p: k for p, k in own_params.items() if not is_stacked(p)}
-            src, _ = lax.scan(pooled_block(ctx, shared), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
-            if i == 0:
-                ctx.name_cache_offsets = ctx.name_cache.copy()
-        src: FourArrays = tuple(oc.at[:, ::pool].add(c.astype(oc.dtype)) for c, oc in zip(src, original_src))
-        ctx.dims.spatial_mixing_kernel = original_kernel
-    ctx.dims.depth = original_depth
-    ctx.add_depth = False
+            return ctx.parameters
+        return src, None
+
+    return _fn
+
+
+@with_context()
+def stem(ctx: Context, src: FourArrays) -> FourArrays:
+    if ctx.is_initializing:
+        ctx.parameters = unet(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
+        for k, v in ctx.parameters.items():
+            if is_stacked(k):
+                ctx.parameters[k] = jnp.stack([v] * ctx.dims.depth)
+        return src
+
+    params = {k: v for k, v in ctx.parameters.items() if is_model(k)}
+    shared = {k: v for k, v in params.items() if not is_stacked(k)}
+    params = {k: v for k, v in params.items() if is_stacked(k)}
+    schedule_length = sum(pool_schedule(ctx))
+    depths = jnp.arange(0, ctx.dims.depth * schedule_length, schedule_length)
+    src, _ = lax.scan(unet(ctx, shared), src, (params, depths), ctx.dims.depth)
     return src
 
 

@@ -80,7 +80,8 @@ class Dims(DataClass):
     pointwise_features: int = 512
     moe_intermediate: int = 4096
     sequence: int = 4096
-    depth: int = 16
+    depth: int = 8
+    up_down: int = 2
     vocab: int = 256
 
     def __getitem__(self, item: str):
@@ -203,6 +204,7 @@ class Context(DataClass):
         self.is_initializing = False
         self.fail_on_missing_parameter = True
         self.add_depth = False
+        self.depth = 0
 
     def add_to_prefix(self, appended="", count=True):
         new = copy.copy(self)
