@@ -150,7 +150,8 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
                     break
                 if len(k_s) == 1:
                     continue
-                if k_key in ctx.name_cache_offsets and (int(n_s[1]) - int(k_s[1])) % ctx.name_cache_offsets[k_key] == 0:
+                offset = ctx.name_cache_offsets
+                if k_key in offset and (int(n_s[1]) - int(k_s[1])) % (1 + offset[k_key]) == 0:
                     continue
                 matched = False
                 break
