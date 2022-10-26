@@ -27,10 +27,10 @@ def all_to_all(ctx: Context, x: jnp.ndarray, split_axis: int, concat_axis: int) 
 def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     devices = jax.device_count()
     big_params = devices * ctx.dims.inner_bottleneck_features
-    sequence_slice = ctx.dims.sequence // devices
-    batch = inp.shape[0]
+    batch, sequence, features = inp.shape
+    sequence_slice = sequence // devices
 
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features, ctx.dims.inner_bottleneck_features)
+    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, features, ctx.dims.inner_bottleneck_features)
 
     # [Batch, Sequence, Features]  ->  [Batch, SequenceSlice, Features * Devices]
     # In essence, 1) Collect features from all devices + 2) Drop unused sequence elements
@@ -48,6 +48,6 @@ def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if not ctx.is_initializing:
         inp = inp.reshape(batch, sequence_slice, 1, big_params)
         inp = all_to_all(ctx, inp, 3, 2)
-        inp = inp.reshape(batch, ctx.dims.sequence, ctx.dims.inner_bottleneck_features)
+        inp = inp.reshape(batch, sequence, ctx.dims.inner_bottleneck_features)
 
-    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, ctx.dims.features)
+    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, features)

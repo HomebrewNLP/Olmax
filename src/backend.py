@@ -54,7 +54,7 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
 
 
 def is_model(param_name: str):
-    return "/step:" in param_name and '/optimizer' not in param_name
+    return "/stem:" in param_name and '/optimizer' not in param_name
 
 
 def is_stacked(param_name: str):

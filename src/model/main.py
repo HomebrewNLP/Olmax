@@ -40,7 +40,7 @@ def pooled_block(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
         src = reversible(ctx, mix, src, depth)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
-            return src[0]
+            return src
         ctx.parameters = original_parameters
         return src[1:], None
 
@@ -53,13 +53,12 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
     original_kernel = ctx.dims.spatial_mixing_kernel
     original_depth = ctx.dims.depth
     ctx.add_depth = ctx.is_initializing
-    shared = {}
     for i in range(-cases, cases):
         i = cases - 1 - (abs(i) - int(i < 0))  # range(-2, 2) == [-2, -1, 0, 1]  ->  [0, 1, 1, 0]
         pool = ctx.dims.depth = 2 ** i
         pooled = ctx.dims.sequence // pool
 
-        if pooled < 128:
+        if jax.default_backend() == "tpu" and pooled < 128:
             warnings.warn(f"Pooled sequence length ({pooled}) with {ctx.dims.sequence=}, {pool=} and {i=} is below "
                           f"minimum (128). Decreasing pooling, but perhaps increase sequence length?")
             pool = ctx.dims.depth = ctx.dims.sequence // 128
@@ -79,17 +78,17 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
         original_src = src
         src: FourArrays = tuple(c[:, ::pool] for c in src)
         if ctx.is_initializing:
-            ctx.parameters = pooled_block(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
+            ctx.parameters, *src = pooled_block(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
             if i == 0:
                 ctx.name_cache_offsets = ctx.name_cache.copy()
         else:
-            own_params = {p: k for p, k in ctx.parameters.items() if is_model(p) and p.startswith(ctx.global_prefix)}
-            params = {p: k for p, k in own_params.items() if is_stacked(p)}
+            own_params = {p: k for p, k in ctx.parameters.items() if is_model(p)}
+            params = {p: k for p, k in own_params.items() if is_stacked(p) and k.shape[0] == ctx.dims.depth}
             shared = {p: k for p, k in own_params.items() if not is_stacked(p)}
             src, _ = lax.scan(pooled_block(ctx, shared), src, (params, jnp.arange(ctx.dims.depth)), ctx.dims.depth)
             if i == 0:
                 ctx.name_cache_offsets = ctx.name_cache.copy()
-        src: FourArrays = tuple(oc.at[:, ::pool].add(c) for c, oc in zip(src, original_src))
+        src: FourArrays = tuple(oc.at[:, ::pool].add(c.astype(oc.dtype)) for c, oc in zip(src, original_src))
         ctx.dims.spatial_mixing_kernel = original_kernel
     ctx.dims.depth = original_depth
     ctx.add_depth = False
