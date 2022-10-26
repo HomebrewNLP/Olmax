@@ -143,12 +143,14 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         for k, v in ctx.parameters.items():
             matched = True
             for k_part, name_part in zip(k.split('/'), prefix_name.split('/')):
-                k_s = k_part.split(':')
-                n_s = name_part.split(':')
-                if k_s[0] != n_s[0] or len(k_s) != len(n_s):
+                k_s, n_s = k_part.split(':'), name_part.split(':')
+                k_key, n_key = k_s[0], n_s[0]
+                if k_key != n_key or len(k_s) != len(n_s):
                     matched = False
                     break
-                if len(k_part.split(':')) == 1 or (int(n_s[1]) - int(k_s[1])) % ctx.name_cache_offsets[k_s[0]] == 0:
+                if len(k_s) == 1:
+                    continue
+                if k_key in ctx.name_cache_offsets and (int(n_s[1]) - int(k_s[1])) % ctx.name_cache_offsets[k_key] == 0:
                     continue
                 matched = False
                 break
