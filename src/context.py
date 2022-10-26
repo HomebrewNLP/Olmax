@@ -195,6 +195,7 @@ class Context(DataClass):
         self.global_prefix = ''
 
         self.name_cache: typing.Dict[str, int] = {}
+        self.name_cache_offsets: typing.Dict[str, int] = {}
         self.parameters: typing.Dict[str, jnp.ndarray] = {}
         self.parameter_variance: typing.Dict[str, float] = {}
         self.parameter_usages: typing.Dict[str, int] = collections.defaultdict(int)

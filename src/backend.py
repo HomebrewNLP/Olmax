@@ -136,24 +136,45 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         computation_dtype = dtype
         storage_dtype = dtype
 
-    if prefix_name not in ctx.parameters:
-        if init_val is not None:
-            param = init_val * scale * post_variance_scale
-        elif std is None and mean is None:
-            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
-            if add_depth:
-                param = jnp.stack([param for _ in range(ctx.dims.depth)], 0)
-            param *= scale * post_variance_scale
+    ctx.parameter_usages[prefix_name] += 1
+    if prefix_name in ctx.parameters:
+        return ctx.parameters[prefix_name].astype(computation_dtype)
+    if tied:
+        for k, v in ctx.parameters.items():
+            matched = True
+            for k_part, name_part in zip(k.split('/'), prefix_name.split('/')):
+                k_s = k_part.split(':')
+                n_s = name_part.split(':')
+                if k_s[0] != n_s[0] or len(k_s) != len(n_s):
+                    matched = False
+                    break
+                if len(k_part.split(':')) == 1 or (int(n_s[1]) - int(k_s[1])) % ctx.name_cache_offsets[k_s[0]] == 0:
+                    continue
+                matched = False
+                break
+            if matched:
+                return v.astype(computation_dtype)
+
+    if not ctx.is_initializing and ctx.fail_on_missing_parameter:
+        raise ValueError(f"Couldn't find parameter {prefix_name}. {ctx.name_cache=}")
+
+    if init_val is not None:
+        param = init_val * scale * post_variance_scale
+    elif std is None and mean is None:
+        if add_depth:
+            param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
+                               range(ctx.dims.depth)], 0)
         else:
-            param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
-            if std is not None:
-                param *= std
-            if mean is not None:
-                param += mean
-        ctx.parameter_variance[prefix_name] = lr_scale * scale
-        param = param.astype(storage_dtype)
-        assign(ctx, name, param)
-    param = ctx.parameters[prefix_name]
+            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+        param *= scale * post_variance_scale
+    else:
+        param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
+        if std is not None:
+            param *= std
+        if mean is not None:
+            param += mean
+    ctx.parameter_variance[prefix_name] = lr_scale * scale
+    assign(ctx, name, param.astype(storage_dtype))
     return param.astype(computation_dtype)
 
 
