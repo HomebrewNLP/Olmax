@@ -4,7 +4,7 @@ import warnings
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, is_model, is_stacked, with_context
+from src.backend import get_param, is_model, is_stacked, normal, with_context
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
@@ -75,20 +75,6 @@ def pool_schedule(ctx: Context):
     return schedule
 
 
-def merge(original: FourArrays, src: FourArrays, pool: int):
-    @jax.custom_gradient
-    def _fn(x: FourArrays, y: FourArrays):
-        def _grad(dy: FourArrays):
-            return dy, [i[::pool] for i in dy]
-
-        out = list(x)  # [x00 (fwd input), x01 (bwd input), x10 (fwd input), x11 (bwd input)]
-        out[0] = out[0].at[:, ::pool].add(y[0].astype(out[0].dtype))
-        out[2] = out[2].at[:, ::pool].add(y[2].astype(out[2].dtype))
-        return tuple(out), _grad
-
-    return _fn(original, src)
-
-
 @with_context()
 def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
     def _fn(src: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
@@ -137,7 +123,8 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
         ctx.parameters = unet(ctx, {})(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
         for k, v in ctx.parameters.items():
             if is_stacked(k):
-                ctx.parameters[k] = jnp.stack([v] * ctx.dims.depth)
+                new = normal(ctx, [ctx.dims.depth] + list(v.shape))
+                ctx.parameters[k] = (new * v.std() + v.mean()).astype(ctx.model.storage_dtype)
         return src
 
     params = {k: v for k, v in ctx.parameters.items() if is_model(k)}
