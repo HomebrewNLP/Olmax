@@ -14,6 +14,7 @@ Output = typing.TypeVar("Output")
 CtxFn = typing.TypeVar("CtxFn")
 
 PRECISION = lax.Precision.HIGHEST
+jax.config.update("jax_default_matmul_precision", PRECISION.name)
 
 
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
