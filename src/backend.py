@@ -13,6 +13,8 @@ INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 Output = typing.TypeVar("Output")
 CtxFn = typing.TypeVar("CtxFn")
 
+PRECISION = "fastest"
+
 
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
@@ -66,7 +68,7 @@ def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tupl
     lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
     dimension_numbers = lax.ConvDimensionNumbers(lhs, (0, ndim - 1,) + tuple(range(1, ndim - 1)), lhs)
     return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
-                                    dimension_numbers=dimension_numbers, precision='fastest')
+                                    dimension_numbers=dimension_numbers, precision=PRECISION)
 
 
 def device_id():
@@ -77,7 +79,7 @@ def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE,
         left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jnp.ndarray:
     dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
             (pos_dim(left, tuple_int(left_batch_dims)), pos_dim(right, tuple_int(right_batch_dims))))
-    return lax.dot_general(left, right, dims, "fastest")
+    return lax.dot_general(left, right, dims, PRECISION)
 
 
 def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
