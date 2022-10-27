@@ -99,9 +99,10 @@ def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
         for i, pool in enumerate(pool_schedule(ctx)):
             ctx.dims.up_down = pool
 
-            src = tuple(s.reshape(ctx.dims.batch, -1, pool, ctx.dims.features) for s in src)
-            original_src = tuple(s[:, :, 1:] for s in src)
-            src: FourArrays = tuple(s[:, :, 0] for s in src)
+            if pool > 1:
+                src = tuple(s.reshape(ctx.dims.batch, -1, pool, ctx.dims.features) for s in src)
+                original_src = tuple(s[:, :, 1:] for s in src)
+                src: FourArrays = tuple(s[:, :, 0] for s in src)
             if ctx.is_initializing:
                 ctx.parameters, *src = pooled_block(ctx, shared)(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
                 if i == 0:
@@ -112,8 +113,9 @@ def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
                                   ctx.dims.up_down)
                 if i == 0:
                     ctx.name_cache_offsets = ctx.name_cache.copy()
-            src = tuple(jnp.concatenate([s, os], 2).reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
-                        for s, os in zip(src, original_src))
+            if pool > 1:
+                src = tuple(jnp.concatenate([s, os], 2).reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
+                            for s, os in zip(src, original_src))
             ctx.dims.spatial_mixing_kernel = original_kernel
         ctx.dims.up_down = original_depth
         ctx.add_depth = False
