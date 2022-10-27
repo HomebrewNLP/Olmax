@@ -13,7 +13,7 @@ INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 Output = typing.TypeVar("Output")
 CtxFn = typing.TypeVar("CtxFn")
 
-PRECISION = "fastest"
+PRECISION = "bfloat16_3x"   # fastest/default, bfloat16_3x/high, float32/highest
 
 
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
@@ -66,6 +66,7 @@ def is_stacked(param_name: str):
 def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
     ndim = weight.ndim
     lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
+    jax.lax.Precision
     dimension_numbers = lax.ConvDimensionNumbers(lhs, (0, ndim - 1,) + tuple(range(1, ndim - 1)), lhs)
     return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
                                     dimension_numbers=dimension_numbers, precision=PRECISION)
