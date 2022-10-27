@@ -114,8 +114,13 @@ def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
                 if i == 0:
                     ctx.name_cache_offsets = ctx.name_cache.copy()
             if pool > 1:
-                src = tuple(jnp.concatenate([s, os], 2).reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
-                            for s, os in zip(src, original_src))
+                src = []
+                for s, os in zip(src, original_src):
+                    s = s.reshape(ctx.dims.batch, -1, 1, ctx.dims.features)  # [Batch,Pooled,Feat]  --> [B,P,1,F]
+                    concat = jnp.concatenate([s, os], 2)  # [B,P,1,F] + [B,P,PoolFactor - 1,F] --> [B,P,PF,F]
+                    out = concat.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)  # [B,P,PF,F] --> [B,S,F]
+                    src.append(out)
+                src = tuple(src)
             ctx.dims.spatial_mixing_kernel = original_kernel
         ctx.dims.up_down = original_depth
         ctx.add_depth = False
