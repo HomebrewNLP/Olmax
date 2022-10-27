@@ -13,7 +13,7 @@ INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 Output = typing.TypeVar("Output")
 CtxFn = typing.TypeVar("CtxFn")
 
-PRECISION = lax.Precision.HIGH
+PRECISION = lax.Precision.HIGHEST
 
 
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
