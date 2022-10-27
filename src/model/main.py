@@ -75,6 +75,20 @@ def pool_schedule(ctx: Context):
     return schedule
 
 
+def merge(original: FourArrays, src: FourArrays, pool: int):
+    @jax.custom_gradient
+    def _fn(x: FourArrays, y: FourArrays):
+        def _grad(dy: FourArrays):
+            return dy, [i[::pool] for i in dy]
+
+        out = list(x)  # [x00 (fwd input), x01 (bwd input), x10 (fwd input), x11 (bwd input)]
+        out[0] = out[0].at[:, ::pool].add(y[0].astype(out[0].dtype))
+        out[2] = out[2].at[:, ::pool].add(y[2].astype(out[2].dtype))
+        return tuple(out), _grad
+
+    return _fn(original, src)
+
+
 @with_context()
 def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
     def _fn(src: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
@@ -84,8 +98,10 @@ def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
         ctx.add_depth = ctx.is_initializing
         for i, pool in enumerate(pool_schedule(ctx)):
             ctx.dims.up_down = pool
-            original_src = src
-            src: FourArrays = tuple(c[:, ::pool] for c in src)
+
+            src = tuple(s.reshape(ctx.dims.batch, -1, pool, ctx.dims.features) for s in src)
+            original_src = tuple(s[:, :, 1:] for s in src)
+            src: FourArrays = tuple(s[:, :, 0] for s in src)
             if ctx.is_initializing:
                 ctx.parameters, *src = pooled_block(ctx, shared)(src, (ctx.parameters, jnp.zeros([], dtype=jnp.int32)))
                 if i == 0:
@@ -96,7 +112,8 @@ def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
                                   ctx.dims.up_down)
                 if i == 0:
                     ctx.name_cache_offsets = ctx.name_cache.copy()
-            src: FourArrays = tuple(oc.at[:, ::pool].add(c.astype(oc.dtype)) for c, oc in zip(src, original_src))
+            src = tuple(jnp.concatenate([s, os], 2).reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
+                        for s, os in zip(src, original_src))
             ctx.dims.spatial_mixing_kernel = original_kernel
         ctx.dims.up_down = original_depth
         ctx.add_depth = False
