@@ -95,7 +95,7 @@ def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
                     ctx.name_cache_offsets = ctx.name_cache.copy()
             else:
                 params = {p: k for p, k in ctx.parameters.items() if is_stacked(p) and k.shape[0] == ctx.dims.up_down}
-                src, _ = lax.scan(pooled_block(ctx, shared), src, (params, jnp.arange(ctx.dims.up_down)),
+                src, _ = lax.scan(pooled_block(ctx, shared), src, (params, depth + jnp.arange(ctx.dims.up_down)),
                                   ctx.dims.up_down)
                 if i == 0:
                     ctx.name_cache_offsets = ctx.name_cache.copy()
@@ -108,6 +108,7 @@ def unet(ctx: Context, shared: typing.Dict[str, jnp.ndarray]):
                     new_src.append(out)
                 src = tuple(new_src)
             ctx.dims.spatial_mixing_kernel = original_kernel
+            depth += pool
         ctx.dims.up_down = original_depth
         ctx.add_depth = False
         if ctx.is_initializing:
