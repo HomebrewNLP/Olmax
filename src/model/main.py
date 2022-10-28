@@ -154,7 +154,7 @@ def single_forward(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray
     ctx.parameters = params
     src, tgt = inp
     out = body_ctx(ctx, src)
-    return (out,) + cross_entropy_loss(ctx, out, tgt)
+    return (out[0],) + cross_entropy_loss(ctx, out, tgt)
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray
