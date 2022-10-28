@@ -29,11 +29,14 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
         def _fn(x: jnp.ndarray):
             batch = max(sequence // ctx.dims.spatial_mixing_kernel ** (current_depth % max_dims + 1), 1)
             out = x.reshape(original_batch * batch, ctx.dims.spatial_mixing_kernel, -1)
+            inner_batch, inner_sequence, inner_features = out.shape
 
             # Shape[Batch, Sequence, Features] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
             out = dot(out,  wgt0, left_contract_dims=(1,), right_contract_dims=(0,))
 
+            out = out.reshape(inner_batch, ctx.dims.features, -1)
             out = scale_norm_act(ctx, out, ctx.dims.features, weight=scale, add_to_prefix=False, dim=1)
+            out = out.reshape(inner_sequence, inner_features, inner_sequence)
 
             # Shape[Batch, Features, Sequence] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
             out = dot(out, wgt1, left_contract_dims=(2,), right_contract_dims=(0,))
