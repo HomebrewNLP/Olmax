@@ -73,7 +73,6 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         ctx.parameter_variance = {}
         return params, lax.pmean(var, ParallelAxes.model)
 
-    inp = jnp.broadcast_to(inp, (len(jax.local_devices()),) + inp.shape)
     pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=(0,), out_axes=(0, 0), donate_argnums=(0,))
     ctx.parameters, variance = pmapped(inp)
     ctx.parameter_variance = {name: var.mean() for name, var in variance.items()}

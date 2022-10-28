@@ -13,6 +13,9 @@ INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
 Output = typing.TypeVar("Output")
 CtxFn = typing.TypeVar("CtxFn")
 
+PRECISION = "highest"
+jax.config.update("jax_default_matmul_precision", PRECISION)
+
 
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
@@ -54,7 +57,7 @@ def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
 
 
 def is_model(param_name: str):
-    return "/step:" in param_name and '/optimizer' not in param_name
+    return "/stem:" in param_name and '/optimizer' not in param_name
 
 
 def is_stacked(param_name: str):
@@ -66,7 +69,7 @@ def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tupl
     lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
     dimension_numbers = lax.ConvDimensionNumbers(lhs, (0, ndim - 1,) + tuple(range(1, ndim - 1)), lhs)
     return lax.conv_general_dilated(inp, weight, (1,) * (ndim - 2), padding=padding, feature_group_count=groups,
-                                    dimension_numbers=dimension_numbers, precision='fastest')
+                                    dimension_numbers=dimension_numbers, precision=PRECISION)
 
 
 def device_id():
@@ -77,7 +80,7 @@ def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE,
         left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jnp.ndarray:
     dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
             (pos_dim(left, tuple_int(left_batch_dims)), pos_dim(right, tuple_int(right_batch_dims))))
-    return lax.dot_general(left, right, dims, "fastest")
+    return lax.dot_general(left, right, dims, PRECISION)
 
 
 def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
@@ -139,6 +142,24 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     ctx.parameter_usages[prefix_name] += 1
     if prefix_name in ctx.parameters:
         return ctx.parameters[prefix_name].astype(computation_dtype)
+    if tied:
+        for k, v in ctx.parameters.items():
+            matched = True
+            for k_part, name_part in zip(k.split('/'), prefix_name.split('/')):
+                k_s, n_s = k_part.split(':'), name_part.split(':')
+                k_key, n_key = k_s[0], n_s[0]
+                if k_key != n_key or len(k_s) != len(n_s):
+                    matched = False
+                    break
+                if len(k_s) == 1:
+                    continue
+                offset = ctx.name_cache_offsets
+                if k_key in offset and (int(n_s[1]) - int(k_s[1])) % (1 + offset[k_key]) == 0:
+                    continue
+                matched = False
+                break
+            if matched:
+                return v.astype(computation_dtype)
 
     if not ctx.is_initializing and ctx.fail_on_missing_parameter:
         raise ValueError(f"Couldn't find parameter {prefix_name}. {ctx.name_cache=}")
@@ -146,14 +167,12 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     if init_val is not None:
         param = init_val * scale * post_variance_scale
     elif std is None and mean is None:
+        param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
         if add_depth:
-            param = jnp.stack([orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape))) for _ in
-                               range(ctx.dims.depth)], 0)
-        else:
-            param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
+            param = normal(ctx, [ctx.dims.up_down] * add_depth + list(shape)) * param.std() + param.mean()
         param *= scale * post_variance_scale
     else:
-        param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
+        param = normal(ctx, [ctx.dims.up_down] * add_depth + list(shape)) * scale
         if std is not None:
             param *= std
         if mean is not None:
@@ -171,6 +190,9 @@ def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1)
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
 
 
-def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[], jnp.ndarray]], cases: int, predicate: jnp.ndarray,
-                  base: jnp.ndarray):
-    return lax.switch(predicate % cases, [gen_fn(i) for i in range(cases)], base)
+typevar = typing.TypeVar("obj")
+
+
+def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[typevar], jnp.ndarray]], cases: int,
+                  predicate: jnp.ndarray, base: typevar):
+    return lax.switch(predicate.astype(jnp.int32) % cases, [gen_fn(i) for i in range(cases)], base)

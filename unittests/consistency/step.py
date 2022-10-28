@@ -13,10 +13,10 @@ def get_wctx(config: typing.Optional[typing.Dict[str, typing.Any]] = None):
     wctx = WhileTrainContext(config)
     ctx = wctx.ctx
 
-    ctx.dims.batch = 2
-    ctx.dims.depth = 3
+    ctx.dims.batch = 16
+    ctx.dims.up_down = 2
     ctx.dims.spatial_mixing_kernel = 8
-    ctx.dims.sequence = ctx.dims.spatial_mixing_kernel * 2
+    ctx.dims.sequence = 128
     ctx.dims.features = 16
     ctx.dims.pointwise_features = 32
     ctx.dims.inner_bottleneck_features = 8
@@ -99,6 +99,18 @@ class ParameterVariance(BaseTest):
         self.same_shape(self.export1.ctx.parameter_variance, self.export2.ctx.parameter_variance)
 
 
-@pytest.mark.parametrize("cls", [NameCache, ParameterUsage, ParameterShapes, ParameterVariance])
+classes = [NameCache, ParameterUsage, ParameterShapes, ParameterVariance]
+
+
+@pytest.mark.parametrize("cls", classes)
 def test(cls: type):
     cls()()
+
+
+def main():
+    for cls in classes:
+        test(cls)
+
+
+if __name__ == '__main__':
+    main()

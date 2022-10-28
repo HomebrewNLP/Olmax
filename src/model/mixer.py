@@ -2,7 +2,7 @@ import math
 
 from jax import numpy as jnp
 
-from src.backend import get_param, pattern_match, with_context
+from src.backend import dot, get_param, pattern_match, with_context
 from src.context import Context
 from src.model.activate import activate
 from src.model.norm import prenorm
@@ -18,16 +18,26 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
         return inp
 
     original_shape = inp.shape
-    max_dims = math.ceil(math.log(ctx.dims.sequence, ctx.dims.spatial_mixing_kernel))
+    _batch, sequence, _features = original_shape
+    max_dims = math.ceil(math.log(sequence, ctx.dims.spatial_mixing_kernel))
     original_batch = inp.shape[0]
+    if ctx.model.autoregressive:
+        wgt0 = jnp.triu(wgt0)
+        wgt1 = jnp.triu(wgt1)
 
     def _get_mix_fn(current_depth: int):
         def _fn(x: jnp.ndarray):
-            batch = max(ctx.dims.sequence // ctx.dims.spatial_mixing_kernel ** (current_depth % max_dims + 1), 1)
-            out = x.reshape(original_batch * batch, ctx.dims.spatial_mixing_kernel, -1, ctx.dims.features)
-            out = jnp.einsum("bkrf,kg->bgrf", out, jnp.triu(wgt0) if ctx.model.autoregressive else wgt0)
+            batch = max(sequence // ctx.dims.spatial_mixing_kernel ** (current_depth % max_dims + 1), 1)
+            out = x.reshape(original_batch * batch, ctx.dims.spatial_mixing_kernel, -1)
+
+            # Shape[Batch, Sequence, Features] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
+            out = dot(out, wgt0, left_contract_dims=(1,), right_contract_dims=(0,))
+
             out = activate(out)
-            out = jnp.einsum("bkrf,kg->bgrf", out, jnp.triu(wgt1) if ctx.model.autoregressive else wgt1)
+
+            # Shape[Batch, Features, Sequence] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
+            out = dot(out, wgt1, left_contract_dims=(2,), right_contract_dims=(0,))
+            out = out.transpose(0, 2, 1)
             return out.reshape(original_shape)
 
         return _fn
