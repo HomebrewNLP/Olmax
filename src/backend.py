@@ -190,7 +190,7 @@ def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1)
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
 
 
-input = typing.TypeVar("input")
+fn_input = typing.TypeVar("fn_input")
 
 
 def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[input], jnp.ndarray]], cases: int,
