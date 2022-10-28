@@ -29,7 +29,7 @@ def replicate(x: typing.Any) -> typing.Any:
 
 
 def pmap(config: typing.Optional[typing.Dict[str, typing.Any]]):
-    orig_wctx, ctx = get_wctx()
+    _, ctx = get_wctx()
     src = replicate(jnp.zeros((ctx.dims.batch, ctx.dims.sequence), dtype=jnp.int32))
     name_cache = {}
     parameter_usages = {}

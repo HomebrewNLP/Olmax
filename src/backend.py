@@ -191,9 +191,9 @@ def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1)
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
 
 
-input = typing.TypeVar("input")
+typevar = typing.TypeVar("typevar")
 
 
-def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[input], jnp.ndarray]], cases: int,
-                  predicate: jnp.ndarray, base: input):
+def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[typevar], jnp.ndarray]], cases: int,
+                  predicate: jnp.ndarray, base: typevar):
     return lax.switch(predicate.astype(jnp.int32) % cases, [gen_fn(i) for i in range(cases)], base)
