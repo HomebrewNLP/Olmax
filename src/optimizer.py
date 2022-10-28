@@ -161,5 +161,5 @@ def update_ema(ctx: Context, step: jnp.ndarray):
             continue
         param = ctx.parameters[ema_name[:-len('_ema')]]
         ema_value = ema_value * (1 - beta ** step)  # bias ema, since the last step debiased it
-        ema_value = ema_value + param
+        ema_value = ema_value * beta + param * (1 - beta)
         ctx.parameters[ema_name] = ema_value / (1 - beta ** (step + 1))  # debias
