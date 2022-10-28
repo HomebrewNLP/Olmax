@@ -66,7 +66,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
         body_ctx(ctx, x)
         params = ctx.parameters
-        for k, v in params:
+        for k, v in params.items():
             params[k + '_ema'] = jnp.zeros_like(v)
         var = ctx.parameter_variance
         ctx.parameters = {}
