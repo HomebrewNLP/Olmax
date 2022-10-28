@@ -27,9 +27,10 @@ def with_context(count: typing.Optional[bool] = None) -> CtxFn:
         if count is not None:
             prefix_kwargs["count"] = count
 
-        def _fn(ctx: Context, *args, **kwargs):
-            local_ctx = ctx.add_to_prefix(**prefix_kwargs)
-            return fn(local_ctx, *args, **kwargs)
+        def _fn(ctx: Context, *args, add_to_prefix: bool = True, **kwargs):
+            if add_to_prefix:
+                ctx = ctx.add_to_prefix(**prefix_kwargs)
+            return fn(ctx, *args, **kwargs)
 
         return _fn
 
