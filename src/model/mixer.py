@@ -36,7 +36,7 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
 
             out = out.reshape(inner_batch, ctx.dims.features, -1)
             out = scale_norm_act(ctx, out, ctx.dims.features, weight=scale, add_to_prefix=False, dim=1)
-            out = out.reshape(inner_sequence, inner_features, inner_sequence)
+            out = out.reshape(inner_batch, inner_features, inner_sequence)
 
             # Shape[Batch, Features, Sequence] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
             out = dot(out, wgt1, left_contract_dims=(2,), right_contract_dims=(0,))
