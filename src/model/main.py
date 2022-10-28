@@ -148,11 +148,21 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     return out, wgt
 
 
-def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def single_forward(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray
+                   ) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
     out = body_ctx(ctx, src)
-    if ctx.is_initializing:
-        return out
-    return cross_entropy_loss(ctx, out, tgt)
+    return (out,) + cross_entropy_loss(ctx, out, tgt)
+
+
+def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray
+            ) -> typing.Tuple[jnp.ndarray, typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray,
+                                                        jnp.ndarray]]:
+    ema_params = {k[:-len('_ema')]: lax.stop_gradient(v) for k, v in params.items() if k.endswith('_ema')}
+    ema_out, ema_loss, ema_acc = jax.tree_util.tree_map(lax.stop_gradient, single_forward(ema_params, inp))
+    out, loss, acc = single_forward(params, inp)
+    ctx = Context()
+    consistency_loss = jnp.sum(lax.square(out - ema_out) / ctx.dims.batch) * ctx.training.z_loss
+    return loss + consistency_loss, (consistency_loss, loss, acc, ema_loss, ema_acc)

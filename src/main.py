@@ -15,7 +15,7 @@ from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
 from src.model.main import body_ctx, compute
-from src.optimizer import get_current_lr, update
+from src.optimizer import get_current_lr, update, update_ema
 from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
@@ -27,10 +27,10 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % steps]
-    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
+    update_ema(wctx.ctx, wctx.current_step)
+    (_, scalars), grads = grad_fn(wctx.ctx.parameters, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
-    wctx.loss += loss / steps  # higher numerical accuracy if we divide before summing
-    wctx.accuracy += accuracy / steps
+    wctx.scalars += jnp.stack(scalars) / steps
     wctx.current_step += 1
     return wctx.serialize()
 
@@ -66,6 +66,8 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
         body_ctx(ctx, x)
         params = ctx.parameters
+        for k, v in params:
+            params[k + '_ema'] = jnp.zeros_like(v)
         var = ctx.parameter_variance
         ctx.parameters = {}
         ctx.prng_key = initial_prng_key
@@ -83,6 +85,7 @@ def get_optimizer_state(ctx: Context):
         new_ctx = ctx
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
+        parameters = {k: v for k, v in parameters.items() if not k.endswith('_ema')}
         new_ctx.parameters = parameters
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
         grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
@@ -110,8 +113,7 @@ class TrainLoop:
 
     def __call__(self, dat: jnp.ndarray) -> WhileTrainContext:
         wctx = self.wctx(dat)
-        wctx.loss = jnp.zeros_like(wctx.loss)
-        wctx.accuracy = jnp.zeros_like(wctx.loss)
+        wctx.scalars = jnp.zeros_like(wctx.scalars)
         self.wctx = WhileTrainContext(self.step(wctx.serialize()))
         return self.wctx
 
@@ -143,8 +145,7 @@ def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
     wctx.ctx.is_initializing = False
     wctx.ctx.parameter_variance = replicate(wctx.ctx.parameter_variance)
     wctx.current_step = replicate(wctx.current_step)
-    wctx.loss = replicate(wctx.loss)
-    wctx.accuracy = replicate(wctx.accuracy)
+    wctx.scalars = replicate(wctx.scalars)
 
     return data
 
@@ -207,8 +208,8 @@ def main():
         current_step = wctx.step
         lr = float(get_current_lr(wctx.ctx, wctx.current_step[0]))
         print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
-              f'Loss: {wctx.loss[0]:6.3f} - '
-              f'Accuracy: {wctx.accuracy[0]:8.3f} | '
+              f'Loss: {wctx.scalars[0, 1]:6.3f} - '
+              f'Accuracy: {wctx.scalars[0, 2]:8.3f} | '
               f'LearningRate: {lr:.5f} | '
               f'StepTime: {time.time() - step_start:10.6f}s - '
               f'Rate: {tokens_processed * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')

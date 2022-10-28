@@ -152,3 +152,14 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
+
+
+def update_ema(ctx: Context, step: jnp.ndarray):
+    beta = ctx.training.ema_beta
+    for ema_name, ema_value in ctx.parameters.items():
+        if not ema_name.endswith('_ema'):
+            continue
+        param = ctx.parameters[ema_name[:-len('_ema')]]
+        ema_value = ema_value * (1 - beta ** step)  # bias ema, since the last step debiased it
+        ema_value = ema_value + param
+        ctx.parameters[ema_name] = ema_value / (1 - beta ** (step + 1))  # debias
