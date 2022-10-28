@@ -29,6 +29,7 @@ def all_gather(inp: jnp.ndarray, dim: int) -> jnp.ndarray:
 
     return _fn(inp)
 
+
 def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarray] = None, psum: bool = False,
                  act: bool = True, dim: int = 2):
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
@@ -51,8 +52,8 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
-                   weight: typing.Union[bool, None, jnp.ndarray] = None,
-                   psum: bool = False, act: bool = True, dim: int = 2) -> jnp.ndarray:
+                   weight: typing.Union[bool, None, jnp.ndarray] = None, psum: bool = False, act: bool = True,
+                   dim: int = 2) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
