@@ -4,9 +4,7 @@ from jax import numpy as jnp
 
 from src.backend import get_param, pattern_match, with_context, dot
 from src.context import Context
-from src.model.activate import activate
-from src.model.norm import prenorm
-
+from src.model.norm import prenorm, scale_norm_act
 
 @prenorm
 @with_context()
@@ -14,6 +12,8 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
     wgt0 = get_param(ctx, "mix_0", weight_shape)
     wgt1 = get_param(ctx, "mix_1", weight_shape)
+    scale = get_param(ctx, "scale", [ctx.dims.features], std=0, mean=1,
+                      dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
     if ctx.is_initializing:
         return inp
 
@@ -33,7 +33,7 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
             # Shape[Batch, Sequence, Features] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
             out = dot(out,  wgt0, left_contract_dims=(1,), right_contract_dims=(0,))
 
-            out = activate(out)
+            out = scale_norm_act(ctx, out, ctx.dims.features, weight=scale, add_to_prefix=False, dim=1)
 
             # Shape[Batch, Features, Sequence] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
             out = dot(out, wgt1, left_contract_dims=(2,), right_contract_dims=(0,))

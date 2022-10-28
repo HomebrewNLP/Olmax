@@ -19,27 +19,26 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
     return _fn
 
 
-def all_gather(inp: jnp.ndarray) -> jnp.ndarray:
+def all_gather(inp: jnp.ndarray, dim: int) -> jnp.ndarray:
     @jax.custom_gradient
     def _fn(x):
         def _grad(dy):
-            return lax.psum_scatter(dy, axis_name=ParallelAxes.model, scatter_dimension=2, tiled=True)
+            return lax.psum_scatter(dy, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
 
-        return lax.all_gather(x, axis_name=ParallelAxes.model, axis=2, tiled=True), _grad
+        return lax.all_gather(x, axis_name=ParallelAxes.model, axis=dim, tiled=True), _grad
 
     return _fn(inp)
 
-
 def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarray] = None, psum: bool = False,
-                 act: bool = True):
+                 act: bool = True, dim: int = 2):
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     original_dtype = src.dtype
     src_fp64 = promote_to(src, run_type)
     if psum:
-        src_fp64 = all_gather(src_fp64)
+        src_fp64 = all_gather(src_fp64, dim)
     if ctx.model.norm.zero_mean:
-        src_fp64 -= src_fp64.mean(-1, keepdims=True)
-    std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm.power).sum(-1, keepdims=True), ctx.model.norm.eps,
+        src_fp64 -= src_fp64.mean(dim, keepdims=True)
+    std = stable_rsqrt(jnp.power(jnp.abs(src_fp64), ctx.model.norm.power).sum(dim, keepdims=True), ctx.model.norm.eps,
                        ctx.model.norm.power)
     norm_out = src_fp64 * std
     out = norm_out * wgt
@@ -53,7 +52,7 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
                    weight: typing.Union[bool, None, jnp.ndarray] = None,
-                   psum: bool = False, act: bool = True) -> jnp.ndarray:
+                   psum: bool = False, act: bool = True, dim: int = 2) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
@@ -67,11 +66,11 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
         original_dtype = src.dtype
         if isinstance(wgt, jnp.ndarray):
-            reshaped_weight = wgt.reshape((1,) * (src.ndim - 1) + (-1,))
+            reshaped_weight = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))
         else:
             reshaped_weight = wgt
 
-        out, new_src, std = norm_forward(ctx, src, reshaped_weight, psum, act)
+        out, new_src, std = norm_forward(ctx, src, reshaped_weight, psum, act, dim)
 
         def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
             src_fp64 = promote_to(new_src, run_type)
@@ -80,21 +79,23 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
             if act:
                 dy = dy * activate_grad(norm_out * reshaped_weight)
             if isinstance(wgt, jnp.ndarray):
-                d_wgt = (dy * norm_out).sum(list(range(src.ndim - 1))).reshape((-1,))
+                summed = list(range(src.ndim))
+                del summed[dim]
+                d_wgt = (dy * norm_out).sum(summed).reshape((-1,))
             else:
                 d_wgt = None
             dy = dy * reshaped_weight
 
-            d_std = (dy * src_fp64).sum(-1, keepdims=True)  # broadcast forward -> sum backward
+            d_std = (dy * src_fp64).sum(dim, keepdims=True)  # broadcast forward -> sum backward
             d_std *= std ** (ctx.model.norm.power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
             d_std *= src_fp64 ** (ctx.model.norm.power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
             if ctx.model.norm.power % 2 != 0:  # x^1, x^3 need to be made non-negative; x^2, x^4 don't
                 d_std *= lax.sign(src_fp64)
             dx = dy * std - d_std
             if ctx.model.norm.zero_mean:
-                dx -= dx.mean(-1, keepdims=True)
+                dx -= dx.mean(dim, keepdims=True)
             if psum:
-                dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=2, tiled=True)
+                dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
             return dx.astype(original_dtype), d_wgt
 
         return out, _grad
