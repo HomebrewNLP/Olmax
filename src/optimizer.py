@@ -132,7 +132,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
     lr = -get_current_lr(ctx, step)
 
     for param_name, grad in grads.items():
-        if "optimizer" in param_name:
+        if "optimizer" in param_name or param_name.endswith('_ema'):
             continue
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
         ctx.name_cache = {}
