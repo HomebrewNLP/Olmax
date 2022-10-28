@@ -85,13 +85,12 @@ def get_optimizer_state(ctx: Context):
         new_ctx = ctx
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
-        parameters = {k: v for k, v in parameters.items() if not k.endswith('_ema')}
-        new_ctx.parameters = parameters
-        keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
+        new_ctx.parameters = {k: v for k, v in parameters.items() if not k.endswith('_ema')}
+        keys = jax.random.split(jax.random.PRNGKey(0), len(new_ctx.parameters))
         grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
-                 for key, (name, param) in zip(keys, parameters.items())}
+                 for key, (name, param) in zip(keys, new_ctx.parameters.items())}
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
-        new_ctx.parameters.update({k: v for k, v in parameters.items() if k.endswith('_ema')})
+        new_ctx.parameters.update(parameters)  # ensure noisy 0th step doesn't influence weights
         return new_ctx.parameters
 
     pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=({k: 0 for k in ctx.parameters.keys()},), out_axes=0,
