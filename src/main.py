@@ -91,6 +91,7 @@ def get_optimizer_state(ctx: Context):
         grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
                  for key, (name, param) in zip(keys, parameters.items())}
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
+        new_ctx.parameters.update({k: v for k, v in parameters.items() if k.endswith('_ema')})
         return new_ctx.parameters
 
     pmapped = jax.pmap(_fn, ParallelAxes.model, in_axes=({k: 0 for k in ctx.parameters.keys()},), out_axes=0,
