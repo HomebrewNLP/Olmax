@@ -89,5 +89,5 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray
     ema_out, ema_loss, ema_acc = jax.tree_util.tree_map(lax.stop_gradient, single_forward(ema_params, inp))
     out, loss, acc = single_forward(params, inp)
     ctx = Context()
-    consistency_loss = jnp.sum(lax.square(out - ema_out) / ctx.dims.batch) * ctx.training.z_loss
+    consistency_loss = jnp.sum(lax.square(out - ema_out) / ctx.dims.batch) * ctx.training.consistency_loss
     return loss + consistency_loss, (consistency_loss, loss, acc, ema_loss, ema_acc)
