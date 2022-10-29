@@ -37,7 +37,7 @@ def pooled_block(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, dense_moe, src)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, mix, src, depth)
+        # src = reversible(ctx, mix, src, depth)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src
