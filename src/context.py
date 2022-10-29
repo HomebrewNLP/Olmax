@@ -158,7 +158,7 @@ class Training(DataClass):
     checkpoint_interval: float = 16384
     do_checkpoint: bool = False
     z_loss: float = 0.01
-    consistency_loss:float = 0.01
+    consistency_loss: float = 0.01
     device_steps: int = 4
     device_unroll: int = 1
     steps: int = 2 ** 16

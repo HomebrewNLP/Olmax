@@ -92,7 +92,7 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray
     ctx = Context()
     consistency_loss = lax.square(out.astype(jnp.float32) - ema_out.astype(jnp.float32))
     consistency_loss /= ctx.dims.batch * jax.device_count()
-    consistency_loss = jnp.sum(consistency_loss) * ctx.training.consistency_loss
-    model_loss = loss + consistency_loss
+    consistency_loss = jnp.sum(consistency_loss)
+    model_loss = loss + consistency_loss * ctx.training.consistency_loss
     consistency_loss = lax.psum(consistency_loss, ParallelAxes.model)
     return model_loss, (consistency_loss, loss, acc, ema_loss, ema_acc)
