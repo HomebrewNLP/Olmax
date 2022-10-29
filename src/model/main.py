@@ -4,6 +4,7 @@ import jax
 from jax import lax, numpy as jnp
 
 from src.backend import get_param, is_model, is_stacked, with_context
+from src.constants import ParallelAxes
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
@@ -89,5 +90,9 @@ def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray
     ema_out, ema_loss, ema_acc = jax.tree_util.tree_map(lax.stop_gradient, single_forward(ema_params, inp))
     out, loss, acc = single_forward(params, inp)
     ctx = Context()
-    consistency_loss = jnp.sum(lax.square(out - ema_out) / ctx.dims.batch) * ctx.training.consistency_loss
-    return loss + consistency_loss, (consistency_loss, loss, acc, ema_loss, ema_acc)
+    consistency_loss = lax.square(out.astype(jnp.float32) - ema_out.astype(jnp.float32))
+    consistency_loss /= ctx.dims.batch * jax.device_count()
+    consistency_loss = jnp.sum(consistency_loss) * ctx.training.consistency_loss
+    model_loss = loss + consistency_loss
+    consistency_loss = lax.psum(consistency_loss, ParallelAxes.model)
+    return model_loss, (consistency_loss, loss, acc, ema_loss, ema_acc)
