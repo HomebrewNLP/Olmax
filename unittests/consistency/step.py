@@ -14,7 +14,6 @@ def get_wctx(config: typing.Optional[typing.Dict[str, typing.Any]] = None):
     ctx = wctx.ctx
 
     ctx.dims.batch = 16
-    ctx.dims.up_down = 2
     ctx.dims.spatial_mixing_kernel = 8
     ctx.dims.sequence = 128
     ctx.dims.features = 16

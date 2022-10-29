@@ -5,8 +5,8 @@ from jax import numpy as jnp
 
 from src.constants import ParallelAxes
 
-trials = 4
-sample_sizes = [2 ** 10]
+trials = 1
+sample_sizes = [2 ** 6]
 
 
 def randn_fn():
@@ -26,6 +26,6 @@ def randn_fn():
 
 def grad_fn(dy: jnp.ndarray, *args):
     def _fn(fn):
-        return jax.pmap(jax.grad(lambda *x: (fn(*x) * dy).sum()), ParallelAxes.model)(args)
+        return jax.pmap(jax.grad(lambda x: (fn(x) * dy).sum()), ParallelAxes.model)(args)
 
     return _fn
