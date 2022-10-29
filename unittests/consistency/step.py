@@ -14,7 +14,6 @@ def get_wctx(config: typing.Optional[typing.Dict[str, typing.Any]] = None):
     ctx = wctx.ctx
 
     ctx.dims.batch = 16
-    ctx.dims.up_down = 2
     ctx.dims.spatial_mixing_kernel = 8
     ctx.dims.sequence = 128
     ctx.dims.features = 16
@@ -29,7 +28,7 @@ def replicate(x: typing.Any) -> typing.Any:
 
 
 def pmap(config: typing.Optional[typing.Dict[str, typing.Any]]):
-    orig_wctx, ctx = get_wctx()
+    _, ctx = get_wctx()
     src = replicate(jnp.zeros((ctx.dims.batch, ctx.dims.sequence), dtype=jnp.int32))
     name_cache = {}
     parameter_usages = {}

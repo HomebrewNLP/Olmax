@@ -11,7 +11,6 @@ from transformers import GPT2TokenizerFast
 from src.backend import matmul, promote_to
 from src.constants import ParallelAxes
 from src.context import Context, WhilePredictContext
-from src.main import get_parameters
 from src.model.main import body_ctx
 from src.utils.checkpoint import read_checkpoint
 

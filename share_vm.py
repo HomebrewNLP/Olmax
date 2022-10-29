@@ -47,7 +47,8 @@ def parse_args() -> Args:
     parser.add_argument("--host", type=str, help="Name of the TPU")
     parser.add_argument("--subdomain-prefix", type=str, help="like abc to get abc0.example.com and abc7.example.com")
     parser.add_argument("--namecheap-username", type=str, help="Username used for login on namecheap")
-    parser.add_argument("--namecheap-api-key", type=str, help="See https://ap.www.namecheap.com/settings/tools/apiaccess/")
+    parser.add_argument("--namecheap-api-key", type=str,
+                        help="See https://ap.www.namecheap.com/settings/tools/apiaccess/")
     parser.add_argument("--domain-name", type=str, help="example.com, including the .com")
     parser.add_argument("--ssh-key", type=str, help="like `ssh-rsa <random string> <user>@<machine>`")
     parser.add_argument("--tpu-version", type=int, default=3, help="Which TPU version to create (v2-8 or v3-8)")
@@ -81,7 +82,7 @@ class CreationCallback:
         records.extend([{"RecordType": "A", "HostName": f"{self.args.subdomain_prefix}{i}", "Address": ip,
                          "MXPref": 10, "TTL": 300
                          } for i, ip in enumerate(ips)])
-        records = [self.api._elements_names_fix(x) for x in records]
+        records = [self.api._elements_names_fix(x) for x in records]  # skipcq: PYL-W0212
         records = list({r["HostName"]: r for r in records}.values())  # deduplicate, and take last element
         self.api.domains_dns_setHosts(self.args.domain_name, records)
 

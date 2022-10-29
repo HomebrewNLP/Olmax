@@ -81,7 +81,6 @@ class Dims(DataClass):
     moe_intermediate: int = 4096
     sequence: int = 4096
     depth: int = 8
-    up_down: int = 2
     vocab: int = 256
 
     def __getitem__(self, item: str):

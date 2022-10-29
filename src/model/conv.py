@@ -3,7 +3,6 @@ from jax import numpy as jnp
 
 from src.backend import conv as lax_conv, get_param, with_context
 from src.context import Context
-from src.model.activate import activate
 from src.model.norm import prenorm, scale_norm_act
 
 
@@ -36,5 +35,5 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 @with_context()
 def dense_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, ctx.dims.pointwise_features)
-    inp = activate(inp)
+    inp = scale_norm_act(ctx, inp, ctx.dims.pointwise_features)
     return conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.pointwise_features, ctx.dims.features)
