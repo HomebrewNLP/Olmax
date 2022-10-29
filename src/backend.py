@@ -126,7 +126,6 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
               lr_scale: float = 1, dtype: typing.Optional[jnp.float32] = None,
               init_val: typing.Optional[jnp.ndarray] = None,
               tied: bool = False) -> jnp.ndarray:
-
     if not tied:
         name = name + '_stacked'
     add_depth = ctx.add_depth and not tied
@@ -143,24 +142,6 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     ctx.parameter_usages[prefix_name] += 1
     if prefix_name in ctx.parameters:
         return ctx.parameters[prefix_name].astype(computation_dtype)
-    if tied:
-        for k, v in ctx.parameters.items():
-            matched = True
-            for k_part, name_part in zip(k.split('/'), prefix_name.split('/')):
-                k_s, n_s = k_part.split(':'), name_part.split(':')
-                k_key, n_key = k_s[0], n_s[0]
-                if k_key != n_key or len(k_s) != len(n_s):
-                    matched = False
-                    break
-                if len(k_s) == 1:
-                    continue
-                offset = ctx.name_cache_offsets
-                if k_key in offset and (int(n_s[1]) - int(k_s[1])) % (1 + offset[k_key]) == 0:
-                    continue
-                matched = False
-                break
-            if matched:
-                return v.astype(computation_dtype)
 
     if not ctx.is_initializing and ctx.fail_on_missing_parameter:
         raise ValueError(f"Couldn't find parameter {prefix_name}. {ctx.name_cache=}")
@@ -170,10 +151,10 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
     elif std is None and mean is None:
         param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
         if add_depth:
-            param = normal(ctx, [ctx.dims.up_down] * add_depth + list(shape)) * param.std() + param.mean()
+            param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * param.std() + param.mean()
         param *= scale * post_variance_scale
     else:
-        param = normal(ctx, [ctx.dims.up_down] * add_depth + list(shape)) * scale
+        param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
         if std is not None:
             param *= std
         if mean is not None:

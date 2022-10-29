@@ -1,9 +1,6 @@
 import time
-import types
-import typing
 
 import numpy as np
-from jax import numpy as jnp
 
 from src.context import WhileTrainContext
 

@@ -6,6 +6,7 @@ from src.backend import dot, get_param, pattern_match, with_context
 from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
 
+
 @prenorm
 @with_context()
 def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
@@ -34,7 +35,7 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
             # Shape[Batch, Sequence, Features] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
             out = dot(out, wgt0, left_contract_dims=(1,), right_contract_dims=(0,))
 
-            out = out.reshape(inner_batch, ctx.dims.features, -1)
+            out = out.reshape(-1, ctx.dims.features, inner_sequence)
             out = scale_norm_act(ctx, out, ctx.dims.features, weight=scale, add_to_prefix=False, dim=1)
             out = out.reshape(inner_batch, inner_features, inner_sequence)
 
