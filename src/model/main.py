@@ -1,10 +1,9 @@
 import typing
-import warnings
 
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, is_model, is_stacked, normal, with_context
+from src.backend import get_param, is_model, is_stacked, with_context
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss

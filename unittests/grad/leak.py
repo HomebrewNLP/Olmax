@@ -1,18 +1,15 @@
-from src.model.reversible import FourArrays, reversible, revnet_out
-
 import typing
 
 import jax
-import numpy as np
 import pytest
 import tqdm
 from jax import lax, numpy as jnp
 
-from src.backend import is_main, matmul
 from src.constants import ParallelAxes
 from src.context import Context
-from src.model.main import body_ctx, stem
-from unittests.grad.backend import grad_fn, randn_fn, sample_sizes, trials
+from src.model.main import stem
+from src.model.reversible import revnet_out
+from unittests.grad.backend import grad_fn, randn_fn, trials
 
 
 def mean(x: jnp.ndarray):

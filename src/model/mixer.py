@@ -6,6 +6,7 @@ from src.backend import dot, get_param, pattern_match, with_context
 from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
 
+
 @prenorm
 @with_context()
 def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
