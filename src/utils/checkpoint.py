@@ -128,7 +128,7 @@ def read_checkpoint(ctx: Context, ignore: str = '.*optimizer.*', load_variance: 
     _overwrite(_read_shards(ctx.training.checkpoint_load_path, structure, "parameters"), ctx.parameters, ignore)
 
     if load_variance:
-        py_structure = {k: v for k, v in py_structure.items() if "optimizer" not in k}  # no optimizer for param-lr
+        py_structure = {k: v for k, v in py_structure.items() if "optimizer" not in k and not k.endswith('_ema')}
         _, structure = jax.tree_util.tree_flatten(py_structure)
         _overwrite(_read_shards(ctx.training.checkpoint_load_path, structure, "variance"), ctx.parameter_variance,
                    ignore)
