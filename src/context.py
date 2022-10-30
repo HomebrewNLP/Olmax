@@ -139,6 +139,7 @@ class Model(DataClass):
 
 
 class Training(DataClass):
+    embedding_gradient_shrink: float = 0.1
     debug: bool = False
     checkpoint_path: str = "gs://homebrewnlp-eu/homebrewnlp-checkpoint"
     checkpoint_load_path: str = ""

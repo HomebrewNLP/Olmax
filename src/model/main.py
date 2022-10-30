@@ -15,7 +15,8 @@ from src.model.reversible import FourArrays, reversible, revnet_out
 
 @with_context()
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features)
+    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features,
+                      lr_scale=ctx.training.embedding_gradient_shrink)
 
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray) -> jnp.ndarray:
         return jnp.take(wgt, src, 0)
