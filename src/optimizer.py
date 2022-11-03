@@ -71,7 +71,10 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # skipcq: PYL-W0640
+def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # skipcq: PYL-W0640
+    if "/conv:" in param_name and "/conv_weight:" in param_name:
+        original_shape = grad.shape
+        grad = grad.reshape(original_shape[0], original_shape[1] * original_shape[2])
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
@@ -91,7 +94,10 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray: 
         assign(ctx, f"preconditioner_{i}", new_p)
     if ctx.is_initializing:
         return grad
-    return preconditioner.preconditioned_grad(grad, new_preconditioners)
+    out = preconditioner.preconditioned_grad(grad, new_preconditioners)
+    if "/conv:" in param_name and "/conv_weight:" in param_name:
+        return out.reshape(original_shape)
+    return out
 
 
 def norm(param_name: str, val: jnp.ndarray):
@@ -145,9 +151,9 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         weight_update = adam(ctx, grad, step)
         if not small_parameter(param_name, grad):
             if is_stacked(param_name):
-                shampoo_update = jnp.stack([shampoo(ctx, grad[i], step) for i in range(grad.shape[0])], 0)
+                shampoo_update = jnp.stack([shampoo(ctx, param_name, grad[i], step) for i in range(grad.shape[0])], 0)
             else:
-                shampoo_update = shampoo(ctx, grad, step)
+                shampoo_update = shampoo(ctx, param_name, grad, step)
             shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
             weight_update = graft(param_name, weight_update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
