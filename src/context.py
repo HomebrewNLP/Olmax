@@ -78,7 +78,6 @@ class Dims(DataClass):
     features: int = 256
     spatial_mixing_kernel: int = 512
     pointwise_features: int = 512
-    moe_intermediate: int = 4096
     sequence: int = 4096
     depth: int = 8
     vocab: int = 256
@@ -104,14 +103,12 @@ class WandB(DataClass):
     id: typing.Optional[str] = None
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
-    percentile: float = 25
     median_sizes: typing.List[int] = [64, 256, 1024]
 
 
 class Optimizer(DataClass):
     nesterov: bool = True
     heavyball: bool = True
-    graft_to_adam: bool = False
     block_size: int = 512
     epsilon: float = 1e-16
     statistics_compute_steps: int = 4
@@ -133,22 +130,12 @@ class Normalization(DataClass):
 
 
 class Model(DataClass):
-    maximum_pool_factor: int = 1024
     norm: Normalization = Normalization()
     autoregressive: bool = True
-    unroll_depth: int = 1
     conv_scale: float = 4.
     conv_shift: float = 8.
-    qrnn_frequency: int = 8
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
-    mixer_iterations: int = 2  # ideally spatial_mixing_kernel ** mixer_iterations > sequence_length
-
-
-class ExpectedLoss(DataClass):
-    offset: float = 6.165868  # <- should be fixed. It technically goes down to 0.9 with other models.
-    scale: float = 39.08037
-    exponent: float = -0.3642513
 
 
 class Training(DataClass):
