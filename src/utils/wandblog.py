@@ -21,8 +21,8 @@ class WandbLog:
         ctx = wctx.ctx
         curr_loss = wctx.loss[0]
         sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
-        self.losses.append(curr_loss.astype(float))
-        self.accuracies.append((wctx.accuracy[0]).astype(float))
+        self.losses.append(curr_loss.astype(np.float32))
+        self.accuracies.append((wctx.accuracy[0]).astype(np.float32))
         self.loss_medians.append(np.median(self.losses[-max(sizes):]))
         self.losses = self.losses[-max(sizes):]
         self.accuracies = self.accuracies[-max(sizes):]
