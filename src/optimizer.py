@@ -40,7 +40,8 @@ def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
 
 @with_context()
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize: typing.Optional[bool] = None,
-        init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None) -> jnp.ndarray:
+        init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None,
+        debias: bool = True) -> jnp.ndarray:
     if quantize is None:
         quantize = not small_parameter(ctx.global_prefix, inp)
     if heavyball is None:
@@ -51,7 +52,7 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
                       init_val=jnp.zeros_like(inp) if init_val is None else init_val, tied=True)
     new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
-    if not heavyball:  # non-heavyball momentum needs to be debiased
+    if not heavyball and debias:  # non-heavyball momentum needs to be debiased
         new_state = new_state / (1 - beta ** (step + 1))
     if nesterov:
         return new_state * beta + inp
@@ -76,7 +77,7 @@ def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray: 
     for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
         eye = jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype)
         new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
-                       nesterov=False, heavyball=False)
+                       nesterov=False, heavyball=False, debias=False)
         prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
         if ctx.is_initializing:
             continue
