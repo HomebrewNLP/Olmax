@@ -87,8 +87,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
                 summed = list(range(src.ndim))
                 del summed[dim]
                 d_wgt = dy * norm_out
-                d_wgt_sq = lax.square(d_wgt).sum(summed).reshape((-1,))
-                d_wgt = ((dy * norm_out).sum(summed) * ctx.dims.batch).reshape((-1,))
+                d_wgt_sq = lax.square(d_wgt).sum(summed).reshape((-1,)).astype(wgt.dtype)
+                d_wgt = ((dy * norm_out).sum(summed) * ctx.dims.batch).reshape((-1,)).astype(wgt_dummy.dtype)
             else:
                 d_wgt = None
                 d_wgt_sq = None
