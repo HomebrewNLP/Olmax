@@ -64,7 +64,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
         return inp
 
     if weight is None:
-        weight_sq = get_param(ctx, "scale_sq")
+        weight_sq = get_param(ctx, "scale_stacked_sq")
     elif weight is False:
         weight_sq = 1
     else:
