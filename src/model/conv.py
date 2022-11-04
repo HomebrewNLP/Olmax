@@ -20,7 +20,7 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out
     @jax.custom_gradient
     def _prepare(x: jnp.ndarray):
         def _grad(dy: jnp.ndarray):
-            return lax.square(dy) * ctx.dims.batch
+            return (lax.square(dy) * ctx.dims.batch).astype(x.dtype)
 
         return jnp.zeros_like(x), _grad
 

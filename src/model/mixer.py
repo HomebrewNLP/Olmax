@@ -15,7 +15,7 @@ def dot_sq(ctx: Context, src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.n
     @jax.custom_gradient
     def _prepare(x: jnp.ndarray):
         def _grad(dy: jnp.ndarray):
-            return lax.square(dy) * ctx.dims.batch
+            return (lax.square(dy) * ctx.dims.batch).astype(x.dtype)
 
         return jnp.zeros_like(x), _grad
 
