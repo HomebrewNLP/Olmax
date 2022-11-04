@@ -69,7 +69,7 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
 def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
     write_checkpoint(wctx.ctx, verbose)
     for shard in range(jax.local_device_count()):
-        for tree, suffix in ((wctx.loss, "loss"), (wctx.accuracy, "accuracy"), (wctx.current_step, "current_step")):
+        for tree, suffix in ((wctx.scalars, "scalars"), (wctx.current_step, "current_step")):
             write_shard([tree], shard, wctx.ctx.training.checkpoint_path, f"{suffix}.npz", verbose)
 
 
@@ -136,7 +136,6 @@ def read_checkpoint(ctx: Context, ignore: str = '.*optimizer.*', load_variance: 
 
 def read_train_checkpoint(wctx: WhileTrainContext, ignore: str = '.*optimizer.*'):
     _, structure = jax.tree_util.tree_flatten([jnp.zeros((1,))])
-    wctx.loss = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "loss")[0]
-    wctx.accuracy = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "accuracy")[0]
+    wctx.scalars = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "scalars")[0]
     wctx.current_step = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "current_step")[0]
     read_checkpoint(wctx.ctx, ignore, load_variance=True)

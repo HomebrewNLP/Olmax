@@ -241,18 +241,15 @@ class WhileContext(DataClass):
 class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
-        self.loss = jnp.zeros([])
-        self.accuracy = jnp.zeros([])
+        self.scalars = jnp.zeros([2], jnp.float32)
 
         if config is not None:
-            self.loss = config['loss']
-            self.accuracy = config['accuracy']
+            self.scalars = config['scalars']
             self.ctx.parameter_variance = config['parameter_variance']
 
     def serialize(self):
         serialized = self._serialize()
-        serialized['loss'] = self.loss
-        serialized['accuracy'] = self.accuracy
+        serialized['scalars'] = self.scalars
         serialized['parameter_variance'] = self.ctx.parameter_variance
         return serialized
 
