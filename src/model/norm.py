@@ -57,18 +57,15 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
+        if not ctx.is_initializing:
+            weight_sq = get_param(ctx, "scale_sq")
     elif weight is False:
-        weight = 1
+        weight_sq = weight = 1
+    else:
+        weight, weight_sq = weight
 
     if ctx.is_initializing:
         return inp
-
-    if weight is None:
-        weight_sq = get_param(ctx, "scale_sq")
-    elif weight is False:
-        weight_sq = 1
-    else:
-        weight, weight_sq = weight
 
     @jax.custom_gradient
     def _fn(src: jnp.ndarray, wgt: jnp.ndarray, wgt_dummy: jnp.ndarray):
