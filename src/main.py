@@ -89,7 +89,7 @@ def get_optimizer_state(ctx: Context):
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
         grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
                  for key, (name, param) in zip(keys, parameters.items())}
-        grads.update({k + '_sq': jnp.zeros_like(v) for k, v in grads.items())
+        grads.update({k + '_sq': jnp.zeros_like(v) for k, v in grads.items()})
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
