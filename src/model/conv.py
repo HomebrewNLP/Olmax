@@ -15,7 +15,7 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out
     weight = get_param(ctx, "weight", [out_features, conv_kernel, in_features], column_axes=2, lr_scale=fan_in,
                        tied=tied)
     if ctx.is_initializing:
-        return jnp.zeros(inp.shape[:-1] + (out_features,))
+        return jnp.zeros(inp.shape[:-1] + (out_features,), dtype=inp.dtype)
 
     @jax.custom_gradient
     def _prepare(x: jnp.ndarray):
