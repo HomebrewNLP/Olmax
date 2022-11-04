@@ -30,7 +30,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return _fn(inp, param, param)
 
-    param_sq = get_param(ctx, "inp_embd_stacked_sq")
+    param_sq = get_param(ctx, "inp_embd_sq")
     return _fn(inp, param, param_sq)
 
 @with_context()
@@ -81,7 +81,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
     if ctx.is_initializing:
         return out
-    wgt_sq = get_param(ctx, "out_embd_stacked_sq")
+    wgt_sq = get_param(ctx, "out_embd_sq")
     return out, wgt, wgt_sq
 
 

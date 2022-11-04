@@ -36,9 +36,9 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return inp
 
-    wgt0_sq = get_param(ctx, "mix_0_stacked_sq")
-    wgt1_sq = get_param(ctx, "mix_1_stacked_sq")
-    scale_sq = get_param(ctx, "scale_stacked_sq")
+    wgt0_sq = get_param(ctx, "mix_0_sq")
+    wgt1_sq = get_param(ctx, "mix_1_sq")
+    scale_sq = get_param(ctx, "scale_sq")
 
     original_shape = inp.shape
     _batch, sequence, _features = original_shape
@@ -58,7 +58,7 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
             out = dot_sq(ctx, out, wgt0, wgt0_sq, left_contract_dims=(1,), right_contract_dims=(0,))
 
             out = out.reshape(-1, ctx.dims.features, inner_sequence)
-            out = scale_norm_act(ctx, out, ctx.dims.features, weight=(scale, scale_sq), add_to_prefix=False, dim=1)
+            out = scale_norm_act(ctx, out, ctx.dims.features, weight=scale, add_to_prefix=False, dim=1)
             out = out.reshape(inner_batch, inner_features, inner_sequence)
 
             # Shape[Batch, Features, Sequence] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
