@@ -22,13 +22,18 @@ from src.utils.wandblog import WandbLog
 jax.distributed.initialize()
 
 
+def add_zeros(params: typing.Dict[str, jnp.ndarray]):
+    params.update({k.split('_stacked')[0] + '_sq' + '_stacked' * (k.endswith('_stacked')): jnp.zeros_like(v)
+                   for k, v in params.items()})
+
+
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % steps]
     params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
-    params.update({k + '_sq': jnp.zeros_like(v) for k, v in params.items()})
+    add_zeros(params)
     (loss, accuracy), grads = grad_fn(params, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss / steps  # higher numerical accuracy if we divide before summing
@@ -89,7 +94,7 @@ def get_optimizer_state(ctx: Context):
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
         grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
                  for key, (name, param) in zip(keys, parameters.items())}
-        grads.update({k + '_sq': jnp.zeros_like(v) for k, v in grads.items()})
+        add_zeros(grads)
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
