@@ -20,9 +20,9 @@ def dot_sq(ctx: Context, src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.n
         return jnp.zeros_like(x), _grad
 
     out = dot(src, weight, left_contract_dims=left_contract_dims, right_contract_dims=right_contract_dims)
-    sq = dot(lax.stop_gradient(lax.square(src)), weight_sq, left_contract_dims=left_contract_dims,
+    sq = dot(lax.stop_gradient(lax.square(src)).astype(src.dtype), weight_sq, left_contract_dims=left_contract_dims,
              right_contract_dims=right_contract_dims)
-    return out + _prepare(sq)
+    return out + _prepare(sq.astype(src.dtype)).astype(src.dtype)
 
 
 @prenorm

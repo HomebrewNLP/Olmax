@@ -25,8 +25,8 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out
         return jnp.zeros_like(x), _grad
 
     weight_sq = get_param(ctx, "weight_sq", tied=tied)
-    sq_out = lax_conv(lax.stop_gradient(lax.square(inp)), weight_sq, [(conv_kernel - 1, 0)], 1)
-    return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1) + _prepare(sq_out)
+    sq_out = lax_conv(lax.stop_gradient(lax.square(inp)).astype(inp.dtype), weight_sq, [(conv_kernel - 1, 0)], 1)
+    return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1) + _prepare(sq_out.astype(inp.dtype)).astype(inp.dtype)
 
 
 @prenorm
