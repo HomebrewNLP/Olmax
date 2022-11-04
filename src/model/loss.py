@@ -9,21 +9,21 @@ from src.constants import ParallelAxes
 from src.context import Context
 
 
-def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndarray], outer_tgt: jnp.ndarray
-                       ) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+                       outer_tgt: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - one_hot(target) + softmax(x) * logsumexp(x) * z_loss
-    src, param = src_wgt
+    src, param, param_sq = src_wgt
     devices = jax.device_count()
     total_items = ctx.dims.batch * ctx.dims.sequence
     steps = ctx.dims.vocab // 128
     step_batch = total_items // steps
     local_batch = step_batch // devices
 
-    def _xent_slice(carry: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+    def _xent_slice(carry: typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
                     x: typing.Tuple[jnp.ndarray, jnp.ndarray], wgt: jnp.ndarray):
-        d_wgt, loss, accuracy = carry
+        d_wgt, d_wgt_sq, loss, accuracy = carry
         inp_slice, tgt_slice = x
         tmp = matmul(inp_slice, wgt)
         tmp = promote_to(tmp, jnp.float32)
@@ -46,10 +46,11 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
         d_wgt = d_wgt + matmul(dy, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
-        return (d_wgt, loss, accuracy), dx
+        d_wgt_sq = d_wgt_sq + matmul(lax.square(dy), lax.square(inp_slice))
+        return (d_wgt, d_wgt_sq, loss, accuracy), dx
 
     @jax.custom_gradient
-    def _fn(inp: jnp.ndarray, tgt: jnp.ndarray, wgt: jnp.ndarray):
+    def _fn(inp: jnp.ndarray, tgt: jnp.ndarray, wgt: jnp.ndarray, wgt_sq: jnp.ndarray):
         inp = inp.reshape(steps, devices, local_batch, ctx.dims.features)
         tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
         tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
@@ -57,20 +58,21 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
         def _slice_fn(carry, x):
             return _xent_slice(carry, x, wgt)
 
-        init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros(()), jnp.zeros(()))
-        (d_wgt, loss, accuracy), dx = lax.scan(_slice_fn, init, (inp, tgt))
+        init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros(wgt.shape[::-1]), jnp.zeros(()), jnp.zeros(()))
+        (d_wgt, d_wgt_sq, loss, accuracy), dx = lax.scan(_slice_fn, init, (inp, tgt))
 
         dx = dx.transpose(0, 2, 1)  # [Steps, Features, StepBatch] -> [Steps, StepBatch, Features]
         dx = dx.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         d_wgt = d_wgt.transpose(1, 0)  # [Vocab, Features]  ->  [Features, Vocab]
+        d_wgt_sq = d_wgt_sq.transpose(1, 0) * ctx.dims.batch
 
         def _grad(dy: typing.Tuple[jnp.ndarray, None]) -> typing.Tuple[jnp.ndarray, None, jnp.ndarray]:
             # dy == 1 since this is the last function before the output
             dy, _ = dy
-            return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype)
+            return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype), (d_wgt_sq * dy).astype(wgt.dtype)
 
         loss = lax.psum(loss, ParallelAxes.model)
         accuracy = lax.psum(accuracy, ParallelAxes.model)
         return (loss.astype(jnp.float32), accuracy.astype(jnp.float32)), _grad
 
-    return _fn(src, outer_tgt, param)
+    return _fn(src, outer_tgt, param, param_sq)

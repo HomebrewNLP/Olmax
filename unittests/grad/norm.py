@@ -19,15 +19,15 @@ def general_test(act: bool, psum: bool, zero_mean: bool, samples: int, power: in
         out_shape = list(src.shape)[1:]
         out_shape[dim] *= multiplier
         wgt = randn(out_shape[dim])
+        wgt_sq = randn(out_shape[dim])
         dy = randn(*out_shape)
         print(dy.shape, src.shape, wgt.shape)
-        grad = grad_fn(dy, src, wgt)
+        grad = grad_fn(dy, src, wgt, wgt_sq)
 
         print(trial)
-
-        out0 = grad(lambda x: norm_forward(ctx, x[0], x[1].reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 2 - dim)),
-                                           bool(psum), act, dim)[0])
-        out1 = grad(lambda x: scale_norm_act(ctx, x[0], ctx.dims.features, x[1], bool(psum), act, dim))
+        shape = (1,) * dim + (-1,) + (1,) * (src.ndim - 2 - dim)
+        out0 = grad(lambda x: norm_forward(ctx, x[0], x[1].reshape(shape), bool(psum), act, dim)[0])
+        out1 = grad(lambda x: scale_norm_act(ctx, x[0], ctx.dims.features, (x[1], x[2]), bool(psum), act, dim))
 
         assert jnp.allclose(out0[0], out1[0])
         assert jnp.allclose(out0[1], out1[1])

@@ -60,14 +60,10 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
 
 
 @with_context()
-def square_ema(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # == rmsprop
-    buffer = ema(ctx, jnp.square(grad), step, 1 - ctx.optimizer.adam_beta2)
-    return stable_rsqrt(buffer, ctx.optimizer.epsilon)
-
-
-@with_context()
-def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
-    return ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1) * square_ema(ctx, grad, step)
+def adam(ctx: Context, grad: jnp.ndarray, grad_sq: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+    ema_g = ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1)
+    ema_sq = ema(ctx, grad_sq, step, 1 - ctx.optimizer.adam_beta2)
+    return ema_g * stable_rsqrt(ema_sq, ctx.optimizer.epsilon)
 
 
 @with_context()
@@ -133,7 +129,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
     lr = -get_current_lr(ctx, step)
 
     for param_name, grad in grads.items():
-        if "optimizer" in param_name:
+        if "optimizer" in param_name or param_name.endswith('_sq'):
             continue
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
         ctx.name_cache = {}
@@ -142,7 +138,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
-        weight_update = adam(ctx, grad, step)
+        weight_update = adam(ctx, grad, grads[param_name + '_sq'], step)
         if not small_parameter(param_name, grad):
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)

@@ -17,11 +17,21 @@ from src.model.reversible import FourArrays, reversible, revnet_out
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features)
 
-    def _fn(src: jnp.ndarray, wgt: jnp.ndarray) -> jnp.ndarray:
-        return jnp.take(wgt, src, 0)
+    @jax.custom_gradient
+    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, wgt_sq: jnp.ndarray):
+        def _grad(dy: jnp.ndarray):
+            zeros = jnp.zeros_like(wgt)
+            d_wgt = zeros.at[src].add(dy)
+            d_wgt_sq = zeros.at[src].add(dy ** 2)
+            return None, d_wgt, d_wgt_sq
 
-    return jax.checkpoint(_fn)(inp, param)
+        return jnp.take(wgt, src, 0), _grad
 
+    if ctx.is_initializing:
+        return _fn(inp, param, param)
+
+    param_sq = get_param(ctx, "inp_embd_sq")
+    return _fn(inp, param, param_sq)
 
 @with_context()
 def block(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
@@ -61,7 +71,8 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
     return src
 
 
-def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+                                                             jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = stem(ctx, (src, zero, src, zero))
@@ -70,7 +81,8 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.nd
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
     if ctx.is_initializing:
         return out
-    return out, wgt
+    wgt_sq = get_param(ctx, "out_embd_sq")
+    return out, wgt, wgt_sq
 
 
 def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:

@@ -1,5 +1,5 @@
 import jax
-from jax import numpy as jnp
+from jax import lax, numpy as jnp
 
 from src.backend import conv as lax_conv, get_param, with_context
 from src.context import Context
@@ -16,7 +16,17 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out
                        tied=tied)
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,))
-    return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1)
+
+    @jax.custom_gradient
+    def _prepare(x: jnp.ndarray):
+        def _grad(dy: jnp.ndarray):
+            return lax.square(dy) * ctx.dims.batch
+
+        return jnp.zeros_like(x), _grad
+
+    weight_sq = get_param(ctx, "weight_sq")
+    sq_out = lax_conv(lax.stop_gradient(lax.square(inp)), weight_sq, [(conv_kernel - 1, 0)], 1)
+    return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1) + _prepare(sq_out)
 
 
 @prenorm

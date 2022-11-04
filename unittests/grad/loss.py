@@ -51,8 +51,8 @@ def general_value_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         wgt = randn(ctx.dims.features, ctx.dims.vocab)
 
-        grad0 = float(jax.pmap(lambda x: cross_entropy_loss(ctx, x, tgt)[0], ParallelAxes.model)((src, wgt))[0])
-        grad1 = float(jax.pmap(lambda x: naive_loss(x, tgt, z_loss), ParallelAxes.model)((src, wgt))[0])
+        grad0 = float(jax.pmap(lambda x: cross_entropy_loss(ctx, x, tgt)[0], ParallelAxes.model)((src, wgt, wgt))[0])
+        grad1 = float(jax.pmap(lambda x: naive_loss(x, tgt, z_loss), ParallelAxes.model)((src, wgt, wgt))[0])
         assert np.isclose(grad0, grad1)
 
 

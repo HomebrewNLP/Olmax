@@ -27,7 +27,9 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % steps]
-    (loss, accuracy), grads = grad_fn(wctx.ctx.parameters, data_slice)
+    params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
+    params.update({k + '_sq': jnp.zeros_like(v) for k, v in params.items()})
+    (loss, accuracy), grads = grad_fn(params, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.loss += loss / steps  # higher numerical accuracy if we divide before summing
     wctx.accuracy += accuracy / steps
