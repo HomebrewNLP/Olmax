@@ -10,7 +10,7 @@ import numpy as np
 import wandb
 from jax import lax, numpy as jnp
 
-from src.backend import deep_replace, device_id, loop
+from src.backend import deep_replace, device_id, loop, add_sq
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
@@ -23,8 +23,7 @@ jax.distributed.initialize()
 
 
 def add_zeros(params: typing.Dict[str, jnp.ndarray]):
-    params.update({k.split('_stacked')[0] + '_sq' + '_stacked' * (k.endswith('_stacked')): jnp.zeros_like(v)
-                   for k, v in params.items()})
+    params.update({add_sq(k): jnp.zeros_like(v) for k, v in params.items()})
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:

@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param
+from .backend import assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param, add_sq
 from .context import Context
 from .shampoo import Preconditioner, fallback_pth_root
 
@@ -129,7 +129,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
     lr = -get_current_lr(ctx, step)
 
     for param_name, grad in grads.items():
-        if "optimizer" in param_name or param_name.endswith('_sq'):
+        if "optimizer" in param_name or param_name.endswith('_sq') or param_name.endswith('_sq_stacked'):
             continue
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
         ctx.name_cache = {}
@@ -138,7 +138,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
 
-        weight_update = adam(ctx, grad, grads[param_name + '_sq'], step)
+        weight_update = adam(ctx, grad, grads[add_sq(param_name)], step)
         if not small_parameter(param_name, grad):
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)

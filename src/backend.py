@@ -17,6 +17,12 @@ PRECISION = "highest"
 jax.config.update("jax_default_matmul_precision", PRECISION)
 
 
+def add_sq(name: str) -> str:
+    if name.endswith('_stacked'):
+        return name[:-len('_stacked')] + '_sq_stacked'
+    return name + '_sq'
+
+
 def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
