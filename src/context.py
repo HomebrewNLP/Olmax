@@ -112,6 +112,7 @@ class Optimizer(DataClass):
     block_size: int = 512
     epsilon: float = 1e-16
     statistics_compute_steps: int = 4
+    start_preconditioning_at: int = 1024
     momentum_beta: float = 0.1
     learning_rate: float = 0.01
     gradient_clip: float = 0.001

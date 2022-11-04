@@ -89,7 +89,9 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray)
             return fallback_pth_root(prev_p, step, new_stat, preconditioner.exponent_for_preconditioner(),
                                      ctx.optimizer.epsilon)
 
-        new_p = lax.cond((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond, lambda: prev_p)
+        new_p = lax.cond(jnp.logical_and((step % ctx.optimizer.statistics_compute_steps) == 0,
+                                         step > ctx.optimizer.start_preconditioning_at),
+                         _new_precond, lambda: prev_p)
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
     if ctx.is_initializing:
@@ -155,7 +157,9 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             else:
                 shampoo_update = shampoo(ctx, param_name, grad, step)
             shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
-            weight_update = graft(param_name, weight_update, shampoo_update)
+            weight_update = lax.cond(step > ctx.optimizer.start_preconditioning_at,
+                                     lambda: graft(param_name, weight_update, shampoo_update),
+                                     lambda: weight_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
