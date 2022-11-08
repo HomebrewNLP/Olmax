@@ -87,8 +87,6 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
                        nesterov=False, heavyball=False, debias=False)
         prev_p = get_param(ctx, f'preconditioner_{i}', stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
 
-        print(param_name, stat.shape)
-
         if ctx.is_initializing:
             continue
 
