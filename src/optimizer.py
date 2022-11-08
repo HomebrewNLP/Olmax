@@ -74,16 +74,16 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
             ) -> typing.Tuple[jnp.ndarray, jnp.ndarray, int]:  # skipcq: PYL-W0640
     original_shape = grad.shape
-    if is_stacked(param_name):
+    if ctx.optimizer.shampoo.flatten_depth and is_stacked(param_name):
         grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
-    if "/conv:" in param_name and "/conv_weight" in param_name:
+    if ctx.optimizer.shampoo.flatten_conv and "/conv:" in param_name and "/conv_weight" in param_name:
         grad = grad.reshape(grad.shape[0], grad.shape[1] * grad.shape[2])
-    preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
+    preconditioner = Preconditioner(grad, ctx.optimizer.shampoo.block_size)
     new_preconditioners = []
     failures = jnp.zeros([], jnp.int32)
     for i, stat in enumerate(preconditioner.statistics_from_grad(grad)):
         eye = jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype)
-        ema_stat = ema(ctx, stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
+        ema_stat = ema(ctx, stat, step, 1 - ctx.optimizer.shampoo.beta2, True, init_val=eye * ctx.optimizer.epsilon,
                        nesterov=False, heavyball=False, debias=False)
         prev_p = get_param(ctx, f'preconditioner_{i}', stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
 
@@ -94,7 +94,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
             return fallback_pth_root(prev_p, step, ema_stat, preconditioner.exponent_for_preconditioner(),
                                      ctx.optimizer.epsilon)
 
-        new_p, failure = lax.cond((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond,
+        new_p, failure = lax.cond((step % ctx.optimizer.shampoo.statistics_compute_steps) == 0, _new_precond,
                                   lambda: (prev_p, jnp.zeros([], bool)))
         failures = failures + failure
         new_preconditioners.append(new_p)
@@ -160,7 +160,7 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             shampoo_update, failure, preconditioner = shampoo(ctx, param_name, grad, step)
             failures += failure
             preconditioners += preconditioner
-            shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
+            shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.shampoo.beta1)
             weight_update = graft(param_name, weight_update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
