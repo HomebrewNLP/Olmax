@@ -76,7 +76,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
     original_shape = grad.shape
     if is_stacked(param_name):
         grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
-    if "/conv:" in param_name and "/conv_weight:" in param_name:
+    if "/conv:" in param_name and "/conv_weight" in param_name:
         grad = grad.reshape(grad.shape[0], grad.shape[1] * grad.shape[2])
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
@@ -101,12 +101,9 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
         failures = failures + failure
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
-    if ctx.is_initializing:
-        return grad, failures, len(new_preconditioners)
-    out = preconditioner.preconditioned_grad(grad, new_preconditioners)
-    if is_stacked(param_name) or ("/conv:" in param_name and "/conv_weight:" in param_name):
-        out = out.reshape(original_shape)
-    return out, failures, len(new_preconditioners)
+    if not ctx.is_initializing:
+        grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
+    return grad.reshape(original_shape), failures, len(new_preconditioners)
 
 
 def norm(param_name: str, val: jnp.ndarray):
