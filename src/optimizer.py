@@ -33,7 +33,7 @@ def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
 
 
 def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
-    is_small = "norm" in param_name.lower() or "rezero" in param_name.lower()
+    is_small = "scale_norm_act" in param_name.lower() or "rezero" in param_name.lower()
     is_small |= grad.ndim < (2 + is_stacked(param_name))
     return is_small
 
@@ -81,16 +81,16 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
     failures = jnp.zeros([], jnp.int32)
-    for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
-        eye = jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype)
-        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
+    for i, stat in enumerate(preconditioner.statistics_from_grad(grad)):
+        eye = jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype)
+        ema_stat = ema(ctx, stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
                        nesterov=False, heavyball=False, debias=False)
-        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
+        prev_p = get_param(ctx, f'preconditioner_{i}', stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
         if ctx.is_initializing:
             continue
 
         def _new_precond():
-            return fallback_pth_root(prev_p, step, new_stat, preconditioner.exponent_for_preconditioner(),
+            return fallback_pth_root(prev_p, step, ema_stat, preconditioner.exponent_for_preconditioner(),
                                      ctx.optimizer.epsilon)
 
         new_p, failure = lax.cond((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond,
