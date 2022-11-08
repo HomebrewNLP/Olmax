@@ -164,7 +164,9 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
                 failures += sum(failures)
                 preconditioners += sum(preconditioners)
             else:
-                shampoo_update, failures, preconditioners = shampoo(ctx, param_name, grad, step)
+                shampoo_update, failure, preconditioner = shampoo(ctx, param_name, grad, step)
+                failures += failure
+                preconditioners += preconditioner
             shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
             weight_update = graft(param_name, weight_update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
