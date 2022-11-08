@@ -77,7 +77,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
     if is_stacked(param_name):
         grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
     if "/conv:" in param_name and "/conv_weight:" in param_name:
-        grad = grad.reshape(original_shape[0], original_shape[1] * original_shape[2])
+        grad = grad.reshape(grad.shape[0], grad.shape[1] * grad.shape[2])
     preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
     new_preconditioners = []
     failures = jnp.zeros([], jnp.int32)
@@ -86,6 +86,9 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
         ema_stat = ema(ctx, stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
                        nesterov=False, heavyball=False, debias=False)
         prev_p = get_param(ctx, f'preconditioner_{i}', stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
+
+        print(param_name, stat.shape)
+
         if ctx.is_initializing:
             continue
 
