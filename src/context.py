@@ -106,18 +106,24 @@ class WandB(DataClass):
     median_sizes: typing.List[int] = [64, 256, 1024]
 
 
+class Shampoo(DataClass):
+    block_size: int = 512
+    statistics_compute_steps: int = 16
+    beta1: float = 0.1
+    beta2: float = 0.01
+    flatten_depth: bool = True
+    flatten_conv: bool = True
+
+
 class Optimizer(DataClass):
+    shampoo: Shampoo = Shampoo()
     nesterov: bool = True
     heavyball: bool = True
-    block_size: int = 512
     epsilon: float = 1e-16
-    statistics_compute_steps: int = 4
-    momentum_beta: float = 0.1
     learning_rate: float = 0.01
     gradient_clip: float = 0.001
     adam_beta1: float = 0.03
     adam_beta2: float = 0.003
-    shampoo_beta2: float = 0.01
     weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
@@ -241,18 +247,15 @@ class WhileContext(DataClass):
 class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
-        self.loss = jnp.zeros([])
-        self.accuracy = jnp.zeros([])
+        self.scalars = jnp.zeros([4], jnp.float64)
 
         if config is not None:
-            self.loss = config['loss']
-            self.accuracy = config['accuracy']
+            self.scalars = config['scalars']
             self.ctx.parameter_variance = config['parameter_variance']
 
     def serialize(self):
         serialized = self._serialize()
-        serialized['loss'] = self.loss
-        serialized['accuracy'] = self.accuracy
+        serialized['scalars'] = self.scalars
         serialized['parameter_variance'] = self.ctx.parameter_variance
         return serialized
 

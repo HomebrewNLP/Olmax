@@ -33,7 +33,7 @@ def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
 
 
 def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
-    is_small = "norm" in param_name.lower() or "rezero" in param_name.lower()
+    is_small = "scale_norm_act" in param_name.lower() or "rezero" in param_name.lower()
     is_small |= grad.ndim < (2 + is_stacked(param_name))
     return is_small
 
@@ -71,27 +71,37 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # skipcq: PYL-W0640
-    preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
+def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
+            ) -> typing.Tuple[jnp.ndarray, jnp.ndarray, int]:  # skipcq: PYL-W0640
+    original_shape = grad.shape
+    if ctx.optimizer.shampoo.flatten_depth and is_stacked(param_name):
+        grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
+    if ctx.optimizer.shampoo.flatten_conv and "/conv:" in param_name and "/conv_weight" in param_name:
+        grad = grad.reshape(grad.shape[0], grad.shape[1] * grad.shape[2])
+    preconditioner = Preconditioner(grad, ctx.optimizer.shampoo.block_size)
     new_preconditioners = []
-    for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
-        eye = jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype)
-        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
+    failures = jnp.zeros([], jnp.int32)
+    for i, stat in enumerate(preconditioner.statistics_from_grad(grad)):
+        eye = jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype)
+        ema_stat = ema(ctx, stat, step, 1 - ctx.optimizer.shampoo.beta2, True, init_val=eye * ctx.optimizer.epsilon,
                        nesterov=False, heavyball=False, debias=False)
-        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
+        prev_p = get_param(ctx, f'preconditioner_{i}', stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
+
         if ctx.is_initializing:
             continue
 
         def _new_precond():
-            return fallback_pth_root(prev_p, step, new_stat, preconditioner.exponent_for_preconditioner(),
+            return fallback_pth_root(prev_p, step, ema_stat, preconditioner.exponent_for_preconditioner(),
                                      ctx.optimizer.epsilon)
 
-        new_p = lax.cond((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond, lambda: prev_p)
+        new_p, failure = lax.cond((step % ctx.optimizer.shampoo.statistics_compute_steps) == 0, _new_precond,
+                                  lambda: (prev_p, jnp.zeros([], bool)))
+        failures = failures + failure
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
-    if ctx.is_initializing:
-        return grad
-    return preconditioner.preconditioned_grad(grad, new_preconditioners)
+    if not ctx.is_initializing:
+        grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
+    return grad.reshape(original_shape), failures, len(new_preconditioners)
 
 
 def norm(param_name: str, val: jnp.ndarray):
@@ -128,9 +138,12 @@ def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
     return learning_rate.astype(ctx.model.storage_dtype)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray):
+def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray) -> typing.Tuple[jnp.ndarray, int]:
     outer_ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, step)
+
+    failures = jnp.zeros([], jnp.int32)
+    preconditioners = 0
 
     for param_name, grad in grads.items():
         if "optimizer" in param_name:
@@ -144,12 +157,12 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         weight_update = adam(ctx, grad, step)
         if not small_parameter(param_name, grad):
-            if is_stacked(param_name):
-                shampoo_update = jnp.stack([shampoo(ctx, grad[i], step) for i in range(grad.shape[0])], 0)
-            else:
-                shampoo_update = shampoo(ctx, grad, step)
-            shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.momentum_beta)
+            shampoo_update, failure, preconditioner = shampoo(ctx, param_name, grad, step)
+            failures += failure
+            preconditioners += preconditioner
+            shampoo_update = ema(ctx, shampoo_update, step, 1 - ctx.optimizer.shampoo.beta1)
             weight_update = graft(param_name, weight_update, shampoo_update)
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
+    return failures, preconditioners

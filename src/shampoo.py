@@ -225,9 +225,14 @@ def matrix_inverse_pth_root(matrix: jnp.ndarray, step: jnp.ndarray, p: int, num_
     return resultant_mat_h, error
 
 
+def _skip(error):
+    return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD)
+
+
 def fallback_pth_root(prev: jnp.array, step: jnp.ndarray, stat: jnp.array, p: int, eps: float):
     new_p, error = matrix_inverse_pth_root(stat, step, p, ridge_epsilon=eps)
-    return select_preconditioner(error, new_p, prev)
+    failure = _skip(error)
+    return lax.cond(failure, lambda: prev, lambda: new_p), failure
 
 
 def merge_small_dims(shape_to_merge, max_dim):
@@ -372,11 +377,3 @@ class Preconditioner:
             preconditioned_partitioned_grads.append(precond_g)
         merged_grad = self.merge_partitions(preconditioned_partitioned_grads)
         return jnp.reshape(merged_grad, self._original_shape)
-
-
-def _skip(error):
-    return jnp.logical_or(jnp.isnan(error), error >= INVERSE_FAILURE_THRESHOLD).astype(error.dtype)
-
-
-def select_preconditioner(error, new_p, old_p):
-    return lax.cond(_skip(error), lambda _: old_p, lambda _: new_p, operand=None)
