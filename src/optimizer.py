@@ -71,11 +71,13 @@ def adam(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
+def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray, stack: bool = True
             ) -> typing.Tuple[jnp.ndarray, jnp.ndarray, int]:  # skipcq: PYL-W0640
     original_shape = grad.shape
     if ctx.optimizer.shampoo.flatten_depth and is_stacked(param_name):
         grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
+    elif stack:
+        return jnp.stack([shampoo(ctx, param_name, g, step, False) for g in grad], 0)
     if ctx.optimizer.shampoo.flatten_conv and "/conv:" in param_name and "/conv_weight" in param_name:
         grad = grad.reshape(*grad.shape[:-2], grad.shape[-2] * grad.shape[-1])
     preconditioner = Preconditioner(grad, ctx.optimizer.shampoo.block_size)
