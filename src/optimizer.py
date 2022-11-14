@@ -33,7 +33,7 @@ def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
 
 
 def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
-    is_small = "scale_norm_act" in param_name.lower() or "rezero" in param_name.lower()
+    is_small = "norm" in param_name.lower() or "rezero" in param_name.lower()
     is_small |= grad.ndim < (2 + is_stacked(param_name))
     return is_small
 
