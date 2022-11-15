@@ -83,7 +83,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
         grad = grad.reshape(*grad.shape[:-2], grad.shape[-2] * grad.shape[-1])
     else:
         batch_dims += 1
-    preconditioner = Preconditioner(grad.shape[batch_dims:], ctx.optimizer.shampoo.block_size, batch_dims)
+    preconditioner = Preconditioner(grad.shape, ctx.optimizer.shampoo.block_size, batch_dims)
     new_preconditioners = []
     failures = jnp.zeros([], jnp.int32)
 
