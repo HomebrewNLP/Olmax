@@ -3,9 +3,9 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param
-from .context import Context
-from .shampoo import Preconditioner, fallback_pth_root
+from src.backend import assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param
+from src.context import Context
+from src.shampoo import Preconditioner, fallback_pth_root
 
 
 def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
@@ -77,7 +77,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
     batch_dims = 0
     if ctx.optimizer.shampoo.flatten_depth and is_stacked(param_name):
         grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
-    else:
+    elif is_stacked(param_name):
         batch_dims += 1
     if ctx.optimizer.shampoo.flatten_conv and "/conv:" in param_name and "/conv_weight" in param_name:
         grad = grad.reshape(*grad.shape[:-2], grad.shape[-2] * grad.shape[-1])
