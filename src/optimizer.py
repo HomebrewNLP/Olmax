@@ -75,14 +75,16 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
             ) -> typing.Tuple[jnp.ndarray, jnp.ndarray, int]:  # skipcq: PYL-W0640
     original_shape = grad.shape
     batch_dims = 0
-    if ctx.optimizer.shampoo.flatten_depth and is_stacked(param_name):
-        grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
-    elif is_stacked(param_name):
-        batch_dims += 1
-    if ctx.optimizer.shampoo.flatten_conv and "/conv:" in param_name and "/conv_weight" in param_name:
-        grad = grad.reshape(*grad.shape[:-2], grad.shape[-2] * grad.shape[-1])
-    else:
-        batch_dims += 1
+    if is_stacked(param_name):
+        if ctx.optimizer.shampoo.flatten_depth:
+            grad = grad.reshape(-1, *grad.shape[2:])  # flatten fan-out and depth
+        else:
+            batch_dims += 1
+    if "/conv:" in param_name and "/conv_weight" in param_name:
+        if ctx.optimizer.shampoo.flatten_conv:
+            grad = grad.reshape(*grad.shape[:-2], grad.shape[-2] * grad.shape[-1])
+        else:
+            batch_dims += 1
     preconditioner = Preconditioner(grad.shape, ctx.optimizer.shampoo.block_size, batch_dims)
     new_preconditioners = []
     failures = jnp.zeros([], jnp.int32)
