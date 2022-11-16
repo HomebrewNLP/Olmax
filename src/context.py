@@ -111,8 +111,6 @@ class Shampoo(DataClass):
     statistics_compute_steps: int = 16
     beta1: float = 0.1
     beta2: float = 0.01
-    flatten_depth: bool = True
-    flatten_conv: bool = True
 
 
 class Optimizer(DataClass):
