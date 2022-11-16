@@ -95,7 +95,8 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
         _new_precond = jax.vmap(_new_precond)
 
     for i, stat in enumerate(preconditioner.statistics_from_grad(grad)):
-        eye = jnp.eye(stat.shape[0], dtype=ctx.model.storage_dtype)
+        eye = jnp.eye(stat.shape[batch_dims], dtype=ctx.model.storage_dtype)
+        eye = jnp.broadcast_to(eye, preconditioner.batch_shape + tuple(eye.shape))
         ema_stat = ema(ctx, stat, step, 1 - ctx.optimizer.shampoo.beta2, True, init_val=eye * ctx.optimizer.epsilon,
                        nesterov=False, heavyball=False, debias=False)
         prev_p = get_param(ctx, f'preconditioner_{i}', stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
