@@ -271,7 +271,7 @@ class Preconditioner:
         stats = []
         batch_dims = list(range(self.batch_dims))
         for i, slices in enumerate(partitioned_grads, self.batch_dims):
-            axes = list(range(self.batch_dims, i)) + list(range(i + 1, self.rank))
+            axes = list(range(self.batch_dims, i)) + list(range(i + 1, self.rank + self.batch_dims))
             stats.extend([dot(g, g, axes, axes, batch_dims, batch_dims) for g in slices])
         return stats
 
