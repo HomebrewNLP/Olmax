@@ -262,7 +262,7 @@ class Preconditioner:
         for i, d in enumerate(self.reshaped_slice_shape):
             if 0 > block_size or block_size > d:
                 continue
-            assert d.shape % block_size == 0
+            assert d % block_size == 0
             self.splits.append((i + self.batch_dims, d // block_size))
 
     def statistics_from_grad(self, grad) -> typing.List[jnp.ndarray]:
