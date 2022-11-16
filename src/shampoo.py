@@ -1,38 +1,13 @@
-# coding=utf-8
-# Copyright 2022 The Google Research Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# An implementation of distributed Shampoo optimizer from:
-#
-#  Scalable Second Order Optimization for Deep Learning
-#  Rohan Anil, Vineet Gupta, Tomer Koren, Kevin Regan, Yoram Singer
-#  Preprint Paper: https://arxiv.org/abs/2002.09018
-#
-# This implementation moves computation of inverse pth root back to the
-# accelerator (if higher precision is available).
-#
-# Authors: Rohan Anil (rohananil at google dot com)
-#    &     Vineet Gupta (vineet at google dot com)
-#
-"""Distributed Shampoo Implementation."""
-
+"""
+core functionality from https://github.com/google-research/google-research/blob/19c62b3e187dd7fef2c9e94067b5e2b7f5eda53f/scalable_shampoo/optax/distributed_shampoo.py
+"""
 import typing
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
+from src.backend import dot
 
 INVERSE_FAILURE_THRESHOLD = 0.1
 
@@ -294,9 +269,10 @@ class Preconditioner:
         reshaped_grad = jnp.reshape(grad, self.reshaped_batched_shape)
         partitioned_grads = self.partition(reshaped_grad)
         stats = []
+        batch_dims = list(range(self.batch_dims))
         for i, slices in enumerate(partitioned_grads, self.batch_dims):
             axes = list(range(self.batch_dims, i)) + list(range(i + 1, self.rank))
-            stats.extend([jnp.tensordot(g, g, axes=(axes, axes)) for g in slices])
+            stats.extend([dot(g, g, axes, axes, batch_dims, batch_dims) for g in slices])
         return stats
 
     def exponent_for_preconditioner(self):
