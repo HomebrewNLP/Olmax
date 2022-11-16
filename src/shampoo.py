@@ -251,7 +251,6 @@ class Preconditioner:
         self.reshaped_slice_shape = tuple(merge_small_dims(self.original_slice_shape, block_size))
         self.reshaped_batched_shape = self.batch_shape + self.reshaped_slice_shape
         self.splits = []
-        self.rank = len(self.reshaped_slice_shape)
         # We split params into smaller blocks. Here we store the metadata to make
         # that split.
         for i, d in enumerate(self.reshaped_slice_shape):
@@ -271,12 +270,12 @@ class Preconditioner:
         stats = []
         batch_dims = list(range(self.batch_dims))
         for i, slices in enumerate(partitioned_grads, self.batch_dims):
-            axes = list(range(self.batch_dims, i)) + list(range(i + 1, self.rank + self.batch_dims))
+            axes = list(range(self.batch_dims, i)) + list(range(i + 1, len(self.reshaped_batched_shape)))
             stats.extend([dot(g, g, axes, axes, batch_dims, batch_dims) for g in slices])
         return stats
 
-    def exponent_for_preconditioner(self):
-        return 2 * self.rank
+    def exponent(self):
+        return 2 * len(self.reshaped_slice_shape)
 
     def preconditioned_grad(self, grad, preconditioners):
         grad = jnp.reshape(grad, self.reshaped_batched_shape)

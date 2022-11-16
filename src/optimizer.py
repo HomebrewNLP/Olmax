@@ -88,7 +88,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
     failures = jnp.zeros([], jnp.int32)
 
     def _curried(pp, es):
-        return fallback_pth_root(pp, step, es, preconditioner.exponent_for_preconditioner(), ctx.optimizer.epsilon)
+        return fallback_pth_root(pp, step, es, preconditioner.exponent(), ctx.optimizer.epsilon)
 
     _new_precond = _curried
     for _ in range(batch_dims):
