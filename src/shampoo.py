@@ -1,5 +1,6 @@
 """
-core functionality from https://github.com/google-research/google-research/blob/19c62b3e187dd7fef2c9e94067b5e2b7f5eda53f/scalable_shampoo/optax/distributed_shampoo.py
+core functionality from https://github.com/google-research/google-research/blob
+/19c62b3e187dd7fef2c9e94067b5e2b7f5eda53f/scalable_shampoo/optax/distributed_shampoo.py
 """
 import typing
 
@@ -7,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
+
 from src.backend import dot
 
 INVERSE_FAILURE_THRESHOLD = 0.1
@@ -240,6 +242,10 @@ def merge_small_dims(shape_to_merge, max_dim):
     return resulting_shape
 
 
+def split(tensor: jnp.ndarray, slices: int, dim: int):
+    return tensor.reshape(tensor.shape[:dim] + (slices, -1) + tensor.shape[dim + 1:])
+
+
 class Preconditioner:
     """Compute statistics/shape from gradients for preconditioning."""
 
@@ -256,22 +262,17 @@ class Preconditioner:
         for i, d in enumerate(self.reshaped_slice_shape):
             if 0 > block_size or block_size > d:
                 continue
-            # d-1, otherwise split appends a 0-size array.
-            nsplit = (d - 1) // block_size
-            indices = (np.arange(nsplit, dtype=np.int32) + 1) * block_size
-            self.splits.append((i + self.batch_dims, indices))
+            assert d.shape % block_size == 0
+            self.splits.append((i + self.batch_dims, d // block_size))
 
-    def partition(self, tensor):
-        return [jnp.split(tensor, indices_or_sections=indices, axis=i) for i, indices in self.splits]
-
-    def statistics_from_grad(self, grad):
+    def statistics_from_grad(self, grad) -> typing.List[jnp.ndarray]:
         reshaped_grad = jnp.reshape(grad, self.reshaped_batched_shape)
-        partitioned_grads = self.partition(reshaped_grad)
         stats = []
-        batch_dims = list(range(self.batch_dims))
-        for i, slices in enumerate(partitioned_grads, self.batch_dims):
-            axes = list(range(self.batch_dims, i)) + list(range(i + 1, len(self.reshaped_batched_shape)))
-            stats.extend([dot(g, g, axes, axes, batch_dims, batch_dims) for g in slices])
+        batch_dims = tuple(range(self.batch_dims))
+        for i, sections in self.splits:
+            slices = split(reshaped_grad, sections, i)
+            axes = list(range(self.batch_dims, i)) + list(range(i + 2, slices.ndim))
+            stats.append(dot(slices, slices, axes, axes, batch_dims + (i,), batch_dims + (i,)))
         return stats
 
     def exponent(self):
@@ -279,10 +280,8 @@ class Preconditioner:
 
     def preconditioned_grad(self, grad, preconditioners):
         grad = jnp.reshape(grad, self.reshaped_batched_shape)
-        pid = 0
-        for axis, indices in self.splits:
-            grad = jnp.concatenate([jnp.tensordot(g, preconditioners[pid + i], axes=[[axis], [0]])
-                                    for i, g in enumerate(jnp.split(grad, indices_or_sections=indices, axis=axis))],
-                                   axis=axis)
-            pid += len(indices)
+        for precs, (axis, sections) in zip(preconditioners, self.splits):
+            batch_dims = tuple(range(self.batch_dims))
+            grad = dot(split(grad, sections, axis), precs, axis + 1, self.batch_dims + 1,
+                       batch_dims + (axis,), batch_dims + (self.batch_dims,))
         return jnp.reshape(grad, self.original_batched_shape)

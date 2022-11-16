@@ -91,7 +91,7 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
         return fallback_pth_root(pp, step, es, preconditioner.exponent(), ctx.optimizer.epsilon)
 
     _new_precond = _curried
-    for _ in range(batch_dims):
+    for _ in range(batch_dims + 1):
         _new_precond = jax.vmap(_new_precond)
 
     for i, stat in enumerate(preconditioner.statistics_from_grad(grad)):
