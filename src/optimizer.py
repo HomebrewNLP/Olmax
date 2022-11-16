@@ -86,9 +86,13 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
     def _curried(pp, es):
         return fallback_pth_root(pp, step, es, preconditioner.exponent(), ctx.optimizer.epsilon)
 
-    _new_precond = _curried
+    _curried = _curried
     for _ in range(batch_dims + 1):
-        _new_precond = jax.vmap(_new_precond)
+        _curried = jax.vmap(_curried)
+
+    def _new_precond(pp, es):
+        _new_p, _failure = _curried(pp, es)
+        return _new_p, jnp.sum(_failure).astype(jnp.int32)
 
     for i, stat in enumerate(preconditioner.statistics_from_grad(grad)):
         eye = jnp.eye(stat.shape[batch_dims + 1], dtype=ctx.model.storage_dtype)
@@ -101,9 +105,9 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
             continue
 
         new_p, failure = lax.cond((step % ctx.optimizer.shampoo.statistics_compute_steps) == 0,
-                                  _new_precond, lambda *x: (prev_p, jnp.zeros([], bool)),
+                                  _new_precond, lambda *x: (prev_p, jnp.zeros([], jnp.int32)),
                                   prev_p, ema_stat)
-        failures = failures + jnp.sum(failure)
+        failures = failures + failure
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
     if not ctx.is_initializing:
