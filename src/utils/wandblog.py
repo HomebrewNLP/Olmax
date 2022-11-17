@@ -51,4 +51,4 @@ class WandbLog:
 
         self.run.log(items, step=step)
 
-        return any(val in (float("nan"), float("inf"), float("-inf")) for val in wctx.scalars[0, :])
+        return any(val in (float("nan"), float("inf"), float("-inf")) for val in wctx.scalars[0, :2])
