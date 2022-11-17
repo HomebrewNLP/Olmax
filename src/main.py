@@ -58,7 +58,9 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
 
     wctx = WhileTrainContext(loop(train_step, wctx.serialize(), steps, training.device_unroll))
-    number_of_inverses = jnp.sum((jnp.arange(steps) + start_step) % wctx.ctx.optimizer.shampoo.statistics_compute_steps)
+    current_steps = jnp.arange(steps) + start_step
+    inverse_computed = (current_steps % wctx.ctx.optimizer.shampoo.statistics_compute_steps) == 0
+    number_of_inverses = jnp.sum(inverse_computed)
     wctx.scalars = wctx.scalars.at[2].set(wctx.scalars[2] / number_of_inverses)
     return wctx.serialize()
 
