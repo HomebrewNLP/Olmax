@@ -1,6 +1,7 @@
 import typing
 
 import jax
+import numpy as np
 from jax import lax, numpy as jnp
 
 from src.backend import assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param
@@ -94,6 +95,8 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
         _new_p, _failure = _curried(pp, es)
         return _new_p, jnp.sum(_failure).astype(jnp.int32)
 
+    preconditioner_count = 0
+
     for i, stat in enumerate(preconditioner.statistics_from_grad(grad)):
         eye = jnp.eye(stat.shape[batch_dims + 1], dtype=ctx.model.storage_dtype)
         eye = jnp.broadcast_to(eye, stat.shape[:batch_dims + 1] + eye.shape)
@@ -108,11 +111,12 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
                                   _new_precond, lambda *x: (prev_p, jnp.zeros([], jnp.int32)),
                                   prev_p, ema_stat)
         failures = failures + failure
+        preconditioner_count += np.prod(new_p.shape[:batch_dims + 1])
         new_preconditioners.append(new_p)
         assign(ctx, f"preconditioner_{i}", new_p)
     if not ctx.is_initializing:
         grad = preconditioner.preconditioned_grad(grad, new_preconditioners)
-    return grad.reshape(original_shape), failures, len(new_preconditioners)
+    return grad.reshape(original_shape), failures, int(preconditioner_count)
 
 
 def norm(param_name: str, val: jnp.ndarray):
