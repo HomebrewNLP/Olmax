@@ -108,6 +108,7 @@ class WandB(DataClass):
 
 class Shampoo(DataClass):
     block_size: int = 512
+    start_preconditioning_at: int = -1
     statistics_compute_steps: int = 16
     beta1: float = 0.1
     beta2: float = 0.01

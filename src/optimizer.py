@@ -107,7 +107,8 @@ def shampoo(ctx: Context, param_name: str, grad: jnp.ndarray, step: jnp.ndarray
         if ctx.is_initializing:
             continue
 
-        new_p, failure = lax.cond((step % ctx.optimizer.shampoo.statistics_compute_steps) == 0,
+        new_p, failure = lax.cond(jnp.logical_and(step % ctx.optimizer.shampoo.statistics_compute_steps == 0,
+                                                  step > ctx.optimizer.shampoo.start_preconditioning_at),
                                   _new_precond, lambda *x: (prev_p, jnp.zeros([], jnp.int32)),
                                   prev_p, ema_stat)
         failures = failures + failure
