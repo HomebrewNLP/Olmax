@@ -68,8 +68,9 @@ def tg_adam(ctx: Context, param_name: str, grad: jnp.ndarray, tg_grad: jnp.ndarr
     return graft(param_name, adam_update, tg_update)
 
 
-def norm(param_name: str, val: jnp.ndarray):
-    val = lax.square(val)
+def norm(param_name: str, val: jnp.ndarray, is_squared: bool):
+    if not is_squared:
+        val = lax.square(val)
     if is_stacked(param_name):
         val = val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
     else:
@@ -77,13 +78,14 @@ def norm(param_name: str, val: jnp.ndarray):
     return val
 
 
-def clip_norm(param_name: str, val: jnp.ndarray, min_norm: float) -> jnp.ndarray:
-    return jnp.maximum(jnp.sqrt(norm(param_name, val)), min_norm)
+def clip_norm(param_name: str, val: jnp.ndarray, min_norm: float, is_squared: bool) -> jnp.ndarray:
+    return jnp.maximum(jnp.sqrt(norm(param_name, val, is_squared)), min_norm)
 
 
-def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray) -> jnp.ndarray:
-    grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon)
-    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3)
+def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray, is_squared: bool) -> jnp.ndarray:
+    grad = grad.astype(jnp.float64)
+    grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon, is_squared)
+    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3, is_squared)
     grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
     return grad * grad_scale
 
@@ -111,14 +113,16 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             continue
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
         ctx.name_cache = {}
+        dtype = ctx.parameters[param_name].dtype
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
-        grad = grad.astype(jnp.float64)
 
-        grad = adaptive_gradient_clipping(ctx, param_name, grad)
-        weight_update = tg_adam(ctx, param_name, grad, grads[add_sq(param_name)], step)
+        grad = adaptive_gradient_clipping(ctx, param_name, grad, False)
+        grad_sq = adaptive_gradient_clipping(ctx, param_name, grads[add_sq(param_name)], True)
+        weight_update = tg_adam(ctx, param_name, grad, grad_sq, step)
 
         if not small_parameter(param_name, grad):
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
 
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
+        ctx.parameters[param_name] = ctx.parameters.astype(dtype)
