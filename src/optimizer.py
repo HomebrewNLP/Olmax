@@ -124,5 +124,4 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
 
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
-        ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]
-        ctx.parameters[param_name] = ctx.parameters.astype(dtype)
+        ctx.parameters[param_name] = (weight_update * parameter_lr + ctx.parameters[param_name]).astype(dtype)
