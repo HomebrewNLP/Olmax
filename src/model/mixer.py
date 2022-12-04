@@ -29,16 +29,16 @@ def dot_sq(ctx: Context, src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.n
 @with_context()
 def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     wgt0 = get_param(ctx, "mix_0", weight_shape)
     wgt1 = get_param(ctx, "mix_1", weight_shape)
-    scale = get_param(ctx, "scale", [ctx.dims.features], std=0, mean=1,
-                      dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
+    scale = get_param(ctx, "scale", [ctx.dims.features], std=0, mean=1, dtype=run_type)
     if ctx.is_initializing:
         return inp
 
     wgt0_sq = get_param(ctx, "mix_0_sq")
     wgt1_sq = get_param(ctx, "mix_1_sq")
-    scale_sq = get_param(ctx, "scale_sq")
+    scale_sq = get_param(ctx, "scale_sq", dtype=run_type)
 
     original_shape = inp.shape
     _batch, sequence, _features = original_shape
