@@ -91,7 +91,7 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray,
 
 
 def graft(param_name: str, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
-    scale = jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
+    scale = jnp.sqrt(norm(param_name, magnitude, False) / jnp.maximum(norm(param_name, direction, False), 1e-16))
     return scale * direction
 
 
