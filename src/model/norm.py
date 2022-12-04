@@ -104,7 +104,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
                 dx -= dx.mean(dim, keepdims=True)
             if psum:
                 dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
-            return dx.astype(original_dtype), d_wgt, d_wgt_sq
+            return dx.astype(original_dtype), d_wgt.astype(run_type), d_wgt_sq.astype(run_type)
 
         return out, _grad
 
