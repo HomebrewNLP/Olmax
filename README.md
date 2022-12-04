@@ -90,7 +90,6 @@ speedup for both training and inference.
 
 ### Optimizer
 
-#### Shampoo
 
 #### Adaptive Gradient Clipping
 

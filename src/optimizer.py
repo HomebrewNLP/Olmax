@@ -3,9 +3,8 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param, add_sq
+from .backend import add_sq, assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param
 from .context import Context
-from .shampoo import Preconditioner, fallback_pth_root
 
 
 def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
@@ -59,35 +58,14 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
     return new_state
 
 
-@with_context()
-def adam(ctx: Context, grad: jnp.ndarray, grad_sq: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def tg_adam(ctx: Context, param_name: str, grad: jnp.ndarray, tg_grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
     ema_g = ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1)
-    ema_sq = ema(ctx, grad_sq, step, 1 - ctx.optimizer.adam_beta2)
-    return ema_g * stable_rsqrt(ema_sq, ctx.optimizer.epsilon)
+    ema_gsq = ema(ctx, grad ** 2, step, 1 - ctx.optimizer.adam_beta1)
+    ema_tgsq = ema(ctx, tg_grad, step, 1 - ctx.optimizer.adam_beta3)
 
-
-@with_context()
-def shampoo(ctx: Context, grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:  # skipcq: PYL-W0640
-    preconditioner = Preconditioner(grad, ctx.optimizer.block_size)
-    new_preconditioners = []
-    for i, old_stat in enumerate(preconditioner.statistics_from_grad(grad)):
-        eye = jnp.eye(old_stat.shape[0], dtype=ctx.model.storage_dtype)
-        new_stat = ema(ctx, old_stat, step, 1 - ctx.optimizer.shampoo_beta2, True, init_val=eye * ctx.optimizer.epsilon,
-                       nesterov=False, heavyball=False, debias=False)
-        prev_p = get_param(ctx, f'preconditioner_{i}', old_stat.shape, dtype=grad.dtype, init_val=eye, tied=True)
-        if ctx.is_initializing:
-            continue
-
-        def _new_precond():
-            return fallback_pth_root(prev_p, step, new_stat, preconditioner.exponent_for_preconditioner(),
-                                     ctx.optimizer.epsilon)
-
-        new_p = lax.cond((step % ctx.optimizer.statistics_compute_steps) == 0, _new_precond, lambda: prev_p)
-        new_preconditioners.append(new_p)
-        assign(ctx, f"preconditioner_{i}", new_p)
-    if ctx.is_initializing:
-        return grad
-    return preconditioner.preconditioned_grad(grad, new_preconditioners)
+    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
+    adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
+    return graft(param_name, adam_update, tg_update)
 
 
 def norm(param_name: str, val: jnp.ndarray):
@@ -137,9 +115,10 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = grad.astype(jnp.float64)
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad)
+        weight_update = tg_adam(ctx, param_name, grad, grads[add_sq(param_name)], step)
 
-        weight_update = adam(ctx, grad, grads[add_sq(param_name)], step)
         if not small_parameter(param_name, grad):
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+
         weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
         ctx.parameters[param_name] = weight_update * parameter_lr + ctx.parameters[param_name]

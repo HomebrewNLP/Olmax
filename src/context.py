@@ -117,7 +117,7 @@ class Optimizer(DataClass):
     gradient_clip: float = 0.001
     adam_beta1: float = 0.03
     adam_beta2: float = 0.003
-    shampoo_beta2: float = 0.01
+    adam_beta3: float = 0.001
     weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
