@@ -87,8 +87,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
                 summed = list(range(src.ndim))
                 del summed[dim]
                 d_wgt = dy * norm_out
-                d_wgt_sq = lax.square(d_wgt).sum(summed).reshape((-1,))
-                d_wgt = ((dy * norm_out).sum(summed) * ctx.dims.batch).reshape((-1,))
+                d_wgt_sq = lax.square(d_wgt).sum(summed).reshape((-1,)).astype(run_type)
+                d_wgt = ((dy * norm_out).sum(summed) * ctx.dims.batch).reshape((-1,)).astype(run_type)
             else:
                 d_wgt = None
                 d_wgt_sq = None
@@ -104,7 +104,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
                 dx -= dx.mean(dim, keepdims=True)
             if psum:
                 dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
-            return dx.astype(original_dtype), d_wgt.astype(run_type), d_wgt_sq.astype(run_type)
+            return dx.astype(original_dtype), d_wgt, d_wgt_sq
 
         return out, _grad
 
