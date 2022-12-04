@@ -58,7 +58,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
     if weight is None:
         weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
         if not ctx.is_initializing:
-            weight_sq = get_param(ctx, "scale_sq")
+            weight_sq = get_param(ctx, "scale_sq", dtype=run_type)
     elif weight is False:
         weight_sq = weight = 1
     else:
@@ -87,8 +87,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
                 summed = list(range(src.ndim))
                 del summed[dim]
                 d_wgt = dy * norm_out
-                d_wgt_sq = lax.square(d_wgt).sum(summed).reshape((-1,)).astype(wgt_dummy.dtype)
-                d_wgt = ((dy * norm_out).sum(summed) * ctx.dims.batch).reshape((-1,)).astype(wgt.dtype)
+                d_wgt_sq = lax.square(d_wgt).sum(summed).reshape((-1,))
+                d_wgt = ((dy * norm_out).sum(summed) * ctx.dims.batch).reshape((-1,))
             else:
                 d_wgt = None
                 d_wgt_sq = None
