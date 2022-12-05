@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, is_model, is_stacked, with_context
+from src.backend import get_param, is_model, is_stacked, with_context, square_grad
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
@@ -17,21 +17,14 @@ from src.model.reversible import FourArrays, reversible, revnet_out
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features)
 
-    @jax.custom_gradient
-    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, wgt_sq: jnp.ndarray):
-        def _grad(dy: jnp.ndarray):
-            zeros = jnp.zeros_like(wgt)
-            d_wgt = zeros.at[src].add(dy)
-            d_wgt_sq = zeros.at[src].add(dy ** 2)
-            return None, d_wgt, d_wgt_sq
-
-        return jnp.take(wgt, src, 0), _grad
+    def _fn(src, wgt):
+        return jnp.take(wgt, src, 0)
 
     if ctx.is_initializing:
-        return _fn(inp, param, param)
+        return _fn(inp, param)
 
-    param_sq = get_param(ctx, "inp_embd_sq")
-    return _fn(inp, param, param_sq)
+    return square_grad(_fn, inp, param, get_param(ctx, "inp_embd_sq"))
+
 
 @with_context()
 def block(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
@@ -71,8 +64,8 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
     return src
 
 
-def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
-                                                             jnp.ndarray]:
+def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[
+    typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = stem(ctx, (src, zero, src, zero))
