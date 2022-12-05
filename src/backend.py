@@ -22,8 +22,8 @@ def square_grad(fn: typing.Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], sr
     @jax.custom_gradient
     def _fn(x: jnp.ndarray, wgt: jnp.ndarray, wgt_dummy: jnp.ndarray):
         def _grad(dy: jnp.ndarray):
-            d_x, d_wgt = jax.vjp(fn, src, wgt)[1](dy)
-            _, d_wgt_sq = jax.vjp(fn, lax.square(src), wgt)[1](lax.square(dy))
+            d_x, d_wgt = jax.vjp(fn, x, wgt)[1](dy)
+            _, d_wgt_sq = jax.vjp(fn, lax.square(x), wgt)[1](lax.square(dy))
             return d_x, d_wgt, d_wgt_sq * x.shape[0]
 
         return fn(x, wgt), _grad
