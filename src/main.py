@@ -89,11 +89,11 @@ def get_optimizer_state(ctx: Context):
         new_ctx = ctx
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
-        new_ctx.parameters = parameters
+        new_ctx.parameters = parameters.copy()
+        add_zeros(parametets)
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
-        grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
+        grads = {name: jax.random.uniform(key, param.shape, ctx.model.computation_dtype) * 0.001
                  for key, (name, param) in zip(keys, parameters.items())}
-        add_zeros(grads)
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
