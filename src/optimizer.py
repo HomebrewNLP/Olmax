@@ -58,16 +58,6 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
     return new_state
 
 
-def tg_adam(ctx: Context, param_name: str, grad: jnp.ndarray, tg_grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
-    ema_g = ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1)
-    ema_gsq = ema(ctx, grad ** 2, step, 1 - ctx.optimizer.adam_beta1)
-    ema_tgsq = ema(ctx, tg_grad, step, 1 - ctx.optimizer.adam_beta3)
-
-    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
-    adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
-    return graft(param_name, adam_update, tg_update)
-
-
 def norm(param_name: str, val: jnp.ndarray, is_squared: bool):
     if not is_squared:
         val = lax.square(val)
@@ -93,6 +83,16 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray,
 def graft(param_name: str, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
     scale = jnp.sqrt(norm(param_name, magnitude, False) / jnp.maximum(norm(param_name, direction, False), 1e-16))
     return scale * direction
+
+
+def tg_adam(ctx: Context, param_name: str, grad: jnp.ndarray, tg_grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+    ema_g = ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1)
+    ema_gsq = ema(ctx, grad ** 2, step, 1 - ctx.optimizer.adam_beta2)
+    ema_tgsq = ema(ctx, tg_grad, step, 1 - ctx.optimizer.adam_beta3)
+
+    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
+    adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
+    return graft(param_name, adam_update, tg_update)
 
 
 def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
