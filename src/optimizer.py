@@ -3,33 +3,8 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import (add_sq, assign, default, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context,
-                      zero_param)
+from .backend import add_sq, assign, default, get_param, is_stacked, stable_rsqrt, with_context
 from .context import Context
-
-
-def one_shape(ndim: int, dim_name: int, dim_idx: int) -> typing.List[int]:
-    base = [1] * ndim
-    base[dim_idx] = dim_name
-    return base
-
-
-@with_context()
-def sm3(ctx: Context, grad: jnp.ndarray) -> jnp.ndarray:
-    weight_update = zero_param(ctx, "dim0", one_shape(grad.ndim, grad.shape[0], 0), ctx.model.storage_dtype)
-    buffer = [weight_update]
-
-    for i, d in enumerate(grad.shape[1:], 1):
-        buffer.append(zero_param(ctx, f"dim{i}", one_shape(grad.ndim, d, i), ctx.model.storage_dtype))
-        weight_update = jnp.minimum(weight_update, buffer[-1])
-
-    weight_update = weight_update + jnp.square(grad)
-
-    for i in range(grad.ndim):
-        new = weight_update.max([j for j in range(grad.ndim) if j != i], keepdims=True)
-        ctx.parameters[prefixed_name(ctx, f"dim{i}")] = new
-
-    return grad * stable_rsqrt(weight_update, ctx.optimizer.epsilon)
 
 
 def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
