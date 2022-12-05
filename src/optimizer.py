@@ -52,7 +52,7 @@ def clip_norm(param_name: str, val: jnp.ndarray, min_norm: float, is_squared: bo
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray, is_squared: bool) -> jnp.ndarray:
     grad = grad.astype(jnp.float64)
     grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon, is_squared)
-    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3, is_squared)
+    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3, False)
     grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
     return grad * grad_scale
 
