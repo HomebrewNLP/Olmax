@@ -3,7 +3,8 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import add_sq, assign, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context, zero_param
+from .backend import (add_sq, assign, default, get_param, is_stacked, prefixed_name, stable_rsqrt, with_context,
+                      zero_param)
 from .context import Context
 
 
@@ -41,14 +42,15 @@ def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
 def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize: typing.Optional[bool] = None,
         init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None,
         debias: bool = True) -> jnp.ndarray:
-    if quantize is None:
-        quantize = not small_parameter(ctx.global_prefix, inp)
-    if heavyball is None:
-        heavyball = ctx.optimizer.heavyball
-    if nesterov is None:
-        heavyball = ctx.optimizer.nesterov
+    quantize = default(quantize, not small_parameter(ctx.global_prefix, inp))
+    heavyball = default(heavyball, ctx.optimizer.heavyball)
+    nesterov = default(nesterov, ctx.optimizer.nesterov)
+
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else inp.dtype,
-                      init_val=jnp.zeros_like(inp) if init_val is None else init_val, tied=True)
+                      init_val=default(init_val, jnp.zeros_like(inp)), tied=True)
+    if ctx.is_initializing:
+        return state
+
     new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
     assign(ctx, "momentum_buffer", new_state)
     if not heavyball and debias:  # non-heavyball momentum needs to be debiased
@@ -90,6 +92,9 @@ def tg_adam(ctx: Context, param_name: str, grad: jnp.ndarray, tg_grad: jnp.ndarr
     ema_gsq = ema(ctx, grad ** 2, step, 1 - ctx.optimizer.adam_beta2)
     ema_tgsq = ema(ctx, tg_grad, step, 1 - ctx.optimizer.adam_beta3)
 
+    if ctx.is_initializing:
+        return grad
+
     tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
     adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
     return graft(param_name, adam_update, tg_update)
@@ -119,6 +124,9 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
         grad = adaptive_gradient_clipping(ctx, param_name, grad, False)
         grad_sq = adaptive_gradient_clipping(ctx, param_name, grads[add_sq(param_name)], True)
         weight_update = tg_adam(ctx, param_name, grad, grad_sq, step)
+
+        if ctx.is_initializing:
+            continue
 
         if not small_parameter(param_name, grad):
             ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
