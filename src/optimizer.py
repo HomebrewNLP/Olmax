@@ -27,7 +27,7 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
         return state
 
     new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
-    assign(ctx, "momentum_buffer", new_state)
+    assign(ctx, "momentum_buffer", new_state.astype(state.dtype))
     if not heavyball and debias:  # non-heavyball momentum needs to be debiased
         new_state = new_state / (1 - beta ** (step + 1))
     if nesterov:
