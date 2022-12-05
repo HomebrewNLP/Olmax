@@ -1,28 +1,19 @@
 import math
 import typing
 
-import jax
-from jax import lax, numpy as jnp
+from jax import numpy as jnp
 
-from src.backend import dot, get_param, pattern_match, with_context
+from src.backend import dot, get_param, pattern_match, square_grad, with_context
 from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
 
 
-def dot_sq(ctx: Context, src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.ndarray,
-           left_contract_dims: typing.Sequence[int],
-           right_contract_dims: typing.Sequence[int]):
-    @jax.custom_gradient
-    def _prepare(x: jnp.ndarray):
-        def _grad(dy: jnp.ndarray):
-            return lax.square(dy) * ctx.dims.batch
+def dot_sq(src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.ndarray,
+           left_contract_dims: typing.Sequence[int], right_contract_dims: typing.Sequence[int]):
+    def _dot(x, y):
+        return dot(x, y, left_contract_dims=left_contract_dims, right_contract_dims=right_contract_dims)
 
-        return jnp.zeros_like(x), _grad
-
-    out = dot(src, weight, left_contract_dims=left_contract_dims, right_contract_dims=right_contract_dims)
-    sq = dot(lax.stop_gradient(lax.square(src)).astype(src.dtype), weight_sq, left_contract_dims=left_contract_dims,
-             right_contract_dims=right_contract_dims)
-    return out + _prepare(sq.astype(src.dtype)).astype(src.dtype)
+    return square_grad(_dot, src, weight, weight_sq)
 
 
 @prenorm
@@ -55,14 +46,14 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
             inner_batch, inner_sequence, inner_features = out.shape
 
             # Shape[Batch, Sequence, Features] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
-            out = dot_sq(ctx, out, wgt0, wgt0_sq, left_contract_dims=(1,), right_contract_dims=(0,))
+            out = dot_sq(out, wgt0, wgt0_sq, left_contract_dims=(1,), right_contract_dims=(0,))
 
             out = out.reshape(-1, ctx.dims.features, inner_sequence)
             out = scale_norm_act(ctx, out, ctx.dims.features, weight=(scale, scale_sq), add_to_prefix=False, dim=1)
             out = out.reshape(inner_batch, inner_features, inner_sequence)
 
             # Shape[Batch, Features, Sequence] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
-            out = dot_sq(ctx, out, wgt1, wgt1_sq, left_contract_dims=(2,), right_contract_dims=(0,))
+            out = dot_sq(out, wgt1, wgt1_sq, left_contract_dims=(2,), right_contract_dims=(0,))
             out = out.transpose(0, 2, 1)
             return out.reshape(original_shape)
 

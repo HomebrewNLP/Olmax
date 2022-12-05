@@ -1,7 +1,7 @@
 import jax
-from jax import lax, numpy as jnp
+from jax import numpy as jnp
 
-from src.backend import conv as lax_conv, get_param, with_context
+from src.backend import conv as lax_conv, get_param, square_grad, with_context
 from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
 
@@ -17,16 +17,10 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,), dtype=inp.dtype)
 
-    @jax.custom_gradient
-    def _prepare(x: jnp.ndarray):
-        def _grad(dy: jnp.ndarray):
-            return lax.square(dy) * ctx.dims.batch
+    def _conv(x, y):
+        return lax_conv(x, y, [(conv_kernel - 1, 0)], 1)
 
-        return jnp.zeros_like(x), _grad
-
-    weight_sq = get_param(ctx, "weight_sq", tied=tied)
-    sq_out = lax_conv(lax.stop_gradient(lax.square(inp)).astype(inp.dtype), weight_sq, [(conv_kernel - 1, 0)], 1)
-    return lax_conv(inp, weight, [(conv_kernel - 1, 0)], 1) + _prepare(sq_out.astype(inp.dtype)).astype(inp.dtype)
+    return square_grad(_conv, inp, weight, get_param(ctx, "weight_sq", tied=tied))
 
 
 @prenorm

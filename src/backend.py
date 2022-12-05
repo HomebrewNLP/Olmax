@@ -17,6 +17,20 @@ PRECISION = "highest"
 jax.config.update("jax_default_matmul_precision", PRECISION)
 
 
+def square_grad(fn: typing.Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], src: jnp.ndarray, weight: jnp.ndarray,
+                weight_sq: jnp.ndarray):
+    @jax.custom_gradient
+    def _fn(x: jnp.ndarray, wgt: jnp.ndarray, wgt_dummy: jnp.ndarray):
+        def _grad(dy: jnp.ndarray):
+            d_x, d_wgt = jax.vjp(fn, src, wgt)[1](dy)
+            _, d_wgt_sq = jax.vjp(fn, lax.square(src), wgt)[1](lax.square(dy))
+            return d_x, d_wgt, d_wgt_sq * x.shape[0]
+
+        return fn(x, wgt), _grad
+
+    return _fn(src, weight, weight_sq)
+
+
 def add_sq(name: str) -> str:
     if name.endswith('_stacked'):
         return name[:-len('_stacked')] + '_sq_stacked'
