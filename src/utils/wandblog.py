@@ -44,11 +44,6 @@ class WandbLog:
         items.update(self._log("Loss", wctx.scalars[0, 0], sizes))
         items.update(self._log("Accuracy", wctx.scalars[0, 1], sizes))
 
-        failures = wctx.scalars[0, 2]
-        if not np.isnan(failures) and failures >= 0:
-            items.update(self._log("Inverse Failures", failures, sizes))
-            items.update(self._log("Inverse Failures %", failures / wctx.scalars[0, 3] / jax.device_count(), sizes))
-
         self.run.log(items, step=step)
 
         return any(val in (float("nan"), float("inf"), float("-inf")) for val in wctx.scalars[0, :])
