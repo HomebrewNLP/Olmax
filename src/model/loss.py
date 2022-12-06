@@ -72,7 +72,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jnp.ndarray, jnp.ndar
             return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype), (d_wgt_sq * dy).astype(wgt.dtype)
 
         loss = lax.psum(loss, ParallelAxes.model)
-        accuracy = lax.psum(accuracy, ParallelAxes.model)
-        return (loss.astype(jnp.float64), accuracy.astype(jnp.float32)), _grad
+        acc = lax.psum(acc, ParallelAxes.model)
+        return (loss.astype(jnp.float64), acc.astype(jnp.float32)), _grad
 
     return _fn(src, outer_tgt, param, param_sq)
