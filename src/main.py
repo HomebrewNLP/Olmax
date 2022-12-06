@@ -10,7 +10,7 @@ import numpy as np
 import wandb
 from jax import lax, numpy as jnp
 
-from src.backend import deep_replace, device_id, loop, add_sq
+from src.backend import add_sq, deep_replace, device_id, loop
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
@@ -18,8 +18,6 @@ from src.model.main import body_ctx, compute
 from src.optimizer import get_current_lr, update
 from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
-
-jax.distributed.initialize()
 
 
 def add_zeros(params: typing.Dict[str, jnp.ndarray]):
