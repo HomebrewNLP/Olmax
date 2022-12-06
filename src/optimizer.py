@@ -35,7 +35,7 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
     return new_state
 
 
-def norm(param_name: str, val: jnp.ndarray, is_squared: bool):
+def norm(param_name: str, val: jnp.ndarray, is_squared: bool = False):
     if not is_squared:
         val = lax.square(val)
     if is_stacked(param_name):
@@ -45,20 +45,20 @@ def norm(param_name: str, val: jnp.ndarray, is_squared: bool):
     return val
 
 
-def clip_norm(param_name: str, val: jnp.ndarray, min_norm: float, is_squared: bool) -> jnp.ndarray:
+def clip_norm(param_name: str, val: jnp.ndarray, min_norm: float, is_squared: bool = False) -> jnp.ndarray:
     return jnp.maximum(jnp.sqrt(norm(param_name, val, is_squared)), min_norm)
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray, is_squared: bool) -> jnp.ndarray:
     grad = grad.astype(jnp.float64)
     grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon, is_squared)
-    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3, False)
+    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3)
     grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
     return grad * grad_scale
 
 
 def graft(param_name: str, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
-    scale = jnp.sqrt(norm(param_name, magnitude, False) / jnp.maximum(norm(param_name, direction, False), 1e-16))
+    scale = jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
     return scale * direction
 
 
