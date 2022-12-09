@@ -7,6 +7,7 @@ from jax import numpy as jnp
 from src.constants import ParallelAxes
 from src.context import WhileTrainContext
 from src.model.main import body_ctx
+from src.main import add_zeros
 
 
 def get_wctx(config: typing.Optional[typing.Dict[str, typing.Any]] = None):
@@ -37,7 +38,11 @@ def pmap(config: typing.Optional[typing.Dict[str, typing.Any]]):
         wctx, ctx = get_wctx(cfg)
         ctx.fail_on_missing_parameter = False
         ctx.is_initializing = config is None
+        add_zeros(ctx.parameters)
         _ = body_ctx(ctx, x)
+        for k in list(ctx.parameters.keys()):
+            if "optimizer" in k or k.endswith('_sq') or k.endswith('_sq_stacked'):
+                del ctx.parameters[k]
         name_cache.update(ctx.name_cache)
         parameter_usages.update(ctx.parameter_usages)
         return wctx.serialize()

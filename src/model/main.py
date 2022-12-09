@@ -3,7 +3,7 @@ import typing
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, is_model, is_stacked, with_context, square_grad
+from src.backend import get_param, is_model, is_stacked, square_grad, with_context
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
@@ -15,7 +15,8 @@ from src.model.reversible import FourArrays, reversible, revnet_out
 
 @with_context()
 def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
-    param = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features)
+    param, param_sq = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features,
+                                return_sq=True)
 
     def _fn(src, wgt):
         return jnp.take(wgt, src, 0)
@@ -23,7 +24,7 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
     if ctx.is_initializing:
         return _fn(inp, param)
 
-    return square_grad(_fn, inp, param, get_param(ctx, "inp_embd_sq"))
+    return square_grad(_fn, inp, param, param_sq)
 
 
 @with_context()
@@ -71,10 +72,10 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[
     src = stem(ctx, (src, zero, src, zero))
     out = revnet_out(src)
     out = scale_norm_act(ctx, out, ctx.dims.features, act=False, weight=False)
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
+    wgt, wgt_sq = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count(),
+                            return_sq=True)
     if ctx.is_initializing:
         return out
-    wgt_sq = get_param(ctx, "out_embd_sq")
     return out, wgt, wgt_sq
 
 

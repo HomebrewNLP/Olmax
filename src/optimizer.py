@@ -8,7 +8,8 @@ from .context import Context
 
 
 def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
-    is_small = "norm" in param_name.lower() or "rezero" in param_name.lower()
+    param_name = param_name.lower()
+    is_small = any(f'/{k}' in param_name for k in ("scale_norm_act", "rezero", "mix"))
     is_small |= grad.ndim < (2 + is_stacked(param_name))
     return is_small
 

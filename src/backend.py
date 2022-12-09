@@ -1,4 +1,5 @@
 import typing
+from typing import Any, Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import jax
 import jax._src.util as util
@@ -8,16 +9,16 @@ from jax import lax, numpy as jnp, random
 from .constants import ParallelAxes
 from .context import Context
 
-INT_OR_TUPLE = typing.Union[int, typing.Sequence[int]]
+INT_OR_TUPLE = Union[int, Sequence[int]]
 
-Output = typing.TypeVar("Output")
-CtxFn = typing.TypeVar("CtxFn")
+Output = TypeVar("Output")
+CtxFn = TypeVar("CtxFn")
 
 PRECISION = "highest"
 jax.config.update("jax_default_matmul_precision", PRECISION)
 
 
-def square_grad(fn: typing.Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], src: jnp.ndarray, weight: jnp.ndarray,
+def square_grad(fn: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], src: jnp.ndarray, weight: jnp.ndarray,
                 weight_sq: jnp.ndarray):
     @jax.custom_gradient
     def _fn(x: jnp.ndarray, wgt: jnp.ndarray, wgt_dummy: jnp.ndarray):
@@ -41,7 +42,7 @@ def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
-def with_context(count: typing.Optional[bool] = None) -> CtxFn:
+def with_context(count: Optional[bool] = None) -> CtxFn:
     def _inner(fn: CtxFn) -> CtxFn:
         prefix_kwargs = {"appended": fn.__name__}
         if count is not None:
@@ -65,11 +66,11 @@ def stable_rsqrt(inp: jnp.ndarray, eps: float, power: float = 2) -> jnp.ndarray:
     return jnp.reciprocal(jnp.maximum(jnp.power(jnp.maximum(inp, 0), 1 / power), eps))
 
 
-def pos_dim(inp: jnp.ndarray, dims: typing.Sequence[int]) -> typing.Sequence[int]:
+def pos_dim(inp: jnp.ndarray, dims: Sequence[int]) -> Sequence[int]:
     return tuple(d % inp.ndim for d in dims)
 
 
-def tuple_int(obj: INT_OR_TUPLE) -> typing.Sequence[int]:
+def tuple_int(obj: INT_OR_TUPLE) -> Sequence[int]:
     if isinstance(obj, (tuple, list)):
         return tuple(obj)
     if isinstance(obj, int):
@@ -85,7 +86,7 @@ def is_stacked(param_name: str):
     return param_name.endswith('_stacked') and is_model(param_name)
 
 
-def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: typing.List[typing.Tuple[int, int]], groups: int):
+def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: List[Tuple[int, int]], groups: int):
     ndim = weight.ndim
     lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
     dimension_numbers = lax.ConvDimensionNumbers(lhs, (0, ndim - 1,) + tuple(range(1, ndim - 1)), lhs)
@@ -117,7 +118,7 @@ def assign(ctx: Context, name: str, inp: jnp.ndarray):
     ctx.parameters[name] = inp
 
 
-def normal(ctx: Context, shape: typing.Sequence[int]):
+def normal(ctx: Context, shape: Sequence[int]):
     ctx.prng_key, key = random.split(ctx.prng_key)
     return random.normal(key, shape, ctx.model.storage_dtype)
 
@@ -128,7 +129,7 @@ def deep_replace(d, value):
     return value
 
 
-def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) -> jnp.ndarray:
+def orthogonal_init(ctx: Context, shape: List[int], column_axes=(-1,)) -> jnp.ndarray:
     column_axes = tuple(column_axes)
     axes = tuple(shape[c] for c in column_axes)
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
@@ -140,12 +141,22 @@ def orthogonal_init(ctx: Context, shape: typing.List[int], column_axes=(-1,)) ->
     return jnp.reshape(out, tuple(np.delete(shape, column_axes)) + axes).astype(ctx.model.storage_dtype)
 
 
-def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] = None,
-              std: typing.Optional[float] = None, mean: typing.Optional[float] = None, column_axes: int = 1,
+def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
+              std: Optional[float] = None, mean: Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
-              lr_scale: float = 1, dtype: typing.Optional[jnp.float32] = None,
-              init_val: typing.Optional[jnp.ndarray] = None,
-              tied: bool = False) -> jnp.ndarray:
+              lr_scale: float = 1, dtype: Optional[jnp.float32] = None,
+              init_val: Optional[jnp.ndarray] = None,
+              tied: bool = False,
+              return_sq: bool = False,
+              add_parameter_usages: bool = True) -> Union[Tuple[jnp.ndarray, Optional[jnp.ndarray]], jnp.ndarray]:
+    if return_sq:
+        args = [shape, std, mean, column_axes, scale, post_variance_scale, lr_scale, dtype, init_val, tied, False]
+        out0 = get_param(ctx, name, *args)
+        if ctx.is_initializing:
+            return out0, None
+        else:
+            out1 = get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
+            return out0, out1
     if not tied:
         name = name + '_stacked'
     add_depth = ctx.add_depth and not tied
@@ -159,7 +170,8 @@ def get_param(ctx: Context, name: str, shape: typing.Optional[typing.List[int]] 
         computation_dtype = dtype
         storage_dtype = dtype
 
-    ctx.parameter_usages[prefix_name] += 1
+    if add_parameter_usages:  # can't inline, because += 0 would still cause a new item (with val=0) to be created
+        ctx.parameter_usages[prefix_name] += 1
     if prefix_name in ctx.parameters:
         return ctx.parameters[prefix_name].astype(computation_dtype)
 
@@ -190,17 +202,17 @@ def default(option_1, option_2):
     return option_1
 
 
-def zero_param(ctx: Context, name: str, shape: typing.List[int], dtype: typing.Optional[jnp.dtype]) -> jnp.ndarray:
+def zero_param(ctx: Context, name: str, shape: List[int], dtype: Optional[jnp.dtype]) -> jnp.ndarray:
     return get_param(ctx, name, shape, 0, 0, dtype=dtype)
 
 
-def loop(fn: typing.Callable, fn_input: typing.Any, steps: int, unroll: int = 1):
+def loop(fn: Callable, fn_input: Any, steps: int, unroll: int = 1):
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
 
 
 typevar = typing.TypeVar("typevar")
 
 
-def pattern_match(gen_fn: typing.Callable[[int], typing.Callable[[typevar], jnp.ndarray]], cases: int,
+def pattern_match(gen_fn: Callable[[int], Callable[[typevar], jnp.ndarray]], cases: int,
                   predicate: jnp.ndarray, base: typevar):
     return lax.switch(predicate.astype(jnp.int32) % cases, [gen_fn(i) for i in range(cases)], base)
