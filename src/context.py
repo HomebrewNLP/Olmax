@@ -106,17 +106,7 @@ class WandB(DataClass):
     median_sizes: typing.List[int] = [64, 256, 1024]
 
 
-class Shampoo(DataClass):
-    block_size: int = 512
-    statistics_compute_steps: int = 16
-    beta1: float = 0.1
-    beta2: float = 0.01
-    flatten_depth: bool = True
-    flatten_conv: bool = True
-
-
 class Optimizer(DataClass):
-    shampoo: Shampoo = Shampoo()
     nesterov: bool = True
     heavyball: bool = True
     epsilon: float = 1e-16
@@ -125,6 +115,7 @@ class Optimizer(DataClass):
     adam_beta1: float = 0.03
     adam_beta2: float = 0.003
     weight_decay: float = 0.01
+    adam_beta3: float = 0.001
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
 
@@ -247,7 +238,7 @@ class WhileContext(DataClass):
 class WhileTrainContext(WhileContext):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         super().__init__(config)
-        self.scalars = jnp.zeros([4], jnp.float64)
+        self.scalars = jnp.zeros([2], jnp.float64)
 
         if config is not None:
             self.scalars = config['scalars']

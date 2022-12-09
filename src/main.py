@@ -10,7 +10,7 @@ import numpy as np
 import wandb
 from jax import lax, numpy as jnp
 
-from src.backend import deep_replace, device_id, loop
+from src.backend import add_sq, deep_replace, device_id, loop
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
@@ -19,7 +19,9 @@ from src.optimizer import get_current_lr, update
 from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
-jax.distributed.initialize()
+
+def add_zeros(params: typing.Dict[str, jnp.ndarray]):
+    params.update({add_sq(k): jnp.zeros_like(v) for k, v in params.items()})
 
 
 def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
@@ -27,10 +29,10 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % steps]
-    scalars, grads = grad_fn(wctx.ctx.parameters, data_slice)
-    failures, preconditioners = update(wctx.ctx, grads, wctx.current_step)
-    failures = lax.psum(failures, axis_name=ParallelAxes.model)
-    scalars = tuple(scalars) + (failures.astype(scalars[0].dtype), jnp.asarray(preconditioners, scalars[0].dtype))
+    params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
+    add_zeros(params)
+    scalars, grads = grad_fn(params, data_slice)
+    update(wctx.ctx, grads, wctx.current_step)
     wctx.scalars += jnp.stack(scalars) / steps  # higher numerical accuracy if we divide before summing
     wctx.current_step += 1
     return wctx.serialize()
@@ -39,7 +41,6 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
 def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     training = wctx.ctx.training
-    start_step = wctx.current_step
     steps = training.device_steps * jax.process_count()
     step_batch, sequence_p1 = wctx.data.shape
 
@@ -57,10 +58,7 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
     wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
 
-    wctx = WhileTrainContext(loop(train_step, wctx.serialize(), steps, training.device_unroll))
-    number_of_inverses = jnp.sum((jnp.arange(steps) + start_step) % wctx.ctx.optimizer.shampoo.statistics_compute_steps)
-    wctx.scalars = wctx.scalars.at[2].set(wctx.scalars[2] / number_of_inverses)
-    return wctx.serialize()
+    return loop(train_step, wctx.serialize(), steps, training.device_unroll)
 
 
 def get_parameters(ctx: Context, inp: jnp.ndarray):
@@ -88,9 +86,10 @@ def get_optimizer_state(ctx: Context):
         new_ctx = ctx
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
-        new_ctx.parameters = parameters
+        new_ctx.parameters = parameters.copy()
+        add_zeros(parameters)
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
-        grads = {name: jax.random.truncated_normal(key, -2, 2, param.shape, ctx.model.computation_dtype) * 0.001
+        grads = {name: jax.random.uniform(key, param.shape, ctx.model.computation_dtype, 1e-6, 1e-3)
                  for key, (name, param) in zip(keys, parameters.items())}
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters

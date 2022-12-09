@@ -50,11 +50,9 @@ optimizer:
     pointwise_scale: 1
     preconditioning_compute_steps: 128
     qrnn_scale: 1
-    shampoo_beta2: 0.01
     skip_preconditioning_dim_size_gt: 1024
     start_preconditioning_step: 16
     statistics_compute_steps: 4
-    use_shampoo: true
     warmup_end: 1024
     weight_decay: 0.001
 seed: 0

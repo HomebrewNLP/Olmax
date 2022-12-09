@@ -1,20 +1,29 @@
 import math
+import typing
 
 from jax import numpy as jnp
 
-from src.backend import dot, get_param, pattern_match, with_context
+from src.backend import dot, get_param, pattern_match, square_grad, with_context
 from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
+
+
+def dot_sq(src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.ndarray,
+           left_contract_dims: typing.Sequence[int], right_contract_dims: typing.Sequence[int]):
+    def _dot(x, y):
+        return dot(x, y, left_contract_dims=left_contract_dims, right_contract_dims=right_contract_dims)
+
+    return square_grad(_dot, src, weight, weight_sq)
 
 
 @prenorm
 @with_context()
 def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
-    wgt0 = get_param(ctx, "mix_0", weight_shape)
-    wgt1 = get_param(ctx, "mix_1", weight_shape)
-    scale = get_param(ctx, "scale", [ctx.dims.features], std=0, mean=1,
-                      dtype=jnp.promote_types(ctx.model.computation_dtype, jnp.float32))
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
+    wgt0, wgt0_sq = get_param(ctx, "mix_0", weight_shape, return_sq=True)
+    wgt1, wgt1_sq = get_param(ctx, "mix_1", weight_shape, return_sq=True)
+    scale, scale_sq = get_param(ctx, "scale", [ctx.dims.features], std=0, mean=1, dtype=run_type, return_sq=True)
     if ctx.is_initializing:
         return inp
 
@@ -33,14 +42,14 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
             inner_batch, inner_sequence, inner_features = out.shape
 
             # Shape[Batch, Sequence, Features] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
-            out = dot(out, wgt0, left_contract_dims=(1,), right_contract_dims=(0,))
+            out = dot_sq(out, wgt0, wgt0_sq, left_contract_dims=(1,), right_contract_dims=(0,))
 
             out = out.reshape(-1, ctx.dims.features, inner_sequence)
-            out = scale_norm_act(ctx, out, ctx.dims.features, weight=scale, add_to_prefix=False, dim=1)
+            out = scale_norm_act(ctx, out, ctx.dims.features, weight=(scale, scale_sq), add_to_prefix=False, dim=1)
             out = out.reshape(inner_batch, inner_features, inner_sequence)
 
             # Shape[Batch, Features, Sequence] * Shape[Sequence, Sequence] -> Shape[Batch, Features, Sequence]
-            out = dot(out, wgt1, left_contract_dims=(2,), right_contract_dims=(0,))
+            out = dot_sq(out, wgt1, wgt1_sq, left_contract_dims=(2,), right_contract_dims=(0,))
             out = out.transpose(0, 2, 1)
             return out.reshape(original_shape)
 

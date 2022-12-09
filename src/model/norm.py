@@ -52,19 +52,21 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
-                   weight: typing.Union[bool, None, jnp.ndarray] = None, psum: bool = False, act: bool = True,
-                   dim: int = 2) -> jnp.ndarray:
+                   weight: typing.Union[bool, None, typing.Tuple[jnp.ndarray, jnp.ndarray]] = None,
+                   psum: bool = False, act: bool = True, dim: int = 2) -> jnp.ndarray:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
+        weight, weight_sq = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type, return_sq=True)
     elif weight is False:
-        weight = 1
+        weight_sq = weight = 1
+    else:
+        weight, weight_sq = weight
 
     if ctx.is_initializing:
         return inp
 
     @jax.custom_gradient
-    def _fn(src: jnp.ndarray, wgt: jnp.ndarray):
+    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, wgt_dummy: jnp.ndarray):
         original_dtype = src.dtype
         if isinstance(wgt, jnp.ndarray):
             reshaped_weight = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))
@@ -73,7 +75,7 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
 
         out, new_src, std = norm_forward(ctx, src, reshaped_weight, psum, act, dim)
 
-        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             src_fp64 = promote_to(new_src, run_type)
             norm_out = src_fp64 * std
             dy = promote_to(dy, run_type)
@@ -82,9 +84,12 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
             if isinstance(wgt, jnp.ndarray):
                 summed = list(range(src.ndim))
                 del summed[dim]
-                d_wgt = (dy * norm_out).sum(summed).reshape((-1,))
+                d_wgt = dy * norm_out
+                d_wgt_sq = (lax.square(d_wgt).sum(summed) * ctx.dims.batch).reshape((-1,)).astype(run_type)
+                d_wgt = d_wgt.sum(summed).reshape((-1,)).astype(run_type)
             else:
                 d_wgt = None
+                d_wgt_sq = None
             dy = dy * reshaped_weight
 
             d_std = (dy * src_fp64).sum(dim, keepdims=True)  # broadcast forward -> sum backward
@@ -97,8 +102,8 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
                 dx -= dx.mean(dim, keepdims=True)
             if psum:
                 dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
-            return dx.astype(original_dtype), d_wgt
+            return dx.astype(original_dtype), d_wgt, d_wgt_sq
 
         return out, _grad
 
-    return _fn(inp, weight)
+    return _fn(inp, weight, weight_sq)
