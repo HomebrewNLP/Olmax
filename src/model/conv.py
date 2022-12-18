@@ -7,7 +7,7 @@ from src.model.norm import prenorm, scale_norm_act
 
 
 @with_context()
-def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out_features: int, tied: bool = False):
+def conv(ctx: Context, inp: jax.Array, conv_kernel: int, in_features: int, out_features: int, tied: bool = False):
     fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
     fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
     fan_in = fan_in / fan_in.sum()
@@ -25,7 +25,7 @@ def conv(ctx: Context, inp: jnp.ndarray, conv_kernel: int, in_features: int, out
 
 @prenorm
 @with_context()
-def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def bottleneck_block(ctx: Context, inp: jax.Array) -> jax.Array:
     inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features,
                ctx.dims.inner_bottleneck_features // jax.device_count())
     inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
@@ -37,7 +37,7 @@ def bottleneck_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 @prenorm
 @with_context()
-def dense_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def dense_block(ctx: Context, inp: jax.Array) -> jax.Array:
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, ctx.dims.pointwise_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.pointwise_features)
     return conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.pointwise_features, ctx.dims.features)

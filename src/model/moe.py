@@ -1,5 +1,5 @@
 import jax
-from jax import lax, numpy as jnp
+from jax import lax
 
 from src.backend import with_context
 from src.constants import ParallelAxes
@@ -8,13 +8,13 @@ from src.model.conv import conv
 from src.model.norm import prenorm, scale_norm_act
 
 
-def all_to_all(ctx: Context, x: jnp.ndarray, split_axis: int, concat_axis: int) -> jnp.ndarray:
+def all_to_all(ctx: Context, x: jax.Array, split_axis: int, concat_axis: int) -> jax.Array:
     if ctx.is_initializing:
         return x
 
     @jax.custom_gradient
-    def _fn(inp: jnp.ndarray):
-        def _grad(dy: jnp.ndarray) -> jnp.ndarray:
+    def _fn(inp: jax.Array):
+        def _grad(dy: jax.Array) -> jax.Array:
             return lax.all_to_all(dy, ParallelAxes.model, concat_axis, split_axis, tiled=True)
 
         return lax.all_to_all(inp, ParallelAxes.model, split_axis, concat_axis, tiled=True), _grad
@@ -24,7 +24,7 @@ def all_to_all(ctx: Context, x: jnp.ndarray, split_axis: int, concat_axis: int) 
 
 @prenorm
 @with_context()
-def dense_moe(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def dense_moe(ctx: Context, inp: jax.Array) -> jax.Array:
     devices = jax.device_count()
     big_params = devices * ctx.dims.inner_bottleneck_features
     batch, sequence, features = inp.shape

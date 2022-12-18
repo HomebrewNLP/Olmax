@@ -24,7 +24,7 @@ def randn_fn():
     return _fn
 
 
-def grad_fn(dy: jnp.ndarray, *args):
+def grad_fn(dy: jax.Array, *args):
     def _fn(fn):
         return jax.pmap(jax.grad(lambda x: (fn(x) * dy).sum()), ParallelAxes.model)(args)
 

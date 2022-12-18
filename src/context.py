@@ -180,7 +180,7 @@ class Context(DataClass):
 
         self.name_cache: typing.Dict[str, int] = {}
         self.name_cache_offsets: typing.Dict[str, int] = {}
-        self.parameters: typing.Dict[str, jnp.ndarray] = {}
+        self.parameters: typing.Dict[str, jax.Array] = {}
         self.parameter_variance: typing.Dict[str, float] = {}
         self.parameter_usages: typing.Dict[str, int] = collections.defaultdict(int)
         self.prng_key = random.PRNGKey(self.seed)
@@ -216,7 +216,7 @@ class WhileContext(DataClass):
     def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
         self.ctx = Context()
         self.current_step = jnp.ones([], dtype=jnp.uint32)
-        self.data: typing.Optional[jnp.ndarray] = None
+        self.data: typing.Optional[jax.Array] = None
 
         if config is not None:
             self.ctx.parameters = config['parameters']
@@ -230,7 +230,7 @@ class WhileContext(DataClass):
     def step(self):
         return int(self.current_step[0])
 
-    def __call__(self, data: jnp.ndarray):
+    def __call__(self, data: jax.Array):
         self.data = data
         return self
 

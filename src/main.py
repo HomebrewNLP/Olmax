@@ -20,7 +20,7 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-def add_zeros(params: typing.Dict[str, jnp.ndarray]):
+def add_zeros(params: typing.Dict[str, jax.Array]):
     params.update({add_sq(k): jnp.zeros_like(v) for k, v in params.items()})
 
 
@@ -61,8 +61,8 @@ def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[st
     return loop(train_step, wctx.serialize(), steps, training.device_unroll)
 
 
-def get_parameters(ctx: Context, inp: jnp.ndarray):
-    def _fn(x: jnp.ndarray):
+def get_parameters(ctx: Context, inp: jax.Array):
+    def _fn(x: jax.Array):
         initial_seed = ctx.seed
         initial_prng_key = ctx.prng_key
         ctx.seed += device_id()
@@ -82,7 +82,7 @@ def get_parameters(ctx: Context, inp: jnp.ndarray):
 
 
 def get_optimizer_state(ctx: Context):
-    def _fn(parameters: typing.Dict[str, jnp.ndarray]):
+    def _fn(parameters: typing.Dict[str, jax.Array]):
         new_ctx = ctx
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
@@ -112,7 +112,7 @@ class TrainLoop:
         self.wctx = wctx
         self.step = step
 
-    def __call__(self, dat: jnp.ndarray) -> WhileTrainContext:
+    def __call__(self, dat: jax.Array) -> WhileTrainContext:
         wctx = self.wctx(dat)
         wctx.scalars = jnp.zeros_like(wctx.scalars)
         self.wctx = WhileTrainContext(self.step(wctx.serialize()))
@@ -202,7 +202,7 @@ def main():
 
     checkpoint_at = wctx.ctx.training.checkpoint_interval + wctx.step
     start_time = time.time()
-    wblog = WandbLog(run, ctx.training.device_steps * jax.process_count(), parameter_count, tokens_processed)
+    wblog = WandbLog(run, int(ctx.training.device_steps * jax.process_count()), parameter_count, tokens_processed)
     for idx, dat in enumerate(data):
         step_start = time.time()
         wctx = step(dat)

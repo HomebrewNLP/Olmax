@@ -10,7 +10,7 @@ from src.model.loss import cross_entropy_loss
 from unittests.grad.backend import grad_fn, randn_fn, sample_sizes, trials
 
 
-def mean(x: jnp.ndarray):
+def mean(x: jax.Array):
     return (x / x.size).sum()
 
 
@@ -35,7 +35,7 @@ def initialize(z_loss: float, samples: int):
     return ctx, tgt, randn_fn()
 
 
-def statistics(name: str, var: jnp.ndarray):
+def statistics(name: str, var: jax.Array):
     _fn = jax.pmap(lambda x: (lax.pmax(x.max(), "i"), lax.pmin(x.min(), "i"), lax.pmean(x.mean(), "i"),
                               lax.pmean(jnp.square(x - x.mean()).mean(), "i")), "i")
     if is_main():

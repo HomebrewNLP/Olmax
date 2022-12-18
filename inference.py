@@ -15,7 +15,7 @@ from src.model.main import body_ctx
 from src.utils.checkpoint import read_checkpoint
 
 
-def one_hot(inp: jnp.ndarray, size: int) -> jnp.ndarray:
+def one_hot(inp: jax.Array, size: int) -> jax.Array:
     return jnp.equal(jnp.reshape(inp, inp.shape + (1,)), jnp.reshape(jnp.arange(0, size), (1,) * inp.ndim + (size,)))
 
 
@@ -82,11 +82,11 @@ def body_fn(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, ty
     return wctx.serialize()
 
 
-def jitless_prediction_step(parameters: typing.Dict[str, jnp.ndarray], data: jnp.ndarray,
-                            temperature: jnp.ndarray, max_tokens: jnp.ndarray, max_probability_mass: jnp.ndarray,
-                            typical_mass: jnp.ndarray, max_probability_to_filter: jnp.ndarray,
-                            adaptive_filter_power: jnp.ndarray, adaptive_filter_scale: jnp.ndarray, seed: jnp.ndarray,
-                            start_pos: jnp.ndarray, stop_pos: jnp.ndarray) -> jnp.ndarray:
+def jitless_prediction_step(parameters: typing.Dict[str, jax.Array], data: jax.Array,
+                            temperature: jax.Array, max_tokens: jax.Array, max_probability_mass: jax.Array,
+                            typical_mass: jax.Array, max_probability_to_filter: jax.Array,
+                            adaptive_filter_power: jax.Array, adaptive_filter_scale: jax.Array, seed: jax.Array,
+                            start_pos: jax.Array, stop_pos: jax.Array) -> jax.Array:
     wctx = WhilePredictContext()
     wctx.ctx.parameters = parameters
     wctx.data = data
@@ -123,17 +123,17 @@ class Inference:
                           np.ones(()), np.zeros(()), np.zeros(()), np.ones(()))
 
     def complete_jax(self, prompt: jnp.array, temperature: jnp.array, max_tokens: jnp.array,
-                     max_probability_mass: jnp.array, typical_mass: jnp.ndarray,
-                     max_probability_to_filter: jnp.ndarray, adaptive_filter_power: jnp.ndarray,
-                     adaptive_filter_scale: jnp.ndarray, seed: jnp.array, start_pos: jnp.array,
+                     max_probability_mass: jnp.array, typical_mass: jax.Array,
+                     max_probability_to_filter: jax.Array, adaptive_filter_power: jax.Array,
+                     adaptive_filter_scale: jax.Array, seed: jnp.array, start_pos: jnp.array,
                      stop_pos: jnp.array) -> jnp.array:
         return self.step(self.parameters, prompt, temperature, max_tokens, max_probability_mass, typical_mass,
                          max_probability_to_filter, adaptive_filter_power, adaptive_filter_scale, seed, start_pos,
                          stop_pos)
 
-    def complete_tokens(self, prompt: jnp.ndarray, temperature: float, max_tokens: int, max_probability_mass: float,
+    def complete_tokens(self, prompt: jax.Array, temperature: float, max_tokens: int, max_probability_mass: float,
                         typical_mass: float, max_probability_to_filter: float, adaptive_filter_power: float,
-                        adaptive_filter_scale: float, seed: int, length: int) -> jnp.ndarray:
+                        adaptive_filter_scale: float, seed: int, length: int) -> jax.Array:
         tokens = jnp.pad(prompt, ((0, 0), (0, self.ctx.dims.sequence - prompt.shape[1])))
         base = jnp.zeros(())
         start = base + prompt.shape[1]

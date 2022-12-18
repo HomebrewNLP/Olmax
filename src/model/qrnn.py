@@ -10,7 +10,7 @@ from src.model.conv import conv
 from src.model.norm import prenorm, scale_norm_act
 
 
-def qrnn(forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+def qrnn(forget: jax.Array, x: jax.Array) -> jax.Array:
     dtype = forget.dtype
     for offset in 2 ** np.arange(int(math.log2(x.shape[1]))):
         x = x.at[:, offset:].add(x[:, :-offset] * forget[:, offset:])
@@ -18,17 +18,17 @@ def qrnn(forget: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     return x.astype(dtype)
 
 
-def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarray:
+def qrnn_grad(ctx: Context, forget: jax.Array, src: jax.Array) -> jax.Array:
     if ctx.is_initializing:
         return src
 
     @jax.custom_gradient
-    def _fn(fgt: jnp.ndarray, inp: jnp.ndarray):
+    def _fn(fgt: jax.Array, inp: jax.Array):
         dtype = inp.dtype
         out = qrnn(jax.nn.hard_sigmoid(promote_to(fgt, jnp.float32)), promote_to(inp, jnp.float32))
         out = out.astype(dtype)
 
-        def _grad(dy: jnp.ndarray):
+        def _grad(dy: jax.Array):
             x = promote_to(inp, jnp.float32)
             f = jax.nn.hard_sigmoid(promote_to(fgt, jnp.float32))
             f = lax.rev(f, (1,))
@@ -48,7 +48,7 @@ def qrnn_grad(ctx: Context, forget: jnp.ndarray, src: jnp.ndarray) -> jnp.ndarra
 
 @prenorm
 @with_context()
-def qrnn_block(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def qrnn_block(ctx: Context, inp: jax.Array) -> jax.Array:
     # 500ms at 256 features (forward pass, backward takes slightly longer)
     # While conv 256->256 with kernel_size=5 takes ~11.3ms
     mid = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, ctx.dims.inner_bottleneck_features * 2)

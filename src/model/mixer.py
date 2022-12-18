@@ -8,7 +8,7 @@ from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
 
 
-def dot_sq(src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.ndarray,
+def dot_sq(src: jax.Array, weight: jax.Array, weight_sq: jax.Array,
            left_contract_dims: typing.Sequence[int], right_contract_dims: typing.Sequence[int]):
     def _dot(x, y):
         return dot(x, y, left_contract_dims=left_contract_dims, right_contract_dims=right_contract_dims)
@@ -18,7 +18,7 @@ def dot_sq(src: jnp.ndarray, weight: jnp.ndarray, weight_sq: jnp.ndarray,
 
 @prenorm
 @with_context()
-def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
+def mix(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     wgt0, wgt0_sq = get_param(ctx, "mix_0", weight_shape, return_sq=True)
@@ -36,7 +36,7 @@ def mix(ctx: Context, inp: jnp.ndarray, depth: jnp.ndarray) -> jnp.ndarray:
         wgt1 = jnp.triu(wgt1)
 
     def _get_mix_fn(current_depth: int):
-        def _fn(x: jnp.ndarray):
+        def _fn(x: jax.Array):
             batch = max(sequence // ctx.dims.spatial_mixing_kernel ** (current_depth % max_dims + 1), 1)
             out = x.reshape(original_batch * batch, ctx.dims.spatial_mixing_kernel, -1)
             inner_batch, inner_sequence, inner_features = out.shape

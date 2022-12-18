@@ -2,7 +2,6 @@ import collections
 import time
 import typing
 
-import jax
 import numpy as np
 
 from src.context import WhileTrainContext
@@ -20,7 +19,7 @@ class WandbLog:
 
     def _log(self, prefix: str, value: float, sizes: typing.List[int]):
         scalars = self.scalars[prefix]
-        scalars.append(value)
+        scalars.append(float(value))
         items = {f"{prefix}/Median{s * self.device_steps}": np.median(scalars[-s:]) for s in sizes}
         self.scalars[prefix] = scalars[-max(sizes):]
         items[f"{prefix}/Current"] = value

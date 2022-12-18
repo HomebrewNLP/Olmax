@@ -9,8 +9,8 @@ from src.context import Context
 from src.model.activate import activate_forward, activate_grad
 
 
-def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
-    def _fn(ctx: Context, inp: jnp.ndarray, *args) -> jnp.ndarray:
+def prenorm(fn: typing.Callable[[Context, jax.Array], jax.Array]):
+    def _fn(ctx: Context, inp: jax.Array, *args) -> jax.Array:
         ctx = ctx.add_to_prefix("prenorm")
         inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
         out = fn(ctx, inp, *args)
@@ -19,7 +19,7 @@ def prenorm(fn: typing.Callable[[Context, jnp.ndarray], jnp.ndarray]):
     return _fn
 
 
-def all_gather(inp: jnp.ndarray, dim: int) -> jnp.ndarray:
+def all_gather(inp: jax.Array, dim: int) -> jax.Array:
     @jax.custom_gradient
     def _fn(x):
         def _grad(dy):
@@ -30,7 +30,7 @@ def all_gather(inp: jnp.ndarray, dim: int) -> jnp.ndarray:
     return _fn(inp)
 
 
-def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarray] = None, psum: bool = False,
+def norm_forward(ctx: Context, src: jax.Array, wgt: typing.Optional[jax.Array] = None, psum: bool = False,
                  act: bool = True, dim: int = 2):
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     original_dtype = src.dtype
@@ -51,9 +51,9 @@ def norm_forward(ctx: Context, src: jnp.ndarray, wgt: typing.Optional[jnp.ndarra
 
 
 @with_context()
-def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
-                   weight: typing.Union[bool, None, typing.Tuple[jnp.ndarray, jnp.ndarray]] = None,
-                   psum: bool = False, act: bool = True, dim: int = 2) -> jnp.ndarray:
+def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
+                   weight: typing.Union[bool, None, typing.Tuple[jax.Array, jax.Array]] = None,
+                   psum: bool = False, act: bool = True, dim: int = 2) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
         weight, weight_sq = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type, return_sq=True)
@@ -66,22 +66,22 @@ def scale_norm_act(ctx: Context, inp: jnp.ndarray, feature_dim: int,
         return inp
 
     @jax.custom_gradient
-    def _fn(src: jnp.ndarray, wgt: jnp.ndarray, wgt_dummy: jnp.ndarray):
+    def _fn(src: jax.Array, wgt: jax.Array, wgt_dummy: jax.Array):
         original_dtype = src.dtype
-        if isinstance(wgt, jnp.ndarray):
+        if isinstance(wgt, jax.Array):
             reshaped_weight = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))
         else:
             reshaped_weight = wgt
 
         out, new_src, std = norm_forward(ctx, src, reshaped_weight, psum, act, dim)
 
-        def _grad(dy: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        def _grad(dy: jax.Array) -> typing.Tuple[jax.Array, jax.Array, jax.Array]:
             src_fp64 = promote_to(new_src, run_type)
             norm_out = src_fp64 * std
             dy = promote_to(dy, run_type)
             if act:
                 dy = dy * activate_grad(norm_out * reshaped_weight)
-            if isinstance(wgt, jnp.ndarray):
+            if isinstance(wgt, jax.Array):
                 summed = list(range(src.ndim))
                 del summed[dim]
                 d_wgt = dy * norm_out
