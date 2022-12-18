@@ -96,7 +96,6 @@ class CreationCallback:
         cfg.training.checkpoint_path = f'{cfg.training.checkpoint_path}-{args.storage_prefix}'
         self.wandb_api = wandb.Api()
         self.cfg = cfg
-        self.last_checkpoint_step = 0
 
     def _prepare_config(self):  # load checkpoint if exists and avoid overwriting logs at 1000 if already up to 1500
         try:
@@ -104,17 +103,15 @@ class CreationCallback:
             start_step = int(run.summary["_step"])
         except:  # skipcq: FLK-E722
             return  # no logs yet
+        start_step *= self.args.slices * self.cfg.training.device_steps  # add log interval
         if start_step < self.cfg.training.checkpoint_interval:
             self.cfg.training.checkpoint_load_path = ""
             return  # no checkpoint yet
 
         self.cfg.training.checkpoint_load_path = self.cfg.training.checkpoint_path
         new_checkpoint_step = start_step - start_step % self.cfg.training.checkpoint_interval
-        if new_checkpoint_step < self.cfg.training.checkpoint_interval + self.last_checkpoint_step:
-            return  # checkpoint, but no new checkpoint
 
         self.restarts += 1
-        self.last_checkpoint_step = new_checkpoint_step
         self.cfg.wandb.id = new_id()
 
     def __call__(self, host: str, ctx: typing.Optional[TPUContext]) -> TPUContext:
