@@ -206,7 +206,7 @@ def main():
     for idx, dat in enumerate(data):
         step_start = time.time()
         wctx = step(dat)
-        current_step = wctx.step
+        current_step = int(wctx.step)
         lr = float(get_current_lr(wctx.ctx, wctx.current_step[0]))
         print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
               f'Loss: {wctx.scalars[0, 0]:6.3f} - '

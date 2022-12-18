@@ -19,7 +19,8 @@ class WandbLog:
 
     def _log(self, prefix: str, value: float, sizes: typing.List[int]):
         scalars = self.scalars[prefix]
-        scalars.append(float(value))
+        value = float(value)
+        scalars.append(value)
         items = {f"{prefix}/Median{s * self.device_steps}": np.median(scalars[-s:]) for s in sizes}
         self.scalars[prefix] = scalars[-max(sizes):]
         items[f"{prefix}/Current"] = value
