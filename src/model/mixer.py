@@ -1,6 +1,7 @@
 import math
 import typing
 
+import jax
 from jax import numpy as jnp
 
 from src.backend import dot, get_param, pattern_match, square_grad, with_context

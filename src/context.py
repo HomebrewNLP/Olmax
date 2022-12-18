@@ -5,6 +5,7 @@ import typing
 
 import yaml
 from jax import numpy as jnp, random
+import jax
 
 
 class DataClass:
