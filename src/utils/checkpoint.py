@@ -24,6 +24,7 @@ from src.context import Context, WhileTrainContext
 UPLOAD_RETRIES = 8
 WCTX_VALUES = ("scalars", "current_step")
 TMP_PATH_ADDON = "_____TEMPORARY"
+GSUTIL_PATH = "/opt/google-cloud-sdk/bin/gsutil"
 
 
 def log(arg: str, verbose: bool):
@@ -46,10 +47,12 @@ def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str, verbo
     log(f"Saving to {path} failed {UPLOAD_RETRIES} times. Skipping this checkpoint.", True)
 
 
+def cmd(command: str):
+    subprocess.run(command.split(' ')).check_returncode()
+
+
 def move_checkpoint(ctx: Context, new: str):
-    out = subprocess.run(["/opt/google-cloud-sdk/bin/gsutil", "-m", "mv", ctx.training.checkpoint_path + '/*', new])
-    out.check_returncode()
-    return out
+    cmd(f"{GSUTIL_PATH} -m mv {ctx.training.checkpoint_path} {new}")
 
 
 def write_checkpoint(ctx: Context, verbose: bool = True):
