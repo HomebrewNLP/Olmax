@@ -39,15 +39,13 @@ def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, 
     if psum:
         own_sum = lax.psum(own_sum, ParallelAxes.model)
     std = stable_rsqrt(own_sum, ctx.model.norm.eps)
-    norm_out = src_fp64 * std
-    out = norm_out * wgt
+    out = src_fp64 * std * wgt
     if act:
         out = activate_forward(out)
     out = out.astype(original_dtype)
-    src_fp64 = src_fp64.astype(original_dtype) if ctx.model.norm.zero_mean or psum else src
     if psum:
         out = all_gather(out, dim)
-    return out, src_fp64, std
+    return out, std
 
 
 @with_context()
@@ -73,10 +71,11 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
         else:
             reshaped_weight = wgt
 
-        out, new_src, std = norm_forward(ctx, src, reshaped_weight, psum, act, dim)
+        out, std = norm_forward(ctx, src, reshaped_weight, psum, act, dim)
 
         def _grad(dy: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
-            src_fp64 = promote_to(new_src, run_type)
+            inner_src = lax.all_gather(src, ParallelAxes.model, axis=dim) if psum else src
+            src_fp64 = promote_to(inner_src, run_type)
             norm_out = src_fp64 * std
             dy = promote_to(dy, run_type)
             if act:
@@ -93,8 +92,8 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
             dy = dy * reshaped_weight
 
             d_std = (dy * src_fp64).sum(dim, keepdims=True)  # broadcast forward -> sum backward
-            d_std *= std ** (ctx.model.norm.power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
-            d_std *= src_fp64 ** (ctx.model.norm.power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
+            d_std *= std ** 3  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
+            d_std *= src_fp64  # x^pow -> pow * x^(pow-1), multiply fused with above
             dx = dy * std - d_std
             if psum:
                 dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
