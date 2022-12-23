@@ -39,11 +39,9 @@ def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float, quantize: ty
 def norm(param_name: str, val: jax.Array, is_squared: bool = False):
     if not is_squared:
         val = lax.square(val)
-    if is_stacked(param_name):
-        val = val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
-    else:
-        val = val.sum()
-    return val
+    if not is_stacked(param_name):
+        return val.sum()
+    return val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
 
 
 def clip_norm(param_name: str, val: jax.Array, min_norm: float, is_squared: bool = False) -> jax.Array:
@@ -99,13 +97,12 @@ def update(ctx: Context, grads: typing.Dict[str, jax.Array], step: jax.Array):
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad, False)
         grad_sq = adaptive_gradient_clipping(ctx, param_name, grads[add_sq(param_name)], True)
-        weight_update = tg_adam(ctx, param_name, grad, grad_sq, step)
+        weight_update = tg_adam(ctx, param_name, grad, grad_sq, step) * parameter_lr
 
         if ctx.is_initializing:
             continue
 
         if not small_parameter(param_name, grad):
-            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+            ctx.parameters[param_name] *= (1 + ctx.optimizer.weight_decay * parameter_lr).astype(dtype)
 
-        weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
-        ctx.parameters[param_name] = (weight_update * parameter_lr + ctx.parameters[param_name]).astype(dtype)
+        ctx.parameters[param_name] += weight_update.astype(dtype)
