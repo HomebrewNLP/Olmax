@@ -144,7 +144,7 @@ def orthogonal_init(ctx: Context, shape: List[int], column_axes=(-1,)) -> jax.Ar
 def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
               std: Optional[float] = None, mean: Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
-              lr_scale: float = 1, dtype: Optional[jnp.float32] = None,
+              lr_scale: float = 1, dtype: Optional[jnp.dtype] = None,
               init_val: Optional[jax.Array] = None,
               tied: bool = False,
               return_sq: bool = False,

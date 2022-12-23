@@ -22,6 +22,7 @@ def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype, tied=True)
     if ctx.is_initializing:
         return state
+    
     if momentum_type != MomentumType.heavyball:
         inp *= 1 - beta
     inp = inp.astype(ctx.optimizer.momentum_dtype)
@@ -29,6 +30,7 @@ def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
     assign(ctx, "momentum_buffer", new_state)
     if momentum_type == MomentumType.debiased:
         new_state = new_state / (1 - beta ** (step + 1))
+
     if momentum_type == MomentumType.nesterov:
         return new_state * beta + inp
     return new_state
@@ -55,8 +57,7 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jax.Array, i
 
 
 def graft(param_name: str, magnitude: jax.Array, direction: jax.Array) -> jax.Array:
-    scale = jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
-    return scale * direction
+    return direction * jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
 
 
 def tg_adam(ctx: Context, param_name: str, grad: jax.Array, tg_grad: jax.Array, step: jax.Array) -> jax.Array:
@@ -67,17 +68,17 @@ def tg_adam(ctx: Context, param_name: str, grad: jax.Array, tg_grad: jax.Array, 
     if ctx.is_initializing:
         return grad
 
-    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
     adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
+    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
     return graft(param_name, adam_update, tg_update)
 
 
 def get_current_lr(ctx: Context, step: jax.Array) -> jax.Array:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
-    learning_rate *= jnp.minimum(step, opt.warmup_end).astype(jnp.float32)
+    learning_rate *= jnp.minimum(step, opt.warmup_end).astype(jnp.float64)
     learning_rate /= opt.warmup_end
-    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(step.astype(jnp.float32))
+    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(step.astype(jnp.float64))
     return learning_rate.astype(ctx.model.storage_dtype)
 
 
