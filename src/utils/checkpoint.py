@@ -46,8 +46,8 @@ def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str, verbo
     log(f"Saving to {path} failed {UPLOAD_RETRIES} times. Skipping this checkpoint.", True)
 
 
-def move_checkpoint(ctx: Context, real_path: str):
-    out = subprocess.run(["/opt/google-cloud-sdk/bin/gsutil", "-m", "mv", ctx.training.checkpoint_path, real_path])
+def move_checkpoint(ctx: Context, new: str):
+    out = subprocess.run(["/opt/google-cloud-sdk/bin/gsutil", "-m", "mv", ctx.training.checkpoint_path + '/*', new])
     out.check_returncode()
     return out
 
