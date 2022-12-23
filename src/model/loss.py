@@ -28,7 +28,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Ar
         tmp = matmul(inp_slice, wgt)
         tmp = promote_to(tmp, jnp.float32)
         tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(local_batch, ctx.dims.vocab)
-        lse = jax.nn.logsumexp(tmp, 1, keepdims=True)
+        lse = jax.nn.logsumexp(promote_to(tmp, jnp.float64), 1, keepdims=True)
 
         loss = loss + (lse / total_items).sum()
         loss = loss - (jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1) / total_items).sum()
@@ -39,9 +39,9 @@ def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Ar
         dy = dy.at[jnp.arange(local_batch).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / total_items)
         dy = dy + zloss
         dy = dy * jax.device_count()
+        dy = dy.astype(src.dtype)
         dy = lax.all_gather(dy, ParallelAxes.model)
         dy = dy.reshape(step_batch, ctx.dims.vocab).transpose(1, 0)
-        dy = dy.astype(src.dtype)
         dx = matmul(wgt, dy)  # [Features, Vocab] @ [Vocab, StepBatch] -> [Features, StepBatch]
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
