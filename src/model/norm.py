@@ -32,7 +32,7 @@ def all_gather(inp: jax.Array, dim: int) -> jax.Array:
 
 def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, psum: bool = False,
                  act: bool = True, dim: int = 2):
-    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float64)
     original_dtype = src.dtype
     src_fp64 = promote_to(src, run_type)
     if psum:
@@ -54,7 +54,7 @@ def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, 
 def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
                    weight: Union[bool, None, Tuple[jax.Array, jax.Array]] = None,
                    psum: bool = False, act: bool = True, dim: int = 2) -> jax.Array:
-    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float64)
     if weight is None:
         weight, weight_sq = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type, return_sq=True)
     elif weight is False:
