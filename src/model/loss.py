@@ -74,6 +74,6 @@ def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Ar
 
         loss = lax.psum(loss, ParallelAxes.model)
         acc = lax.psum(acc, ParallelAxes.model)
-        return (loss.astype(jnp.float64), acc.astype(jnp.float32)), _grad
+        return (loss, acc), _grad
 
     return _fn(src, outer_tgt, param, param_sq)
