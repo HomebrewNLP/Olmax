@@ -62,8 +62,8 @@ def is_main():
     return jax.process_index() == 0
 
 
-def stable_rsqrt(inp: jax.Array, eps: float, power: float = 2) -> jax.Array:
-    return jnp.reciprocal(jnp.maximum(jnp.power(jnp.maximum(inp, 0), 1 / power), eps))
+def stable_rsqrt(inp: jax.Array, eps: float) -> jax.Array:
+    return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), eps))
 
 
 def pos_dim(inp: jax.Array, dims: Sequence[int]) -> Sequence[int]:
