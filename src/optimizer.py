@@ -1,10 +1,11 @@
-import typing
+from typing import Optional, Dict
 
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import add_sq, assign, default, get_param, is_stacked, stable_rsqrt, with_context
-from .context import Context
+from src.backend import add_sq, assign, default, get_param, is_stacked, stable_rsqrt, with_context
+from src.constants import MomentumType
+from src.context import Context
 
 
 def small_parameter(param_name: str, grad: jax.Array) -> bool:
@@ -15,23 +16,18 @@ def small_parameter(param_name: str, grad: jax.Array) -> bool:
 
 
 @with_context()
-def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float, quantize: typing.Optional[bool] = None,
-        init_val: typing.Optional[jax.Array] = None, heavyball: bool = None, nesterov: bool = None,
-        debias: bool = True) -> jax.Array:
-    quantize = default(quantize, not small_parameter(ctx.global_prefix, inp))
-    heavyball = default(heavyball, ctx.optimizer.heavyball)
-    nesterov = default(nesterov, ctx.optimizer.nesterov)
-
-    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else inp.dtype,
-                      init_val=default(init_val, jnp.zeros_like(inp)), tied=True)
+def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
+        momentum_type: Optional[MomentumType] = None) -> jax.Array:
+    default(momentum_type, ctx.optimizer.momentum_type)
+    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=inp.dtype, tied=True)
     if ctx.is_initializing:
         return state
 
-    new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
-    assign(ctx, "momentum_buffer", new_state.astype(state.dtype))
-    if not heavyball and debias:  # non-heavyball momentum needs to be debiased
+    new_state = state * beta + inp * (1 if momentum_type == MomentumType.heavyball else (1 - beta))
+    assign(ctx, "momentum_buffer", new_state)
+    if momentum_type == MomentumType.debiased:
         new_state = new_state / (1 - beta ** (step + 1))
-    if nesterov:
+    if momentum_type == MomentumType.nesterov:
         return new_state * beta + inp
     return new_state
 
@@ -83,7 +79,7 @@ def get_current_lr(ctx: Context, step: jax.Array) -> jax.Array:
     return learning_rate.astype(ctx.model.storage_dtype)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jax.Array], step: jax.Array):
+def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
     outer_ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, step)
 

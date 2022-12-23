@@ -1,9 +1,13 @@
-class MomentumType:
-    nesterov = 0
-    heavy_ball = 1
-    ema = 2
+from enum import StrEnum
 
 
-class ParallelAxes:
+class MomentumType(StrEnum):
+    heavyball = "heavyball"
+    nesterov = "nesterov"
+    debiased = "debiased"
+    ema = "ema"
+
+
+class ParallelAxes(StrEnum):
     model = "model_parallel"
-    data = "data_parallel"
+    # data = "data_parallel"  # discontinued in favor of pure model parallel
