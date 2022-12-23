@@ -35,15 +35,18 @@ def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, 
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float64)
     original_dtype = src.dtype
     src_fp64 = promote_to(src, run_type)
+    own_sum = lax.square(src_fp64).sum(dim, keepdims=True)
     if psum:
-        src_fp64 = all_gather(src_fp64, dim)
-    std = stable_rsqrt(lax.square(src_fp64).sum(dim, keepdims=True), ctx.model.norm.eps)
+        own_sum = lax.psum(own_sum, ParallelAxes.model)
+    std = stable_rsqrt(own_sum, ctx.model.norm.eps)
     norm_out = src_fp64 * std
     out = norm_out * wgt
     if act:
         out = activate_forward(out)
     out = out.astype(original_dtype)
     src_fp64 = src_fp64.astype(original_dtype) if ctx.model.norm.zero_mean or psum else src
+    if psum:
+        out = all_gather(out, dim)
     return out, src_fp64, std
 
 
@@ -93,6 +96,8 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
             d_std *= std ** (ctx.model.norm.power + 1)  # reciprocal + x^(1/pow) -> 1/std^2 * 1/std^(pow-1) * 1/pow
             d_std *= src_fp64 ** (ctx.model.norm.power - 1)  # x^pow -> pow * x^(pow-1), multiply fused with above
             dx = dy * std - d_std
+            if psum:
+                dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
             return dx.astype(original_dtype), d_wgt, d_wgt_sq
 
         return out, _grad
