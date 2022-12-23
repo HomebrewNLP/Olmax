@@ -19,11 +19,13 @@ def small_parameter(param_name: str, grad: jax.Array) -> bool:
 def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
         momentum_type: Optional[MomentumType] = None) -> jax.Array:
     default(momentum_type, ctx.optimizer.momentum_type)
-    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=inp.dtype, tied=True)
+    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype, tied=True)
     if ctx.is_initializing:
         return state
-
-    new_state = state * beta + inp * (1 if momentum_type == MomentumType.heavyball else (1 - beta))
+    if momentum_type != MomentumType.heavyball:
+        inp *= 1 - beta
+    inp = inp.astype(ctx.optimizer.momentum_dtype)
+    new_state = state * beta + inp
     assign(ctx, "momentum_buffer", new_state)
     if momentum_type == MomentumType.debiased:
         new_state = new_state / (1 - beta ** (step + 1))

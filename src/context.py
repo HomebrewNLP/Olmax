@@ -108,6 +108,7 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
+    momentum_dtype: str = "float32"
     momentum_type: str = "debiased"  # see src.constants.MomentumType for options
     epsilon: float = 1e-16
     learning_rate: float = 0.01
