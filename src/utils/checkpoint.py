@@ -10,7 +10,7 @@ import multiprocessing
 import re
 import subprocess
 import time
-import typing
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -32,7 +32,7 @@ def log(arg: str, verbose: bool):
         print(datetime.datetime.now(), arg)
 
 
-def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str, verbose: bool):
+def write_shard(weights: Any, idx: int, prefix: str, filename: str, verbose: bool):
     path = f"{prefix}/{jax.process_index()}/{idx}/{filename}"
     shard = jax.device_put(jax.tree_util.tree_map(lambda i: i[idx], weights), jax.devices("cpu")[0])
     log(f"Uploading {len(shard)} objects to {path}", verbose)

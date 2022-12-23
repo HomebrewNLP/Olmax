@@ -1,5 +1,5 @@
 import math
-import typing
+from typing import Tuple
 
 import jax
 from jax import lax, numpy as jnp
@@ -9,8 +9,8 @@ from src.constants import ParallelAxes
 from src.context import Context
 
 
-def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jax.Array, jax.Array, jax.Array],
-                       outer_tgt: jax.Array) -> typing.Tuple[jax.Array, jax.Array]:
+def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Array],
+                       outer_tgt: jax.Array) -> Tuple[jax.Array, jax.Array]:
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - one_hot(target) + softmax(x) * logsumexp(x) * z_loss
@@ -21,8 +21,8 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jax.Array, jax.Array,
     step_batch = total_items // steps
     local_batch = step_batch // devices
 
-    def _xent_slice(carry: typing.Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
-                    x: typing.Tuple[jax.Array, jax.Array], wgt: jax.Array):
+    def _xent_slice(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+                    x: Tuple[jax.Array, jax.Array], wgt: jax.Array):
         d_wgt, d_wgt_sq, loss, acc = carry
         inp_slice, tgt_slice = x
         tmp = matmul(inp_slice, wgt)
@@ -67,7 +67,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: typing.Tuple[jax.Array, jax.Array,
         d_wgt = d_wgt.transpose(1, 0)  # [Vocab, Features]  ->  [Features, Vocab]
         d_wgt_sq = d_wgt_sq.transpose(1, 0) * ctx.dims.batch
 
-        def _grad(dy: typing.Tuple[jax.Array, None]) -> typing.Tuple[jax.Array, None, jax.Array]:
+        def _grad(dy: Tuple[jax.Array, None]) -> Tuple[jax.Array, None, jax.Array, jax.Array]:
             # dy == 1 since this is the last function before the output
             dy, _ = dy
             return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype), (d_wgt_sq * dy).astype(wgt.dtype)

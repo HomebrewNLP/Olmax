@@ -1,13 +1,13 @@
-import typing
-from typing import Any, Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Sequence
+from typing import Tuple, List, Any, Optional, TypeVar, Union, Callable
 
 import jax
 import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
 
-from .constants import ParallelAxes
-from .context import Context
+from src.constants import ParallelAxes
+from src.context import Context
 
 INT_OR_TUPLE = Union[int, Sequence[int]]
 
@@ -210,7 +210,7 @@ def loop(fn: Callable, fn_input: Any, steps: int, unroll: int = 1):
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
 
 
-typevar = typing.TypeVar("typevar")
+typevar = TypeVar("typevar")
 
 
 def pattern_match(gen_fn: Callable[[int], Callable[[typevar], jax.Array]], cases: int,

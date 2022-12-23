@@ -1,6 +1,6 @@
 import collections
 import time
-import typing
+from typing import List
 
 import numpy as np
 
@@ -17,7 +17,7 @@ class WandbLog:
         self.tokens_per_step = tokens_per_step
         self.first_step = None
 
-    def _log(self, prefix: str, value: float, sizes: typing.List[int]):
+    def _log(self, prefix: str, value: float, sizes: List[int]):
         scalars = self.scalars[prefix]
         value = float(value)
         scalars.append(value)

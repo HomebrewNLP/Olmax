@@ -2,8 +2,8 @@ import copy
 import math
 import os
 import time
-import typing
 import warnings
+from typing import Tuple, Dict, Any, Callable, Iterator
 
 import jax
 import numpy as np
@@ -20,11 +20,11 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-def add_zeros(params: typing.Dict[str, jax.Array]):
+def add_zeros(params: Dict[str, jax.Array]):
     params.update({add_sq(k): jnp.zeros_like(v) for k, v in params.items()})
 
 
-def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+def train_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
@@ -38,7 +38,7 @@ def train_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str,
     return wctx.serialize()
 
 
-def jitless_step(while_ctx_dict: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     training = wctx.ctx.training
     steps = training.device_steps * jax.process_count()
@@ -82,7 +82,7 @@ def get_parameters(ctx: Context, inp: jax.Array):
 
 
 def get_optimizer_state(ctx: Context):
-    def _fn(parameters: typing.Dict[str, jax.Array]):
+    def _fn(parameters: Dict[str, jax.Array]):
         new_ctx = ctx
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
@@ -108,7 +108,7 @@ def timeit(text: str, fn, *args, pad=50, **kwargs):
 
 
 class TrainLoop:
-    def __init__(self, wctx: WhileTrainContext, step: typing.Callable):
+    def __init__(self, wctx: WhileTrainContext, step: Callable):
         self.wctx = wctx
         self.step = step
 
@@ -119,11 +119,11 @@ class TrainLoop:
         return self.wctx
 
 
-def replicate(x: typing.Any) -> typing.Any:
+def replicate(x: Any) -> Any:
     return jax.device_put_replicated(x, jax.local_devices())
 
 
-def init_data(ctx: Context, skipped_samples: int) -> typing.Tuple[typing.Iterator[np.ndarray], np.ndarray]:
+def init_data(ctx: Context, skipped_samples: int) -> Tuple[Iterator[np.ndarray], np.ndarray]:
     np_data = timeit("Initializing dataset", text_dataset, ctx, skipped_samples)
 
     data = map(replicate, np_data)
@@ -131,7 +131,7 @@ def init_data(ctx: Context, skipped_samples: int) -> typing.Tuple[typing.Iterato
     return data, inp
 
 
-def init_data_and_model(wctx: WhileTrainContext) -> typing.Iterator[np.ndarray]:
+def init_data_and_model(wctx: WhileTrainContext) -> Iterator[np.ndarray]:
     """Model gets loaded in-place into the `WhileTrainContext`"""
     if wctx.ctx.training.checkpoint_load_path:
         read_train_checkpoint(wctx, '[0]{100}')

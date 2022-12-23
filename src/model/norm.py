@@ -1,4 +1,4 @@
-import typing
+from typing import Tuple, Optional, Union, Callable
 
 import jax
 from jax import lax, numpy as jnp
@@ -9,7 +9,7 @@ from src.context import Context
 from src.model.activate import activate_forward, activate_grad
 
 
-def prenorm(fn: typing.Callable[[Context, jax.Array], jax.Array]):
+def prenorm(fn: Callable[[Context, jax.Array], jax.Array]):
     def _fn(ctx: Context, inp: jax.Array, *args) -> jax.Array:
         ctx = ctx.add_to_prefix("prenorm")
         inp = scale_norm_act(ctx, inp, ctx.dims.features, act=False)
@@ -30,7 +30,7 @@ def all_gather(inp: jax.Array, dim: int) -> jax.Array:
     return _fn(inp)
 
 
-def norm_forward(ctx: Context, src: jax.Array, wgt: typing.Optional[jax.Array] = None, psum: bool = False,
+def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, psum: bool = False,
                  act: bool = True, dim: int = 2):
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     original_dtype = src.dtype
@@ -52,7 +52,7 @@ def norm_forward(ctx: Context, src: jax.Array, wgt: typing.Optional[jax.Array] =
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
-                   weight: typing.Union[bool, None, typing.Tuple[jax.Array, jax.Array]] = None,
+                   weight: Union[bool, None, Tuple[jax.Array, jax.Array]] = None,
                    psum: bool = False, act: bool = True, dim: int = 2) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
@@ -75,7 +75,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
 
         out, new_src, std = norm_forward(ctx, src, reshaped_weight, psum, act, dim)
 
-        def _grad(dy: jax.Array) -> typing.Tuple[jax.Array, jax.Array, jax.Array]:
+        def _grad(dy: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
             src_fp64 = promote_to(new_src, run_type)
             norm_out = src_fp64 * std
             dy = promote_to(dy, run_type)

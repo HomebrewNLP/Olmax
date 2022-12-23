@@ -1,13 +1,13 @@
 import copy
-import typing
+from typing import Callable, Dict, Tuple
 
 import jax
 
 from src.context import Context
 
-REVERSIBLE_CTX = typing.Tuple[typing.Dict[str, jax.Array], jax.Array, jax.Array, jax.Array, jax.Array]
-ReversibleFn = typing.Callable[[Context, jax.Array], jax.Array]
-FourArrays = typing.Tuple[jax.Array, jax.Array, jax.Array, jax.Array]
+REVERSIBLE_CTX = Tuple[Dict[str, jax.Array], jax.Array, jax.Array, jax.Array, jax.Array]
+ReversibleFn = Callable[[Context, jax.Array], jax.Array]
+FourArrays = Tuple[jax.Array, jax.Array, jax.Array, jax.Array]
 
 
 def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args) -> REVERSIBLE_CTX:
@@ -23,7 +23,7 @@ def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args) -> RE
 
     name_cache = copy.deepcopy(ctx.name_cache)
 
-    def base(params: typing.Dict[str, jax.Array], inp: jax.Array, *inner_args) -> jax.Array:
+    def base(params: Dict[str, jax.Array], inp: jax.Array, *inner_args) -> jax.Array:
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
@@ -32,7 +32,7 @@ def reversible(ctx: Context, fn: ReversibleFn, src: REVERSIBLE_CTX, *args) -> RE
         return out
 
     @jax.custom_gradient
-    def _fn(params: typing.Dict[str, jax.Array], x0: jax.Array, _back_x0: jax.Array, x1: jax.Array,
+    def _fn(params: Dict[str, jax.Array], x0: jax.Array, _back_x0: jax.Array, x1: jax.Array,
             _back_x1: jax.Array, *inner_args):
         def _grad(dy):
             d_params_old, dy0, y0, dy1, y1 = dy
