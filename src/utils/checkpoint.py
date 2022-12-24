@@ -47,12 +47,14 @@ def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str, verbo
     log(f"Saving to {path} failed {UPLOAD_RETRIES} times. Skipping this checkpoint.", True)
 
 
-def cmd(command: str):
-    subprocess.run(command.split(' ')).check_returncode()
-
+def cmd(command: str, check: bool = True):
+    out = subprocess.run(command.split(' '))
+    if check:
+        out.check_returncode()
+    return out
 
 def move_checkpoint(ctx: Context, new: str):
-    cmd(f"{GSUTIL_PATH} -m rm {new} ; echo")  # ignore exit code
+    cmd(f"{GSUTIL_PATH} -m rm {new}", False)  # ignore exit code
     cmd(f"{GSUTIL_PATH} -m cp {ctx.training.checkpoint_path} {new}")
     cmd(f"{GSUTIL_PATH} -m rm {ctx.training.checkpoint_path}")
 
