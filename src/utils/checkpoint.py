@@ -53,10 +53,11 @@ def cmd(command: str, check: bool = True):
         out.check_returncode()
     return out
 
+
 def move_checkpoint(ctx: Context, new: str):
-    cmd(f"{GSUTIL_PATH} -m rm {new}", False)  # ignore exit code
-    cmd(f"{GSUTIL_PATH} -m cp {ctx.training.checkpoint_path} {new}")
-    cmd(f"{GSUTIL_PATH} -m rm {ctx.training.checkpoint_path}")
+    cmd(f"{GSUTIL_PATH} -m rm -r {new}", False)  # ignore exit code
+    cmd(f"{GSUTIL_PATH} -m cp -r {ctx.training.checkpoint_path} {new}")
+    cmd(f"{GSUTIL_PATH} -m rm -r {ctx.training.checkpoint_path}")
 
 
 def write_checkpoint(ctx: Context, verbose: bool = True):
