@@ -10,4 +10,3 @@ class MomentumType(StrEnum):
 
 class ParallelAxes(StrEnum):
     model = "model_parallel"
-    # data = "data_parallel"  # discontinued in favor of pure model parallel

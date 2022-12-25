@@ -22,7 +22,7 @@ def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
     state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype, tied=True)
     if ctx.is_initializing:
         return state
-    
+
     if momentum_type != MomentumType.heavyball:
         inp *= 1 - beta
     inp = inp.astype(ctx.optimizer.momentum_dtype)
