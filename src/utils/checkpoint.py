@@ -48,10 +48,7 @@ def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str, verbo
 
 
 def cmd(command: str, check: bool = True):
-    out = subprocess.run(command.split(' '))
-    if check:
-        out.check_returncode()
-    return out
+    return subprocess.run(command.split(' '), check=check)
 
 
 def move_checkpoint(ctx: Context, new: str):
