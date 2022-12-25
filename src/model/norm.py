@@ -64,6 +64,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
 
     @jax.custom_gradient
     def _fn(src: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
+        dtype = src.dtype
         if isinstance(wgt, jax.Array):
             reshaped_weight = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))
         else:
@@ -95,7 +96,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
             dx = dy * std - d_std
             if psum:
                 dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
-            return dx.astype(src.dtype), d_wgt, d_wgt_sq
+            return dx.astype(dtype), d_wgt, d_wgt_sq
 
         return out, _grad
 
