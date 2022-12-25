@@ -154,9 +154,7 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
         out0 = get_param(ctx, name, *args)
         if ctx.is_initializing:
             return out0, None
-        else:
-            out1 = get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
-            return out0, out1
+        return out0, get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
     if not tied:
         name = name + '_stacked'
     add_depth = ctx.add_depth and not tied
