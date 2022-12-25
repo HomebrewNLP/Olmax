@@ -1,12 +1,12 @@
-from enum import StrEnum
+from enum import Enum
 
 
-class MomentumType(StrEnum):
+class MomentumType(Enum):
     heavyball = "heavyball"
     nesterov = "nesterov"
     debiased = "debiased"
     ema = "ema"
 
 
-class ParallelAxes(StrEnum):
+class ParallelAxes(Enum):
     model = "model_parallel"
