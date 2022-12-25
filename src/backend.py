@@ -14,7 +14,7 @@ INT_OR_TUPLE = Union[int, Sequence[int]]
 Output = TypeVar("Output")
 CtxFn = TypeVar("CtxFn")
 
-PRECISION = "highest"
+PRECISION = "fastest"
 jax.config.update("jax_default_matmul_precision", PRECISION)
 
 
