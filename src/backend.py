@@ -99,7 +99,7 @@ def device_id():
 
 
 def dot(left: jax.Array, right: jax.Array, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
-        left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jax.Array:
+        left_batch_dims: INT_OR_TUPLE = (), right_batch_dims: INT_OR_TUPLE = ()) -> jax.Array:
     dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
             (pos_dim(left, tuple_int(left_batch_dims)), pos_dim(right, tuple_int(right_batch_dims))))
     return lax.dot_general(left, right, dims, PRECISION)

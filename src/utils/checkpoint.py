@@ -74,7 +74,7 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
                     f.write(structure)
                 break
             except:  # skipcq: FLK-E722
-                log(f"Couldn't save structure. Retrying now.", verbose)
+                log("Couldn't save structure. Retrying now.", verbose)
 
     for shard in range(jax.local_device_count()):
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
