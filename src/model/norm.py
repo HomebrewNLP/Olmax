@@ -32,6 +32,7 @@ def all_gather(inp: jax.Array, dim: int) -> jax.Array:
 
 def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, psum: bool = False,
                  act: bool = True, dim: int = 2):
+    original_dtype = src.dtype
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     src_fp64 = promote_to(src, run_type)
     own_sum = lax.square(src_fp64).sum(dim, keepdims=True)
@@ -41,7 +42,7 @@ def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, 
     out = src_fp64 * std * wgt
     if act:
         out = activate_forward(out)
-    out = out.astype(src.dtype)
+    out = out.astype(original_dtype)
     if psum:
         out = all_gather(out, dim)
     return out, std
@@ -64,7 +65,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
 
     @jax.custom_gradient
     def _fn(src: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
-        dtype = src.dtype
+        original_dtype = src.dtype
         if isinstance(wgt, jax.Array):
             reshaped_weight = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))
         else:
@@ -96,7 +97,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
             dx = dy * std - d_std
             if psum:
                 dx = lax.psum_scatter(dx, axis_name=ParallelAxes.model, scatter_dimension=dim, tiled=True)
-            return dx.astype(dtype), d_wgt, d_wgt_sq
+            return dx.astype(original_dtype), d_wgt, d_wgt_sq
 
         return out, _grad
 
