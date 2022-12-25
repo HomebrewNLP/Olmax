@@ -19,7 +19,8 @@ def small_parameter(param_name: str, grad: jax.Array) -> bool:
 def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
         momentum_type: Optional[MomentumType] = None) -> jax.Array:
     default(momentum_type, ctx.optimizer.momentum_type)
-    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype, tied=True)
+    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype, tied=True,
+                      init_val=jnp.zeros_like(inp))
     if ctx.is_initializing:
         return state
 
