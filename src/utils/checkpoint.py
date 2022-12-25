@@ -47,12 +47,14 @@ def write_shard(weights: Any, idx: int, prefix: str, filename: str, verbose: boo
     log(f"Saving to {path} failed {UPLOAD_RETRIES} times. Skipping this checkpoint.", True)
 
 
-def cmd(command: str):
-    subprocess.run(command.split(' ')).check_returncode()
+def cmd(command: str, check: bool = True):
+    return subprocess.run(command.split(' '), check=check)
 
 
 def move_checkpoint(ctx: Context, new: str):
-    cmd(f"{GSUTIL_PATH} -m mv {ctx.training.checkpoint_path} {new}")
+    cmd(f"{GSUTIL_PATH} -m rm -r {new}", False)  # ignore exit code
+    cmd(f"{GSUTIL_PATH} -m cp -r {ctx.training.checkpoint_path} {new}")
+    cmd(f"{GSUTIL_PATH} -m rm -r {ctx.training.checkpoint_path}")
 
 
 def write_checkpoint(ctx: Context, verbose: bool = True):
@@ -72,7 +74,7 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
                     f.write(structure)
                 break
             except:  # skipcq: FLK-E722
-                log(f"Couldn't save structure. Retrying now.", verbose)
+                log("Couldn't save structure. Retrying now.", verbose)
 
     for shard in range(jax.local_device_count()):
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):

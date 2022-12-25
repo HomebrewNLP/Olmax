@@ -103,16 +103,13 @@ class CreationCallback:
             start_step = int(run.summary["_step"])
         except:  # skipcq: FLK-E722
             return  # no logs yet
-        start_step *= self.args.slices * self.cfg.training.device_steps  # add log interval
+        finally:
+            self.cfg.wandb.id = new_id()
+        self.restarts += 1
         if start_step < self.cfg.training.checkpoint_interval:
             self.cfg.training.checkpoint_load_path = ""
-            return  # no checkpoint yet
-
-        self.cfg.training.checkpoint_load_path = self.cfg.training.checkpoint_path
-        new_checkpoint_step = start_step - start_step % self.cfg.training.checkpoint_interval
-
-        self.restarts += 1
-        self.cfg.wandb.id = new_id()
+        else:
+            self.cfg.training.checkpoint_load_path = self.cfg.training.checkpoint_path
 
     def __call__(self, host: str, ctx: typing.Optional[TPUContext]) -> TPUContext:
         if ctx is not None:  # every call after 0th

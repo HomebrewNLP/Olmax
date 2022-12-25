@@ -50,7 +50,7 @@ def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Ar
         return (d_wgt, d_wgt_sq, loss.astype(jnp.float64), acc.astype(jnp.float64)), dx
 
     @jax.custom_gradient
-    def _fn(inp: jax.Array, tgt: jax.Array, wgt: jax.Array, wgt_sq: jax.Array):
+    def _fn(inp: jax.Array, tgt: jax.Array, wgt: jax.Array, _wgt_sq: jax.Array):
         inp = inp.reshape(steps, devices, local_batch, ctx.dims.features)
         tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
         tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]

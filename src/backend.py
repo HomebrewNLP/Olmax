@@ -21,7 +21,7 @@ jax.config.update("jax_default_matmul_precision", PRECISION)
 def square_grad(fn: Callable[[jax.Array, jax.Array], jax.Array], src: jax.Array, weight: jax.Array,
                 weight_sq: jax.Array):
     @jax.custom_gradient
-    def _fn(x: jax.Array, wgt: jax.Array, wgt_dummy: jax.Array):
+    def _fn(x: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
         def _grad(dy: jax.Array):
             d_x, d_wgt = jax.vjp(fn, x, wgt)[1](dy)
             _, d_wgt_sq = jax.vjp(fn, lax.square(x), wgt)[1](lax.square(dy))
@@ -99,7 +99,7 @@ def device_id():
 
 
 def dot(left: jax.Array, right: jax.Array, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
-        left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jax.Array:
+        left_batch_dims: INT_OR_TUPLE = (), right_batch_dims: INT_OR_TUPLE = ()) -> jax.Array:
     dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
             (pos_dim(left, tuple_int(left_batch_dims)), pos_dim(right, tuple_int(right_batch_dims))))
     return lax.dot_general(left, right, dims, PRECISION)
@@ -154,9 +154,7 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
         out0 = get_param(ctx, name, *args)
         if ctx.is_initializing:
             return out0, None
-        else:
-            out1 = get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
-            return out0, out1
+        return out0, get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
     if not tied:
         name = name + '_stacked'
     add_depth = ctx.add_depth and not tied

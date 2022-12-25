@@ -68,7 +68,10 @@ def text_dataset(ctx: Context, skipped_steps: int) -> Iterator[np.ndarray]:
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
     sequence_length_1 = sequence_length + 1
-    assert full_batch % ctx.data.datasets_used_per_step == 0
+    if full_batch % ctx.data.datasets_used_per_step != 0:
+        raise ValueError(f"Can't use {full_batch=} with {ctx.data.datasets_used_per_step=} as "
+                         f"{full_batch % ctx.data.datasets_used_per_step=}. Ensure full_batch="
+                         f"{device_steps * batch_size=} is divisible by {ctx.data.datasets_used_per_step=}")
     is_int64 = 'int64' in filenames[0]
 
     def _slice_target(x):
