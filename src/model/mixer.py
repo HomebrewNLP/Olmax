@@ -21,7 +21,7 @@ def dot_sq(src: jax.Array, weight: jax.Array, weight_sq: jax.Array,
 @with_context()
 def mix(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
     weight_shape = [ctx.dims.spatial_mixing_kernel] * 2
-    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float64)
+    run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     wgt0, wgt0_sq = get_param(ctx, "mix_0", weight_shape, return_sq=True)
     wgt1, wgt1_sq = get_param(ctx, "mix_1", weight_shape, return_sq=True)
     scale, scale_sq = get_param(ctx, "scale", [ctx.dims.features], std=0, mean=1, dtype=run_type, return_sq=True)
