@@ -4,7 +4,7 @@ export TF_CPP_MIN_LOG_LEVEL=4   # no dataset warnings
 
 export XRT_TPU_CONFIG="localservice;0;localhost:51011"
 
-export JAX_ENABLE_X64=1  # allow fp64
+export JAX_ENABLE_X64=0  # allow fp64
 export JAX_DEFAULT_DTYPE_BITS=32  # ..but don't enforce it
 
 export WANDB_WATCH="false"  # workaround to wandb crashing and killing the whole run

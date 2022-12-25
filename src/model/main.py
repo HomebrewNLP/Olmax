@@ -14,7 +14,7 @@ from src.model.reversible import FourArrays, reversible, revnet_out
 
 
 @with_context()
-def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
+def input_embed(ctx: Context, inp: jax.Array) -> jax.Array:
     param, param_sq = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features,
                                 return_sq=True)
 
@@ -28,10 +28,10 @@ def input_embed(ctx: Context, inp: jnp.ndarray) -> jnp.ndarray:
 
 
 @with_context()
-def block(ctx: Context, shared_params: typing.Dict[str, jnp.ndarray]):
+def block(ctx: Context, shared_params: typing.Dict[str, jax.Array]):
     name_cache = ctx.name_cache
 
-    def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
+    def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jax.Array], jax.Array]):
         original_parameters = ctx.parameters
         ctx.parameters, depth = inp
         ctx.parameters.update(shared_params)
@@ -65,8 +65,8 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
     return src
 
 
-def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[
-    typing.Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+def body_ctx(ctx: Context, src: jax.Array) -> typing.Union[
+    typing.Tuple[jax.Array, jax.Array, jax.Array], jax.Array]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = stem(ctx, (src, zero, src, zero))
@@ -79,7 +79,7 @@ def body_ctx(ctx: Context, src: jnp.ndarray) -> typing.Union[
     return out, wgt, wgt_sq
 
 
-def compute(params: typing.Dict[str, jnp.ndarray], inp: jnp.ndarray) -> typing.Tuple[jnp.ndarray, jnp.ndarray]:
+def compute(params: typing.Dict[str, jax.Array], inp: jax.Array) -> typing.Tuple[jax.Array, jax.Array]:
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp

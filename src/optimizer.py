@@ -7,17 +7,17 @@ from .backend import add_sq, assign, default, get_param, is_stacked, stable_rsqr
 from .context import Context
 
 
-def small_parameter(param_name: str, grad: jnp.ndarray) -> bool:
+def small_parameter(param_name: str, grad: jax.Array) -> bool:
     param_name = param_name.lower()
-    is_small = any(f'/{k}' in param_name for k in ("scale_norm_act", "rezero", "mix"))
+    is_small = any(f'{k}' in param_name for k in ("norm", "rezero"))
     is_small |= grad.ndim < (2 + is_stacked(param_name))
     return is_small
 
 
 @with_context()
-def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize: typing.Optional[bool] = None,
-        init_val: typing.Optional[jnp.ndarray] = None, heavyball: bool = None, nesterov: bool = None,
-        debias: bool = True) -> jnp.ndarray:
+def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float, quantize: typing.Optional[bool] = None,
+        init_val: typing.Optional[jax.Array] = None, heavyball: bool = None, nesterov: bool = None,
+        debias: bool = True) -> jax.Array:
     quantize = default(quantize, not small_parameter(ctx.global_prefix, inp))
     heavyball = default(heavyball, ctx.optimizer.heavyball)
     nesterov = default(nesterov, ctx.optimizer.nesterov)
@@ -36,21 +36,19 @@ def ema(ctx: Context, inp: jnp.ndarray, step: jnp.ndarray, beta: float, quantize
     return new_state
 
 
-def norm(param_name: str, val: jnp.ndarray, is_squared: bool = False):
+def norm(param_name: str, val: jax.Array, is_squared: bool = False):
     if not is_squared:
         val = lax.square(val)
-    if is_stacked(param_name):
-        val = val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
-    else:
-        val = val.sum()
-    return val
+    if not is_stacked(param_name):
+        return val.sum()
+    return val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
 
 
-def clip_norm(param_name: str, val: jnp.ndarray, min_norm: float, is_squared: bool = False) -> jnp.ndarray:
+def clip_norm(param_name: str, val: jax.Array, min_norm: float, is_squared: bool = False) -> jax.Array:
     return jnp.maximum(jnp.sqrt(norm(param_name, val, is_squared)), min_norm)
 
 
-def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray, is_squared: bool) -> jnp.ndarray:
+def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jax.Array, is_squared: bool) -> jax.Array:
     grad = grad.astype(jnp.float64)
     grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon, is_squared)
     wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3)
@@ -58,12 +56,12 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jnp.ndarray,
     return grad * grad_scale
 
 
-def graft(param_name: str, magnitude: jnp.ndarray, direction: jnp.ndarray) -> jnp.ndarray:
+def graft(param_name: str, magnitude: jax.Array, direction: jax.Array) -> jax.Array:
     scale = jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
     return scale * direction
 
 
-def tg_adam(ctx: Context, param_name: str, grad: jnp.ndarray, tg_grad: jnp.ndarray, step: jnp.ndarray) -> jnp.ndarray:
+def tg_adam(ctx: Context, param_name: str, grad: jax.Array, tg_grad: jax.Array, step: jax.Array) -> jax.Array:
     ema_g = ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1)
     ema_gsq = ema(ctx, grad ** 2, step, 1 - ctx.optimizer.adam_beta2)
     ema_tgsq = ema(ctx, tg_grad, step, 1 - ctx.optimizer.adam_beta3)
@@ -76,7 +74,7 @@ def tg_adam(ctx: Context, param_name: str, grad: jnp.ndarray, tg_grad: jnp.ndarr
     return graft(param_name, adam_update, tg_update)
 
 
-def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
+def get_current_lr(ctx: Context, step: jax.Array) -> jax.Array:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
     learning_rate *= jnp.minimum(step, opt.warmup_end).astype(jnp.float32)
@@ -85,7 +83,7 @@ def get_current_lr(ctx: Context, step: jnp.ndarray) -> jnp.ndarray:
     return learning_rate.astype(ctx.model.storage_dtype)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray):
+def update(ctx: Context, grads: typing.Dict[str, jax.Array], step: jax.Array):
     outer_ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, step)
 
@@ -99,13 +97,12 @@ def update(ctx: Context, grads: typing.Dict[str, jnp.ndarray], step: jnp.ndarray
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad, False)
         grad_sq = adaptive_gradient_clipping(ctx, param_name, grads[add_sq(param_name)], True)
-        weight_update = tg_adam(ctx, param_name, grad, grad_sq, step)
+        weight_update = tg_adam(ctx, param_name, grad, grad_sq, step) * parameter_lr
 
         if ctx.is_initializing:
             continue
 
         if not small_parameter(param_name, grad):
-            ctx.parameters[param_name] = (1 + ctx.optimizer.weight_decay * parameter_lr) * ctx.parameters[param_name]
+            ctx.parameters[param_name] *= (1 + ctx.optimizer.weight_decay * parameter_lr).astype(dtype)
 
-        weight_update = weight_update.astype(ctx.parameters[param_name].dtype)
-        ctx.parameters[param_name] = (weight_update * parameter_lr + ctx.parameters[param_name]).astype(dtype)
+        ctx.parameters[param_name] += weight_update.astype(dtype)

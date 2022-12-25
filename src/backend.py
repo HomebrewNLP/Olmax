@@ -18,11 +18,11 @@ PRECISION = "highest"
 jax.config.update("jax_default_matmul_precision", PRECISION)
 
 
-def square_grad(fn: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], src: jnp.ndarray, weight: jnp.ndarray,
-                weight_sq: jnp.ndarray):
+def square_grad(fn: Callable[[jax.Array, jax.Array], jax.Array], src: jax.Array, weight: jax.Array,
+                weight_sq: jax.Array):
     @jax.custom_gradient
-    def _fn(x: jnp.ndarray, wgt: jnp.ndarray, wgt_dummy: jnp.ndarray):
-        def _grad(dy: jnp.ndarray):
+    def _fn(x: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
+        def _grad(dy: jax.Array):
             d_x, d_wgt = jax.vjp(fn, x, wgt)[1](dy)
             _, d_wgt_sq = jax.vjp(fn, lax.square(x), wgt)[1](lax.square(dy))
             return d_x, d_wgt, d_wgt_sq * x.shape[0]
@@ -38,7 +38,7 @@ def add_sq(name: str) -> str:
     return name + '_sq'
 
 
-def promote_to(inp: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
+def promote_to(inp: jax.Array, dtype: jnp.dtype) -> jax.Array:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
@@ -62,11 +62,11 @@ def is_main():
     return jax.process_index() == 0
 
 
-def stable_rsqrt(inp: jnp.ndarray, eps: float, power: float = 2) -> jnp.ndarray:
+def stable_rsqrt(inp: jax.Array, eps: float, power: float = 2) -> jax.Array:
     return jnp.reciprocal(jnp.maximum(jnp.power(jnp.maximum(inp, 0), 1 / power), eps))
 
 
-def pos_dim(inp: jnp.ndarray, dims: Sequence[int]) -> Sequence[int]:
+def pos_dim(inp: jax.Array, dims: Sequence[int]) -> Sequence[int]:
     return tuple(d % inp.ndim for d in dims)
 
 
@@ -86,7 +86,7 @@ def is_stacked(param_name: str):
     return param_name.endswith('_stacked') and is_model(param_name)
 
 
-def conv(inp: jnp.ndarray, weight: jnp.ndarray, padding: List[Tuple[int, int]], groups: int):
+def conv(inp: jax.Array, weight: jax.Array, padding: List[Tuple[int, int]], groups: int):
     ndim = weight.ndim
     lhs = (0, ndim - 1) + tuple(range(1, ndim - 1))
     dimension_numbers = lax.ConvDimensionNumbers(lhs, (0, ndim - 1,) + tuple(range(1, ndim - 1)), lhs)
@@ -98,14 +98,14 @@ def device_id():
     return (lax.psum_scatter(jnp.arange(jax.device_count()), ParallelAxes.model) / jax.device_count()).astype(jnp.int32)
 
 
-def dot(left: jnp.ndarray, right: jnp.ndarray, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
-        left_batch_dims: INT_OR_TUPLE = tuple(), right_batch_dims: INT_OR_TUPLE = tuple()) -> jnp.ndarray:
+def dot(left: jax.Array, right: jax.Array, left_contract_dims: INT_OR_TUPLE, right_contract_dims: INT_OR_TUPLE,
+        left_batch_dims: INT_OR_TUPLE = (), right_batch_dims: INT_OR_TUPLE = ()) -> jax.Array:
     dims = ((pos_dim(left, tuple_int(left_contract_dims)), pos_dim(right, tuple_int(right_contract_dims))),
             (pos_dim(left, tuple_int(left_batch_dims)), pos_dim(right, tuple_int(right_batch_dims))))
     return lax.dot_general(left, right, dims, PRECISION)
 
 
-def matmul(left: jnp.ndarray, right: jnp.ndarray, reduced_dims=1):
+def matmul(left: jax.Array, right: jax.Array, reduced_dims=1):
     return dot(left, right, tuple(range(-reduced_dims, 0)), tuple(range(reduced_dims)))
 
 
@@ -113,7 +113,7 @@ def prefixed_name(ctx: Context, name: str):
     return ctx.add_to_prefix(name, count=False).global_prefix
 
 
-def assign(ctx: Context, name: str, inp: jnp.ndarray):
+def assign(ctx: Context, name: str, inp: jax.Array):
     name = prefixed_name(ctx, name)
     ctx.parameters[name] = inp
 
@@ -129,7 +129,7 @@ def deep_replace(d, value):
     return value
 
 
-def orthogonal_init(ctx: Context, shape: List[int], column_axes=(-1,)) -> jnp.ndarray:
+def orthogonal_init(ctx: Context, shape: List[int], column_axes=(-1,)) -> jax.Array:
     column_axes = tuple(column_axes)
     axes = tuple(shape[c] for c in column_axes)
     n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
@@ -145,18 +145,16 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
               std: Optional[float] = None, mean: Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
               lr_scale: float = 1, dtype: Optional[jnp.float32] = None,
-              init_val: Optional[jnp.ndarray] = None,
+              init_val: Optional[jax.Array] = None,
               tied: bool = False,
               return_sq: bool = False,
-              add_parameter_usages: bool = True) -> Union[Tuple[jnp.ndarray, Optional[jnp.ndarray]], jnp.ndarray]:
+              add_parameter_usages: bool = True) -> Union[Tuple[jax.Array, Optional[jax.Array]], jax.Array]:
     if return_sq:
         args = [shape, std, mean, column_axes, scale, post_variance_scale, lr_scale, dtype, init_val, tied, False]
         out0 = get_param(ctx, name, *args)
         if ctx.is_initializing:
             return out0, None
-        else:
-            out1 = get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
-            return out0, out1
+        return out0, get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
     if not tied:
         name = name + '_stacked'
     add_depth = ctx.add_depth and not tied
@@ -202,7 +200,7 @@ def default(option_1, option_2):
     return option_1
 
 
-def zero_param(ctx: Context, name: str, shape: List[int], dtype: Optional[jnp.dtype]) -> jnp.ndarray:
+def zero_param(ctx: Context, name: str, shape: List[int], dtype: Optional[jnp.dtype]) -> jax.Array:
     return get_param(ctx, name, shape, 0, 0, dtype=dtype)
 
 
@@ -213,6 +211,6 @@ def loop(fn: Callable, fn_input: Any, steps: int, unroll: int = 1):
 typevar = typing.TypeVar("typevar")
 
 
-def pattern_match(gen_fn: Callable[[int], Callable[[typevar], jnp.ndarray]], cases: int,
-                  predicate: jnp.ndarray, base: typevar):
+def pattern_match(gen_fn: Callable[[int], Callable[[typevar], jax.Array]], cases: int,
+                  predicate: jax.Array, base: typevar):
     return lax.switch(predicate.astype(jnp.int32) % cases, [gen_fn(i) for i in range(cases)], base)

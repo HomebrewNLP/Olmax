@@ -12,7 +12,7 @@ from src.model.reversible import revnet_out
 from unittests.grad.backend import grad_fn, randn_fn, trials
 
 
-def mean(x: jnp.ndarray):
+def mean(x: jax.Array):
     return (x / x.size).sum()
 
 
@@ -27,7 +27,7 @@ def randn_zero(ctx: Context, randn, zero_from: int):
     dy = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
     dy = dy[:, :, :zero_from, :]
 
-    def _inner_fn(x: jnp.ndarray):
+    def _inner_fn(x: jax.Array):
         zeros = jnp.zeros((ctx.dims.batch, ctx.dims.sequence - zero_from, ctx.dims.features))
         return jnp.concatenate([x, zeros], 1)
 
@@ -46,7 +46,7 @@ def test(samples: int, depth: int):
     ctx.dims.spatial_mixing_kernel = ctx.dims.sequence // 2
     src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features).astype(jnp.bfloat16)
 
-    def _fn(x: jnp.ndarray):
+    def _fn(x: jax.Array):
         stem(ctx, (x, jnp.zeros_like(x), x, jnp.zeros_like(x)))
         params = ctx.parameters
         ctx.parameters = {}
@@ -55,7 +55,7 @@ def test(samples: int, depth: int):
     params = jax.pmap(_fn, ParallelAxes.model)(src)
     ctx.is_initializing = False
 
-    def _inner(inp: typing.Tuple[typing.Dict[str, jnp.ndarray], jnp.ndarray]):
+    def _inner(inp: typing.Tuple[typing.Dict[str, jax.Array], jax.Array]):
         params, x = inp
         ctx.name_cache = {}
         ctx.parameters = params

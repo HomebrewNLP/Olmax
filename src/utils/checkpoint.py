@@ -3,10 +3,12 @@ Adapted from https://github.com/kingoflolz/mesh-transformer-jax/blob/0a75ca93705
 /mesh_transformer/checkpoint.py
 """
 import datetime
+import functools
 import io
 import json
 import multiprocessing
 import re
+import subprocess
 import time
 import typing
 
@@ -20,6 +22,9 @@ from src.backend import deep_replace, is_main
 from src.context import Context, WhileTrainContext
 
 UPLOAD_RETRIES = 8
+WCTX_VALUES = ("scalars", "current_step")
+TMP_PATH_ADDON = "_____TEMPORARY"
+GSUTIL_PATH = "/opt/google-cloud-sdk/bin/gsutil"
 
 
 def log(arg: str, verbose: bool):
@@ -42,6 +47,16 @@ def write_shard(weights: typing.Any, idx: int, prefix: str, filename: str, verbo
     log(f"Saving to {path} failed {UPLOAD_RETRIES} times. Skipping this checkpoint.", True)
 
 
+def cmd(command: str, check: bool = True):
+    return subprocess.run(command.split(' '), check=check)
+
+
+def move_checkpoint(ctx: Context, new: str):
+    cmd(f"{GSUTIL_PATH} -m rm -r {new}", False)  # ignore exit code
+    cmd(f"{GSUTIL_PATH} -m cp -r {ctx.training.checkpoint_path} {new}")
+    cmd(f"{GSUTIL_PATH} -m rm -r {ctx.training.checkpoint_path}")
+
+
 def write_checkpoint(ctx: Context, verbose: bool = True):
     flattened, jax_structure = jax.tree_util.tree_flatten(ctx.parameters)
     variance, _ = jax.tree_util.tree_flatten(ctx.parameter_variance)  # same structure
@@ -59,18 +74,36 @@ def write_checkpoint(ctx: Context, verbose: bool = True):
                     f.write(structure)
                 break
             except:  # skipcq: FLK-E722
-                log(f"Couldn't save structure. Retrying now.", verbose)
+                log("Couldn't save structure. Retrying now.", verbose)
 
     for shard in range(jax.local_device_count()):
         for tree, suffix in ((flattened, "parameters"), (variance, "variance")):
             write_shard(tree, shard, ctx.training.checkpoint_path, f"{suffix}.npz", verbose)
 
 
+@functools.partial(jax.pmap, axis_name="i")
+def _sync(x):
+    return jax.lax.psum(x, "i") == jax.device_count()
+
+
+def sync():
+    if not _sync(jnp.ones(jax.local_device_count()))[0]:
+        raise ValueError
+
+
 def write_train_checkpoint(wctx: WhileTrainContext, verbose: bool = True):
+    real_path = wctx.ctx.training.checkpoint_path
+    wctx.ctx.training.checkpoint_path = real_path + TMP_PATH_ADDON
+
     write_checkpoint(wctx.ctx, verbose)
     for shard in range(jax.local_device_count()):
-        for tree, suffix in ((wctx.scalars, "scalars"), (wctx.current_step, "current_step")):
-            write_shard([tree], shard, wctx.ctx.training.checkpoint_path, f"{suffix}.npz", verbose)
+        for val in WCTX_VALUES:
+            write_shard([getattr(wctx, val)], shard, wctx.ctx.training.checkpoint_path, val + ".npz", verbose)
+
+    sync()  # ensure that all nodes wrote their respective checkpoints before moving them collectively
+    if is_main():
+        move_checkpoint(wctx.ctx, real_path)
+    wctx.ctx.training.checkpoint_path = real_path
 
 
 def read_shard(checkpoint_dir):
@@ -136,6 +169,6 @@ def read_checkpoint(ctx: Context, ignore: str = '.*optimizer.*', load_variance: 
 
 def read_train_checkpoint(wctx: WhileTrainContext, ignore: str = '.*optimizer.*'):
     _, structure = jax.tree_util.tree_flatten([jnp.zeros((1,))])
-    wctx.scalars = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "scalars")[0]
-    wctx.current_step = _read_shards(wctx.ctx.training.checkpoint_load_path, structure, "current_step")[0]
+    for val in WCTX_VALUES:
+        setattr(wctx, val, _read_shards(wctx.ctx.training.checkpoint_load_path, structure, val)[0])
     read_checkpoint(wctx.ctx, ignore, load_variance=True)
