@@ -66,7 +66,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
         return inp
 
     @jax.custom_gradient
-    def _fn(src: jax.Array, wgt: jax.Array, wgt_dummy: jax.Array):
+    def _fn(src: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
         original_dtype = src.dtype
         if isinstance(wgt, jax.Array):
             reshaped_weight = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))

@@ -21,7 +21,7 @@ jax.config.update("jax_default_matmul_precision", PRECISION)
 def square_grad(fn: Callable[[jax.Array, jax.Array], jax.Array], src: jax.Array, weight: jax.Array,
                 weight_sq: jax.Array):
     @jax.custom_gradient
-    def _fn(x: jax.Array, wgt: jax.Array, wgt_dummy: jax.Array):
+    def _fn(x: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
         def _grad(dy: jax.Array):
             d_x, d_wgt = jax.vjp(fn, x, wgt)[1](dy)
             _, d_wgt_sq = jax.vjp(fn, lax.square(x), wgt)[1](lax.square(dy))
