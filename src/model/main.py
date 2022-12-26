@@ -1,4 +1,4 @@
-import typing
+from typing import Tuple, Dict, Union
 
 import jax
 from jax import lax, numpy as jnp
@@ -28,10 +28,10 @@ def input_embed(ctx: Context, inp: jax.Array) -> jax.Array:
 
 
 @with_context()
-def block(ctx: Context, shared_params: typing.Dict[str, jax.Array]):
+def block(ctx: Context, shared_params: Dict[str, jax.Array]):
     name_cache = ctx.name_cache
 
-    def _fn(carry: FourArrays, inp: typing.Tuple[typing.Dict[str, jax.Array], jax.Array]):
+    def _fn(carry: FourArrays, inp: Tuple[Dict[str, jax.Array], jax.Array]):
         original_parameters = ctx.parameters
         ctx.parameters, depth = inp
         ctx.parameters.update(shared_params)
@@ -65,8 +65,8 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
     return src
 
 
-def body_ctx(ctx: Context, src: jax.Array) -> typing.Union[
-    typing.Tuple[jax.Array, jax.Array, jax.Array], jax.Array]:
+def body_ctx(ctx: Context, src: jax.Array) -> Union[
+    Tuple[jax.Array, jax.Array, jax.Array], jax.Array]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = stem(ctx, (src, zero, src, zero))
@@ -79,7 +79,7 @@ def body_ctx(ctx: Context, src: jax.Array) -> typing.Union[
     return out, wgt, wgt_sq
 
 
-def compute(params: typing.Dict[str, jax.Array], inp: jax.Array) -> typing.Tuple[jax.Array, jax.Array]:
+def compute(params: Dict[str, jax.Array], inp: jax.Array) -> Tuple[jax.Array, jax.Array]:
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp

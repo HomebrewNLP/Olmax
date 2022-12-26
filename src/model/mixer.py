@@ -1,5 +1,5 @@
 import math
-import typing
+from typing import Sequence
 
 import jax
 from jax import numpy as jnp
@@ -10,7 +10,7 @@ from src.model.norm import prenorm, scale_norm_act
 
 
 def dot_sq(src: jax.Array, weight: jax.Array, weight_sq: jax.Array,
-           left_contract_dims: typing.Sequence[int], right_contract_dims: typing.Sequence[int]):
+           left_contract_dims: Sequence[int], right_contract_dims: Sequence[int]):
     def _dot(x, y):
         return dot(x, y, left_contract_dims=left_contract_dims, right_contract_dims=right_contract_dims)
 

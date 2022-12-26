@@ -1,10 +1,11 @@
-import typing
+from typing import Optional, Dict
 
 import jax
 from jax import lax, numpy as jnp
 
-from .backend import add_sq, assign, default, get_param, is_stacked, stable_rsqrt, with_context
-from .context import Context
+from src.backend import add_sq, assign, default, get_param, is_stacked, stable_rsqrt, with_context
+from src.constants import MomentumType
+from src.context import Context
 
 
 def small_parameter(param_name: str, grad: jax.Array) -> bool:
@@ -15,23 +16,23 @@ def small_parameter(param_name: str, grad: jax.Array) -> bool:
 
 
 @with_context()
-def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float, quantize: typing.Optional[bool] = None,
-        init_val: typing.Optional[jax.Array] = None, heavyball: bool = None, nesterov: bool = None,
-        debias: bool = True) -> jax.Array:
-    quantize = default(quantize, not small_parameter(ctx.global_prefix, inp))
-    heavyball = default(heavyball, ctx.optimizer.heavyball)
-    nesterov = default(nesterov, ctx.optimizer.nesterov)
-
-    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=jnp.bfloat16 if quantize else inp.dtype,
-                      init_val=default(init_val, jnp.zeros_like(inp)), tied=True)
+def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
+        momentum_type: Optional[MomentumType] = None) -> jax.Array:
+    default(momentum_type, ctx.optimizer.momentum_type)
+    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype, tied=True,
+                      init_val=jnp.zeros_like(inp))
     if ctx.is_initializing:
         return state
 
-    new_state = state.astype(inp.dtype) * beta + inp * (1 if heavyball else (1 - beta))
-    assign(ctx, "momentum_buffer", new_state.astype(state.dtype))
-    if not heavyball and debias:  # non-heavyball momentum needs to be debiased
+    if momentum_type != MomentumType.heavyball:
+        inp *= 1 - beta
+    inp = inp.astype(ctx.optimizer.momentum_dtype)
+    new_state = state * beta + inp
+    assign(ctx, "momentum_buffer", new_state)
+    if momentum_type == MomentumType.debiased:
         new_state = new_state / (1 - beta ** (step + 1))
-    if nesterov:
+
+    if momentum_type == MomentumType.nesterov:
         return new_state * beta + inp
     return new_state
 
@@ -57,8 +58,7 @@ def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jax.Array, i
 
 
 def graft(param_name: str, magnitude: jax.Array, direction: jax.Array) -> jax.Array:
-    scale = jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
-    return scale * direction
+    return direction * jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
 
 
 def tg_adam(ctx: Context, param_name: str, grad: jax.Array, tg_grad: jax.Array, step: jax.Array) -> jax.Array:
@@ -69,21 +69,21 @@ def tg_adam(ctx: Context, param_name: str, grad: jax.Array, tg_grad: jax.Array, 
     if ctx.is_initializing:
         return grad
 
-    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
     adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
+    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
     return graft(param_name, adam_update, tg_update)
 
 
 def get_current_lr(ctx: Context, step: jax.Array) -> jax.Array:
     opt = ctx.optimizer
     learning_rate = opt.learning_rate
-    learning_rate *= jnp.minimum(step, opt.warmup_end).astype(jnp.float32)
+    learning_rate *= jnp.minimum(step, opt.warmup_end).astype(jnp.float64)
     learning_rate /= opt.warmup_end
-    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(step.astype(jnp.float32))
+    learning_rate *= (1 - opt.exponential_decay) ** jax.nn.relu(step.astype(jnp.float64))
     return learning_rate.astype(ctx.model.storage_dtype)
 
 
-def update(ctx: Context, grads: typing.Dict[str, jax.Array], step: jax.Array):
+def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
     outer_ctx = ctx.add_to_prefix("optimizer")
     lr = -get_current_lr(ctx, step)
 

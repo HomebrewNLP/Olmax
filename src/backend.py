@@ -1,13 +1,13 @@
-import typing
-from typing import Any, Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Sequence
+from typing import Tuple, List, Any, Optional, TypeVar, Union, Callable
 
 import jax
 import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
 
-from .constants import ParallelAxes
-from .context import Context
+from src.constants import ParallelAxes
+from src.context import Context
 
 INT_OR_TUPLE = Union[int, Sequence[int]]
 
@@ -62,8 +62,8 @@ def is_main():
     return jax.process_index() == 0
 
 
-def stable_rsqrt(inp: jax.Array, eps: float, power: float = 2) -> jax.Array:
-    return jnp.reciprocal(jnp.maximum(jnp.power(jnp.maximum(inp, 0), 1 / power), eps))
+def stable_rsqrt(inp: jax.Array, eps: float) -> jax.Array:
+    return jnp.reciprocal(jnp.maximum(jnp.sqrt(inp), eps))
 
 
 def pos_dim(inp: jax.Array, dims: Sequence[int]) -> Sequence[int]:
@@ -144,7 +144,7 @@ def orthogonal_init(ctx: Context, shape: List[int], column_axes=(-1,)) -> jax.Ar
 def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
               std: Optional[float] = None, mean: Optional[float] = None, column_axes: int = 1,
               scale: float = 1., post_variance_scale: float = 1,
-              lr_scale: float = 1, dtype: Optional[jnp.float32] = None,
+              lr_scale: float = 1, dtype: Optional[jnp.dtype] = None,
               init_val: Optional[jax.Array] = None,
               tied: bool = False,
               return_sq: bool = False,
@@ -208,7 +208,7 @@ def loop(fn: Callable, fn_input: Any, steps: int, unroll: int = 1):
     return lax.scan(lambda *x: (fn(*x[:-1]), None), fn_input, None, steps, unroll=unroll)[0]
 
 
-typevar = typing.TypeVar("typevar")
+typevar = TypeVar("typevar")
 
 
 def pattern_match(gen_fn: Callable[[int], Callable[[typevar], jax.Array]], cases: int,

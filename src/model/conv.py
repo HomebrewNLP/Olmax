@@ -25,18 +25,6 @@ def conv(ctx: Context, inp: jax.Array, conv_kernel: int, in_features: int, out_f
 
 @prenorm
 @with_context()
-def bottleneck_block(ctx: Context, inp: jax.Array) -> jax.Array:
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.features,
-               ctx.dims.inner_bottleneck_features // jax.device_count())
-    inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features, psum=True)
-    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, ctx.dims.inner_bottleneck_features,
-               ctx.dims.inner_bottleneck_features)
-    inp = scale_norm_act(ctx, inp, ctx.dims.inner_bottleneck_features)
-    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, ctx.dims.features)
-
-
-@prenorm
-@with_context()
 def dense_block(ctx: Context, inp: jax.Array) -> jax.Array:
     inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, ctx.dims.pointwise_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.pointwise_features)

@@ -1,13 +1,13 @@
 import os
 import random
-import typing
+from typing import Iterator
 
 import jax
 import numpy as np
 import tensorflow as tf
 from tensorflow.data.experimental import AutoShardPolicy
 
-from .context import Context
+from src.context import Context
 
 tf1 = tf.compat.v1
 
@@ -40,7 +40,7 @@ def decoder(int_string: bool, data: tf.Tensor, seed: int, context_p1: int, deter
     return tf.data.TFRecordDataset(filenames=data).interleave(chunk, cycle_length=1, deterministic=deterministic)
 
 
-def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
+def debug_generator(ctx: Context) -> Iterator[np.ndarray]:
     rstate = np.random.RandomState(0)
     while True:
         start = rstate.uniform(1, 2 ** 30, (ctx.training.device_steps * ctx.dims.batch,)).astype(np.int64)
@@ -50,7 +50,7 @@ def debug_generator(ctx: Context) -> typing.Iterator[np.ndarray]:
         yield (np.sin(out) * multiplier * ctx.dims.vocab) % ctx.dims.vocab
 
 
-def text_dataset(ctx: Context, skipped_steps: int) -> typing.Iterator[np.ndarray]:
+def text_dataset(ctx: Context, skipped_steps: int) -> Iterator[np.ndarray]:
     if ctx.training.debug:
         return debug_generator(ctx)
 

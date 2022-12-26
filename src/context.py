@@ -1,11 +1,11 @@
 import collections
 import copy
 import os
-import typing
+from typing import Any, Callable, Union, Dict, Optional, List
 
+import jax
 import yaml
 from jax import numpy as jnp, random
-import jax
 
 
 class DataClass:
@@ -13,15 +13,15 @@ class DataClass:
         return serialize(self)
 
 
-def fn_if_dataclass(instance: typing.Any, fn: typing.Callable):
+def fn_if_dataclass(instance: Any, fn: Callable):
     return fn(instance) if isinstance(instance, (DataClass, list, tuple, dict)) else instance
 
 
-def serialize(instance: typing.Union[DataClass, typing.Dict[str, typing.Any]]):
+def serialize(instance: Union[DataClass, Dict[str, Any]]):
     if isinstance(instance, DataClass):
         attributes = {key: getattr(instance, key) for key in dir(instance) if
                       not key.startswith('_') and not key.endswith('_')}
-        return serialize({key: value for key, value in attributes.items() if not isinstance(value, typing.Callable)})
+        return serialize({key: value for key, value in attributes.items() if not isinstance(value, Callable)})
     if isinstance(instance, (list, tuple)):
         return [fn_if_dataclass(itm, serialize) for itm in instance]
     if isinstance(instance, dict):
@@ -29,7 +29,7 @@ def serialize(instance: typing.Union[DataClass, typing.Dict[str, typing.Any]]):
     return instance
 
 
-def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
+def init_class(instance: DataClass, config: Dict[str, Any]):
     for name in dir(instance):
         if name.startswith("_") or name.endswith("_") or name not in config:
             continue
@@ -53,7 +53,7 @@ def init_class(instance: DataClass, config: typing.Dict[str, typing.Any]):
             raise ValueError(f"Unknown type {type(attr)} with given data {config[name]}")
 
 
-def init_class_copy(instance: DataClass, config: typing.Dict[str, typing.Any]) -> DataClass:
+def init_class_copy(instance: DataClass, config: Dict[str, Any]) -> DataClass:
     instance = copy.deepcopy(instance)
     init_class(instance, config)
     return instance
@@ -83,9 +83,6 @@ class Dims(DataClass):
     depth: int = 8
     vocab: int = 256
 
-    def __getitem__(self, item: str):
-        return getattr(self, item)
-
 
 class TensorboardTrace(DataClass):
     """
@@ -99,31 +96,29 @@ class TensorboardTrace(DataClass):
 
 
 class WandB(DataClass):
-    group: typing.Optional[str] = None
-    name: typing.Optional[str] = None
-    id: typing.Optional[str] = None
+    group: Optional[str] = None
+    name: Optional[str] = None
+    id: Optional[str] = None
     project: str = 'gpt'
     entity: str = 'homebrewnlp'
-    median_sizes: typing.List[int] = [64, 256, 1024]
+    median_sizes: List[int] = [64, 256, 1024]
 
 
 class Optimizer(DataClass):
-    nesterov: bool = True
-    heavyball: bool = True
+    momentum_dtype: str = "float32"
+    momentum_type: str = "debiased"  # see src.constants.MomentumType for options
     epsilon: float = 1e-16
     learning_rate: float = 0.01
     gradient_clip: float = 0.001
     adam_beta1: float = 0.03
     adam_beta2: float = 0.003
-    weight_decay: float = 0.01
     adam_beta3: float = 0.001
+    weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
 
 
 class Normalization(DataClass):
-    power: int = 2  # Lp-Norm, like sum(abs(x)^p). Default: 2, as in standard deviation from LayerNorm/ScaleNorm
-    zero_mean: bool = False  # A bit slower, but LayerNorm+BatchNorm do it
     eps: float = 1e-16
 
 
@@ -161,7 +156,7 @@ class Context(DataClass):
     wandb: WandB = WandB()
     eval: Evaluation = Evaluation()
 
-    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.data = DataContext()
         self.optimizer = Optimizer()
         self.model = Model()
@@ -179,11 +174,11 @@ class Context(DataClass):
         self.seed = 0
         self.global_prefix = ''
 
-        self.name_cache: typing.Dict[str, int] = {}
-        self.name_cache_offsets: typing.Dict[str, int] = {}
-        self.parameters: typing.Dict[str, jax.Array] = {}
-        self.parameter_variance: typing.Dict[str, float] = {}
-        self.parameter_usages: typing.Dict[str, int] = collections.defaultdict(int)
+        self.name_cache: Dict[str, int] = {}
+        self.name_cache_offsets: Dict[str, int] = {}
+        self.parameters: Dict[str, jax.Array] = {}
+        self.parameter_variance: Dict[str, float] = {}
+        self.parameter_usages: Dict[str, int] = collections.defaultdict(int)
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
         self.fail_on_missing_parameter = True
@@ -214,10 +209,10 @@ class Context(DataClass):
 
 
 class WhileContext(DataClass):
-    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.ctx = Context()
         self.current_step = jnp.ones([], dtype=jnp.uint32)
-        self.data: typing.Optional[jax.Array] = None
+        self.data: Optional[jax.Array] = None
 
         if config is not None:
             self.ctx.parameters = config['parameters']
@@ -237,7 +232,7 @@ class WhileContext(DataClass):
 
 
 class WhileTrainContext(WhileContext):
-    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.scalars = jnp.zeros([2], jnp.float64)
 
@@ -253,7 +248,7 @@ class WhileTrainContext(WhileContext):
 
 
 class WhilePredictContext(WhileContext):
-    def __init__(self, config: typing.Optional[typing.Dict[str, typing.Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
 
         batch_dim_size = self.ctx.dims.batch
