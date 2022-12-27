@@ -16,7 +16,7 @@ from src.model.reversible import FourArrays, reversible, revnet_out
 @with_context()
 def input_embed(ctx: Context, inp: jax.Array) -> jax.Array:
     param, param_sq = get_param(ctx, "inp_embd", [ctx.dims.vocab, ctx.dims.features], std=1 / ctx.dims.features,
-                                return_sq=True)
+                                return_sq=True, lr_scale=ctx.dims.vocab ** -0.5)
 
     def _fn(src, wgt):
         return jnp.take(wgt, src, 0)
