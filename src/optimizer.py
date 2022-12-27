@@ -29,6 +29,8 @@ def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
     inp = inp.astype(ctx.optimizer.momentum_dtype)
     new_state = state * beta + inp
     assign(ctx, "momentum_buffer", new_state)
+
+    new_state = new_state.astype(jnp.float64)
     if momentum_type == MomentumType.debiased:
         new_state = new_state / (1 - beta ** (step + 1))
 
@@ -52,7 +54,7 @@ def clip_norm(param_name: str, val: jax.Array, min_norm: float, is_squared: bool
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jax.Array, is_squared: bool) -> jax.Array:
     grad = grad.astype(jnp.float64)
     grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon, is_squared)
-    wgt_norm = clip_norm(param_name, ctx.parameters[param_name], 1e-3)
+    wgt_norm = clip_norm(param_name, ctx.parameters[param_name].astype(jnp.float64), 1e-3)
     grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
     return grad * grad_scale
 
@@ -102,7 +104,7 @@ def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
         if ctx.is_initializing:
             continue
 
+        param = ctx.parameters[param_name].astype(jnp.float64)
         if not small_parameter(param_name, grad):
-            ctx.parameters[param_name] *= (1 + ctx.optimizer.weight_decay * parameter_lr).astype(dtype)
-
-        ctx.parameters[param_name] += weight_update.astype(dtype)
+            param *= 1 + ctx.optimizer.weight_decay * parameter_lr
+        ctx.parameters[param_name] = (param + weight_update).astype(dtype)
