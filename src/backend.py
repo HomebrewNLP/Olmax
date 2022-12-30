@@ -42,8 +42,8 @@ def promote_to(inp: jax.Array, dtype: jnp.dtype) -> jax.Array:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
 
-def with_context(count: Optional[bool] = None) -> CtxFn:
-    def _inner(fn: CtxFn) -> CtxFn:
+def with_context(count: Optional[bool] = None):
+    def _inner(fn: CtxFn):
         prefix_kwargs = {"appended": fn.__name__}
         if count is not None:
             prefix_kwargs["count"] = count
