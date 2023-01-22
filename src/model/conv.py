@@ -1,7 +1,9 @@
+import math
+
 import jax
 from jax import numpy as jnp
 
-from src.backend import conv as lax_conv, get_param, square_grad, with_context
+from src.backend import get_param, square_grad, with_context, conv as lax_conv, pattern_match
 from src.context import Context
 from src.model.norm import prenorm, scale_norm_act
 
@@ -25,7 +27,28 @@ def conv(ctx: Context, inp: jax.Array, conv_kernel: int, in_features: int, out_f
 
 @prenorm
 @with_context()
-def dense_block(ctx: Context, inp: jax.Array) -> jax.Array:
-    inp = conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.features, ctx.dims.pointwise_features)
-    inp = scale_norm_act(ctx, inp, ctx.dims.pointwise_features)
-    return conv(ctx, inp, ctx.dims.pointwise_kernel, ctx.dims.pointwise_features, ctx.dims.features)
+def dense_block(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
+    # Following [Rethinking Channel Dimensions for Efficient Model Design](https://arxiv.org/abs/2007.00992), we're
+    # not increasing the dimensionality in the middle, as the rank doesn't increase -> no useful features are added.
+
+    original_shape = inp.shape
+    original_batch, sequence, features = original_shape
+    max_dims = math.ceil(math.log(sequence, ctx.dims.features))
+
+    def _get_mix_fn(current_depth: int):
+        outer_sequence = max(sequence // ctx.dims.features ** (current_depth % max_dims + 1), 1)
+
+        def _fn(x: jax.Array):
+            out = x.reshape(original_batch, outer_sequence, features, -1)
+            out = jnp.transpose(out, (0, 1, 3, 2))
+            return out.reshape(original_batch, sequence, features)
+
+        return _fn
+
+    pad = jnp.zeros((original_batch, ctx.dims.features - 1, features), inp.dtype)
+    inp_padded = jnp.concatenate([pad, inp[:, :1 - ctx.dims.features]], 1)
+    inp = jnp.concatenate([inp, pattern_match(_get_mix_fn, max_dims, depth, inp_padded)], -1)
+
+    inp = conv(ctx, inp, 5, 2 * ctx.dims.features, 2 * ctx.dims.features)
+    inp = scale_norm_act(ctx, inp, 2 * ctx.dims.features, double=True)
+    return conv(ctx, inp, 5, 4 * ctx.dims.features, ctx.dims.features)

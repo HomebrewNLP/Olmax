@@ -42,8 +42,6 @@ def test(samples: int, depth: int):
     ctx.dims.depth = depth
     ctx.dims.features = 8
     ctx.dims.inner_bottleneck_features = 4
-    ctx.dims.pointwise_features = 16
-    ctx.dims.spatial_mixing_kernel = ctx.dims.sequence // 2
     src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features).astype(jnp.bfloat16)
 
     def _fn(x: jax.Array):

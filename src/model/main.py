@@ -7,7 +7,6 @@ from src.backend import get_param, is_model, is_stacked, square_grad, with_conte
 from src.context import Context
 from src.model.conv import dense_block
 from src.model.loss import cross_entropy_loss
-from src.model.mixer import mix
 from src.model.moe import dense_moe
 from src.model.norm import scale_norm_act
 from src.model.reversible import FourArrays, reversible, revnet_out
@@ -40,7 +39,6 @@ def block(ctx: Context, shared_params: Dict[str, jax.Array]):
         src = reversible(ctx, dense_block, src)
         src = reversible(ctx, dense_moe, src)
         src = reversible(ctx, dense_block, src)
-        src = reversible(ctx, mix, src, depth)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src

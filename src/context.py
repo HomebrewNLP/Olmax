@@ -75,10 +75,7 @@ class Dims(DataClass):
     outer_bottleneck_kernel: int = 25
     inner_bottleneck_kernel: int = 49
     inner_bottleneck_features: int = 128
-    pointwise_kernel: int = 5
     features: int = 256
-    spatial_mixing_kernel: int = 512
-    pointwise_features: int = 512
     sequence: int = 4096
     depth: int = 8
     vocab: int = 256
