@@ -50,14 +50,14 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
 
     @jax.custom_gradient
     def _fn(src: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
+        weight_shape = wgt.shape
         if isinstance(wgt, jax.Array):
             wgt = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))
 
         out, std = norm_forward(ctx, src, wgt, act, dim, double)
 
         def _grad(dy: jax.Array) -> Union[Tuple[jax.Array, jax.Array, jax.Array], Tuple[jax.Array, None, None]]:
-            inner_src = src
-            src_fp64 = promote_to(inner_src, run_type)
+            src_fp64 = promote_to(src, run_type)
             norm_out = src_fp64 * std
             dy = promote_to(dy, run_type)
             if act:
@@ -81,8 +81,8 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
             summed = list(range(src.ndim))
             del summed[dim]
             d_wgt = dy * norm_out
-            d_wgt_sq = (lax.square(d_wgt).sum(summed) * ctx.dims.batch).reshape((-1,)).astype(run_type)
-            d_wgt = d_wgt.sum(summed).reshape((-1,)).astype(run_type)
+            d_wgt_sq = (lax.square(d_wgt).sum(summed) * ctx.dims.batch).reshape(weight_shape).astype(run_type)
+            d_wgt = d_wgt.sum(summed).reshape(weight_shape).astype(run_type)
             return dx, d_wgt, d_wgt_sq
 
         return out, _grad
