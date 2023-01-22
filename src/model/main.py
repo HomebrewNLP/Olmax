@@ -63,7 +63,8 @@ def stem(ctx: Context, src: FourArrays) -> FourArrays:
     return src
 
 
-def body_ctx(ctx: Context, src: jax.Array) -> Union[Tuple[jax.Array, jax.Array, jax.Array], jax.Array]:
+def body_ctx(ctx: Context, src: jax.Array) -> Union[
+    Tuple[jax.Array, jax.Array, jax.Array], jax.Array]:
     src = input_embed(ctx, src)
     zero = jnp.zeros_like(src)
     src = stem(ctx, (src, zero, src, zero))

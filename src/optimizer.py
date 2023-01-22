@@ -66,11 +66,14 @@ def graft(param_name: str, magnitude: jax.Array, direction: jax.Array) -> jax.Ar
 def tg_adam(ctx: Context, param_name: str, grad: jax.Array, tg_grad: jax.Array, step: jax.Array) -> jax.Array:
     ema_g = ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1)
     ema_gsq = ema(ctx, grad ** 2, step, 1 - ctx.optimizer.adam_beta2)
+    ema_tgsq = ema(ctx, tg_grad, step, 1 - ctx.optimizer.adam_beta3)
 
     if ctx.is_initializing:
         return grad
 
-    return ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
+    adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
+    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
+    return graft(param_name, adam_update, tg_update)
 
 
 def get_current_lr(ctx: Context, step: jax.Array) -> jax.Array:
