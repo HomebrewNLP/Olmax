@@ -39,8 +39,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
                    double: bool = False) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        weight, weight_sq = get_param(ctx, "scale", [feature_dim * (1 + double)], std=0, mean=1, dtype=run_type,
-                                      return_sq=True)
+        weight, weight_sq = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type, return_sq=True)
     elif weight is False:
         weight_sq = weight = 1
     else:
@@ -64,7 +63,8 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
             if act:
                 bw_out = norm_out * wgt
                 if double:
-                    dy = dy * activate_grad(bw_out) - dy * activate_grad(-bw_out)
+                    dy0, dy1 = jnp.split(dy, 2, dim)
+                    dy = dy0 * activate_grad(bw_out) - dy1 * activate_grad(-bw_out)
                 else:
                     dy *= activate_grad(bw_out)
             d_normed = dy * wgt

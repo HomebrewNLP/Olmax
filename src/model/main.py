@@ -36,9 +36,9 @@ def block(ctx: Context, shared_params: Dict[str, jax.Array]):
         ctx.parameters.update(shared_params)
         depth = depth.reshape([])
         src = [ctx.parameters] + list(carry)
-        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, dense_block, src, depth)
         src = reversible(ctx, dense_moe, src)
-        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, dense_block, src, depth)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src

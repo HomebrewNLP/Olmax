@@ -13,8 +13,6 @@ def general_test(act: bool, samples: int, dim: int, double: bool):  # skipcq: PY
     for trial in range(trials):
         src = randn(int(samples ** 0.5), int(samples ** 0.5), ctx.dims.features)
         out_shape = list(src.shape)[1:]
-        if double:
-            out_shape[dim] *= 2
         wgt = randn(out_shape[dim])
         wgt_sq = randn(out_shape[dim])
         dy = randn(*out_shape)

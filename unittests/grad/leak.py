@@ -7,6 +7,7 @@ from jax import lax, numpy as jnp
 
 from src.constants import ParallelAxes
 from src.context import Context
+from src.main import add_zeros
 from src.model.main import stem
 from src.model.reversible import revnet_out
 from unittests.grad.backend import grad_fn, randn_fn, trials
@@ -51,6 +52,7 @@ def test(samples: int, depth: int):
         return params
 
     params = jax.pmap(_fn, ParallelAxes.model)(src)
+    add_zeros(params)
     ctx.is_initializing = False
 
     def _inner(inp: typing.Tuple[typing.Dict[str, jax.Array], jax.Array]):
