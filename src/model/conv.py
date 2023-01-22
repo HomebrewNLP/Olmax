@@ -37,17 +37,19 @@ def dense_block(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
 
     def _get_mix_fn(current_depth: int):
         outer_sequence = max(sequence // ctx.dims.features ** (current_depth % max_dims + 1), 1)
+        inner_sequence = sequence // outer_sequence  # == dilation
+        pad_len = (features - 1) * inner_sequence
 
         def _fn(x: jax.Array):
-            out = x.reshape(original_batch, outer_sequence, features, -1)
+            pad = jnp.zeros((original_batch, pad_len), x.dtype)
+            x = jnp.concatenate([pad, x.reshape(original_batch, -1)[:, :-pad_len]], 1)
+            out = x.reshape(original_batch, outer_sequence, features, inner_sequence)
             out = jnp.transpose(out, (0, 1, 3, 2))
             return out.reshape(original_batch, sequence, features)
 
         return _fn
 
-    pad = jnp.zeros((original_batch, ctx.dims.features - 1, features), inp.dtype)
-    inp_padded = jnp.concatenate([pad, inp[:, :1 - ctx.dims.features]], 1)
-    inp = jnp.concatenate([inp, pattern_match(_get_mix_fn, max_dims, depth, inp_padded)], -1)
+    inp = jnp.concatenate([inp, pattern_match(_get_mix_fn, max_dims, depth, inp)], -1)
 
     inp = conv(ctx, inp, 5, 2 * ctx.dims.features, 2 * ctx.dims.features)
     inp = scale_norm_act(ctx, inp, 2 * ctx.dims.features, double=True)
