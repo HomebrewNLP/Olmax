@@ -115,7 +115,7 @@ def prefixed_name(ctx: Context, name: str):
 
 def assign(ctx: Context, name: str, inp: jax.Array):
     name = prefixed_name(ctx, name)
-    ctx.parameters[name] = inp
+    ctx.parameters[name] = inp.astype(ctx.parameters[name].dtype)
 
 
 def normal(ctx: Context, shape: Sequence[int]):

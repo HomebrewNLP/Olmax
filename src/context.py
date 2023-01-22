@@ -116,6 +116,9 @@ class Optimizer(DataClass):
     weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
+    svd_components: int = 8
+    fisher_decay: float = 0.99
+    log_matrix_power: int = 5  # 2^x+1 is actual power
 
 
 class Normalization(DataClass):
