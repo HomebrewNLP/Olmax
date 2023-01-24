@@ -209,8 +209,9 @@ def loop(fn: Callable, fn_input: Any, steps: int, unroll: int = 1):
 
 
 typevar = TypeVar("typevar")
+output = TypeVar("output")
 
 
-def pattern_match(gen_fn: Callable[[int], Callable[[typevar], jax.Array]], cases: int,
-                  predicate: jax.Array, base: typevar):
+def pattern_match(gen_fn: Callable[[int], Callable[[typevar], output]], cases: int,
+                  predicate: jax.Array, base: typevar) -> output:
     return lax.switch(predicate.astype(jnp.int32) % cases, [gen_fn(i) for i in range(cases)], base)

@@ -5,7 +5,7 @@ from jax import lax, numpy as jnp
 
 from src.backend import get_param, is_model, is_stacked, square_grad, with_context
 from src.context import Context
-from src.model.conv import dense_block
+from src.model.dense import dense_block
 from src.model.loss import cross_entropy_loss
 from src.model.moe import dense_moe
 from src.model.norm import scale_norm_act
