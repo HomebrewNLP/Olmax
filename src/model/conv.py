@@ -8,8 +8,8 @@ from src.context import Context
 
 
 @with_context
-def conv_weight(ctx: Context, conv_kernel: int, in_features: int, out_features: int, tied: bool = False) -> Tuple[
-    jax.Array, jax.Array]:
+def conv_weight(ctx: Context, conv_kernel: int, in_features: int, out_features: int, tied: bool = False
+                ) -> Tuple[jax.Array, jax.Array]:
     fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
     fan_in = (1 - 1 / (conv_kernel * ctx.model.conv_scale + ctx.model.conv_shift)) ** fan_in
     fan_in = fan_in / fan_in.sum()

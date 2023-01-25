@@ -47,7 +47,7 @@ def norm_backward(ctx: Context, src: jax.Array, wgt: jax.Array, std: jax.Array, 
         bw_out = (norm_out * wgt) if bw_out is None else bw_out
         if double:
             dy0, dy1 = jnp.split(dy, 2, dim)
-            dy = dy0 * activate_grad(bw_out) - dy1 * activate_grad(-bw_out)
+            dy = dy0 * activate_grad(bw_out) - dy1 * activate_grad(-bw_out)  # skipcq: PYL-E1130
         else:
             dy *= activate_grad(bw_out)
     d_normed = dy * wgt
@@ -104,7 +104,7 @@ def scale_norm_act_conv(ctx: Context, inp: jax.Array, kernel: int, in_features: 
                         tied: bool = False) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     scale, scale_sq = get_param(ctx, "scale", [in_features], std=0, mean=1, dtype=run_type, return_sq=True)
-    weight, weight_sq = conv_weight(tied=tied)
+    weight, weight_sq = conv_weight(ctx, kernel, in_features, out_features, tied)
 
     if ctx.is_initializing:
         return inp
