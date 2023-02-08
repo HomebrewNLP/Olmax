@@ -31,13 +31,14 @@ def dense_block(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
             out = x.reshape(original_batch, outer_seq, features, inner_seq)
             out = jnp.transpose(out, (0, 1, 3, 2))
             out = out.reshape(original_batch, sequence, features)
-            padded = lax.pad(out[:, :-features * inner_seq], 0., ((0, 0, 0), (features * inner_seq, 0, 0), (0, 0, 0)))
+            padded = lax.pad(out[:, :-features * inner_seq], jnp.zeros((), dtype=inp.dtype),
+                             ((0, 0, 0), (features * inner_seq, 0, 0), (0, 0, 0)))
             return out * inner.reshape(1, sequence, features), padded
 
         return _fn
 
     masked, padded = pattern_match(_get_mix_fn, max_dims, depth, inp)
-    inp_glu = inp * lax.pad(inp[:, :-1], 1., ((0, 0, 0), (1, 0, 0), (0, 0, 0)))
+    inp_glu = inp * lax.pad(inp[:, :-1], jnp.ones((), dtype=inp.dtype), ((0, 0, 0), (1, 0, 0), (0, 0, 0)))
     inp = jnp.concatenate([inp, inp_glu, masked, padded], -1)
 
     inp = conv(ctx, inp, 5, 4 * ctx.dims.features, 4 * ctx.dims.features)
