@@ -17,22 +17,22 @@ def dense_block(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
 
     original_shape = inp.shape
     original_batch, sequence, features = original_shape
-    max_dims = math.floor(math.log(sequence, ctx.dims.features))
+    max_dims = math.ceil(math.log(sequence, ctx.dims.features))
 
     arange = jnp.arange(features)
     mask = arange.reshape(1, -1, 1, 1) >= arange.reshape(1, 1, 1, -1)
 
     def _get_mix_fn(current_depth: int):
         def _fn(x: jax.Array):
-            outer_seq = sequence // ctx.dims.features ** (current_depth % max_dims + 1)
+            outer_seq = max(sequence // ctx.dims.features ** (current_depth % max_dims + 1), 1)
             inner_seq = sequence // outer_seq  # == dilation
             inner = lax.broadcast_in_dim(mask, (outer_seq, features, inner_seq // features, features), (0, 1, 2, 3))
 
             out = x.reshape(original_batch, outer_seq, features, inner_seq)
             out = jnp.transpose(out, (0, 1, 3, 2))
             out = out.reshape(original_batch, sequence, features)
-            padded = lax.pad(out[:, :-features * inner_seq], jnp.zeros((), dtype=inp.dtype),
-                             ((0, 0, 0), (features * inner_seq, 0, 0), (0, 0, 0)))
+            padded = lax.pad(out[:, :-inner_seq], jnp.zeros((), dtype=inp.dtype),
+                             ((0, 0, 0), (inner_seq, 0, 0), (0, 0, 0)))
             return out * inner.reshape(1, sequence, features), padded
 
         return _fn
