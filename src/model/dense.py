@@ -26,14 +26,15 @@ def dense_block(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
         def _fn(x: jax.Array):
             outer_seq = max(sequence // ctx.dims.features ** (current_depth % max_dims + 1), 1)
             inner_seq = sequence // outer_seq  # == dilation
-            inner = lax.broadcast_in_dim(mask, (outer_seq, features, inner_seq // features, features), (0, 1, 2, 3))
+            inner = lax.broadcast_in_dim(mask, (outer_seq, features, inner_seq, features), (0, 1, 2, 3))
+            inner = inner.reshape(1, -1, features)[:, :sequence]
 
             out = x.reshape(original_batch, outer_seq, features, inner_seq)
             out = jnp.transpose(out, (0, 1, 3, 2))
             out = out.reshape(original_batch, sequence, features)
             padded = lax.pad(out[:, :-inner_seq], jnp.zeros((), dtype=inp.dtype),
                              ((0, 0, 0), (inner_seq, 0, 0), (0, 0, 0)))
-            return out * inner.reshape(1, sequence, features), padded
+            return out * inner, padded
 
         return _fn
 
