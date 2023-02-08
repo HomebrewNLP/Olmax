@@ -92,7 +92,8 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
         out, _, _, _, std = norm_forward(ctx, src, wgt, act, dim, double)
 
         def _grad(dy: jax.Array) -> Union[Tuple[jax.Array, jax.Array, jax.Array], Tuple[jax.Array, None, None]]:
-            return norm_backward(ctx, src, wgt, std, dy, act, dim, double, _wgt_dummy.shape, run_type)
+            shp = _wgt_dummy.shape if isinstance(weight, jax.Array) else ()
+            return norm_backward(ctx, src, wgt, std, dy, act, dim, double, shp, run_type)
 
         return out, _grad
 
