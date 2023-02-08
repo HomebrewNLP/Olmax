@@ -117,6 +117,7 @@ def scale_norm_act_conv(ctx: Context, inp: jax.Array, kernel: int, in_features: 
     @jax.custom_gradient
     def _fn(src: jax.Array, scl: jax.Array, _scl_dummy: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
         scl = scl.reshape((1,) * dim + (-1,))
+        print(src.shape, scale.shape, scl.shape, in_features, out_features)
         out, _, _, _, std = norm_forward(ctx, src, scl, True, dim, False)
 
         def _grad(dy: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
