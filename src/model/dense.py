@@ -17,14 +17,14 @@ def dense_block(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
 
     original_shape = inp.shape
     original_batch, sequence, features = original_shape
-    max_dims = math.ceil(math.log(sequence, ctx.dims.features))
+    max_dims = math.floor(math.log(sequence, ctx.dims.features))
 
     arange = jnp.arange(features)
     mask = arange.reshape(1, -1, 1, 1) >= arange.reshape(1, 1, 1, -1)
 
     def _get_mix_fn(current_depth: int):
         def _fn(x: jax.Array):
-            outer_seq = max(sequence // ctx.dims.features ** (current_depth % max_dims + 1), 1)
+            outer_seq = sequence // ctx.dims.features ** (current_depth % max_dims + 1)
             inner_seq = sequence // outer_seq  # == dilation
             inner = lax.broadcast_in_dim(mask, (outer_seq, features, inner_seq // features, features), (0, 1, 2, 3))
 
