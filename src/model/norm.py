@@ -99,7 +99,7 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
     return _fn(inp, weight, weight_sq)
 
 
-@with_context
+@with_context()
 def scale_norm_act_conv(ctx: Context, inp: jax.Array, kernel: int, in_features: int, out_features: int,
                         tied: bool = False) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)

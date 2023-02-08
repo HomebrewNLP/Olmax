@@ -7,7 +7,7 @@ from src.backend import get_param, square_grad, with_context, conv as lax_conv
 from src.context import Context
 
 
-@with_context
+@with_context()
 def conv_weight(ctx: Context, conv_kernel: int, in_features: int, out_features: int, tied: bool = False
                 ) -> Tuple[jax.Array, jax.Array]:
     fan_in = jnp.arange(conv_kernel, 0, -1, dtype=ctx.model.storage_dtype)
