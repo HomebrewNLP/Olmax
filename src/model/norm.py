@@ -123,7 +123,7 @@ def scale_norm_act_conv(ctx: Context, inp: jax.Array, kernel: int, in_features: 
             out2, norm_out, bw_out, src_fp64, _ = norm_forward(ctx, src, scl, True, dim, False, std)
             _, d_wgt_sq = jax.vjp(_conv, lax.square(out2), wgt)[1](lax.square(dy))
             dy, d_wgt = jax.vjp(_conv, out2, wgt)[1](dy)
-            dx, d_scl, d_scl_sq = norm_backward(ctx, src, scl, std, dy, True, dim, False, _wgt_dummy.shape, run_type,
+            dx, d_scl, d_scl_sq = norm_backward(ctx, src, scl, std, dy, True, dim, False, _scl_dummy.shape, run_type,
                                                 src_fp64, norm_out, bw_out)
             return dx, d_scl, d_scl_sq, d_wgt, d_wgt_sq
 
