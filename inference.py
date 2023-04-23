@@ -122,11 +122,11 @@ class Inference:
         self.complete_jax(dummy_data, np.zeros(()), np.ones(()), np.ones(()), np.ones(()), np.ones(()), np.ones(()),
                           np.ones(()), np.zeros(()), np.zeros(()), np.ones(()))
 
-    def complete_jax(self, prompt: jnp.array, temperature: jnp.array, max_tokens: jnp.array,
-                     max_probability_mass: jnp.array, typical_mass: jax.Array,
+    def complete_jax(self, prompt: jax.Array, temperature: jax.Array, max_tokens: jax.Array,
+                     max_probability_mass: jax.Array, typical_mass: jax.Array,
                      max_probability_to_filter: jax.Array, adaptive_filter_power: jax.Array,
-                     adaptive_filter_scale: jax.Array, seed: jnp.array, start_pos: jnp.array,
-                     stop_pos: jnp.array) -> jnp.array:
+                     adaptive_filter_scale: jax.Array, seed: jax.Array, start_pos: jax.Array,
+                     stop_pos: jax.Array) -> jax.Array:
         return self.step(self.parameters, prompt, temperature, max_tokens, max_probability_mass, typical_mass,
                          max_probability_to_filter, adaptive_filter_power, adaptive_filter_scale, seed, start_pos,
                          stop_pos)
@@ -216,7 +216,7 @@ class RestAPI:
     async def token_completion(self, params: CompletionInput) -> TokenCompletion:
         tokens = (await self.encode(params.prompt)).tokens
         tokens = (await self.check_tokens(tokens, params.error)).tokens
-        tok = self._interface.complete_tokens(jnp.array(tokens).reshape(1, -1), params.temperature, params.max_tokens,
+        tok = self._interface.complete_tokens(jax.Array(tokens).reshape(1, -1), params.temperature, params.max_tokens,
                                               params.max_probability_mass, params.typical_mass,
                                               params.max_probability_to_filter, params.adaptive_filter_power,
                                               params.adaptive_filter_scale, params.seed, params.length)

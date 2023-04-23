@@ -80,7 +80,6 @@ class Dims(DataClass):
     spatial_mixing_kernel: int = 512
     pointwise_features: int = 512
     sequence: int = 4096
-    depth: int = 8
     vocab: int = 256
 
 
@@ -256,15 +255,15 @@ class WhilePredictContext(WhileContext):
         vocab_dim_size = self.ctx.dims.vocab
 
         self.start_pos = jnp.zeros([batch_dim_size])
-        self.stop_pos = jnp.array([sequence_dim_size] * batch_dim_size)[0]
+        self.stop_pos = jax.Array([sequence_dim_size] * batch_dim_size)[0]
         self.temperature = jnp.zeros([batch_dim_size])
-        self.max_tokens = jnp.array([vocab_dim_size] * batch_dim_size)
-        self.max_probability_mass = jnp.array([1] * batch_dim_size)
-        self.typical_mass = jnp.array([1] * batch_dim_size)
-        self.seed = jnp.array([0] * batch_dim_size)
-        self.max_probability_to_filter = jnp.array([0] * batch_dim_size)
-        self.adaptive_filter_scale = jnp.array([0] * batch_dim_size)
-        self.adaptive_filter_power = jnp.array([1] * batch_dim_size)
+        self.max_tokens = jax.Array([vocab_dim_size] * batch_dim_size)
+        self.max_probability_mass = jax.Array([1] * batch_dim_size)
+        self.typical_mass = jax.Array([1] * batch_dim_size)
+        self.seed = jax.Array([0] * batch_dim_size)
+        self.max_probability_to_filter = jax.Array([0] * batch_dim_size)
+        self.adaptive_filter_scale = jax.Array([0] * batch_dim_size)
+        self.adaptive_filter_power = jax.Array([1] * batch_dim_size)
 
         if config is not None:
             self.start_pos = config['start_pos']

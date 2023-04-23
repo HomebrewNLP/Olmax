@@ -9,7 +9,6 @@ data:
     vocab_size: 256
 dims:
     batch: 16
-    depth: 64
     features: 256
     heads: 8
     inner_bottleneck_features: 128

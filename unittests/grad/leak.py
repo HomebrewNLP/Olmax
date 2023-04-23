@@ -35,11 +35,9 @@ def randn_zero(ctx: Context, randn, zero_from: int):
 
 
 @pytest.mark.parametrize("samples", [8, 128])
-@pytest.mark.parametrize("depth", [2, 8])
-def test(samples: int, depth: int):
+def test(samples: int):
     ctx, randn = initialize(samples)
     ctx.is_initializing = True
-    ctx.dims.depth = depth
     ctx.dims.features = 8
     ctx.dims.inner_bottleneck_features = 4
     ctx.dims.pointwise_features = 16
