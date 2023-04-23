@@ -27,7 +27,8 @@ def dense_block(ctx: Context, past: jnp.ndarray, new: jnp.ndarray, step: jnp.nda
     last_item = lax.dynamic_index_in_dim(past, jnp.clip(step - 1, min=0), 1)
     context = lax.dynamic_slice_in_dim(past.mean(-1), start, ctx.dims.spatial_mixing_kernel, 1)
     local_input = jnp.concatenate([last_item, new, context], 1)
-    inp = scale_norm_act(ctx, local_input, 1)
-    inp = linear(ctx, inp, 1, ctx.dims.features * 4 + ctx.dims.spatial_mixing_kernel, ctx.dims.pointwise_features)
+    features = ctx.dims.features * 4 + ctx.dims.spatial_mixing_kernel
+    inp = scale_norm_act(ctx, local_input, features)
+    inp = linear(ctx, inp, 1, features, ctx.dims.pointwise_features)
     inp = scale_norm_act(ctx, inp, ctx.dims.pointwise_features)
     return linear(ctx, inp, 1, ctx.dims.pointwise_features, ctx.dims.features)
