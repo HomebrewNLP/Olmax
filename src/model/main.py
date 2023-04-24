@@ -25,23 +25,13 @@ def input_embed(ctx: Context, inp: jax.Array) -> jax.Array:
     return square_grad(_fn, inp, param, param_sq)
 
 
-@jax.custom_gradient
-def all2all(inp):
-    def _grad(dy):
-        return lax.all_to_all(dy, ParallelAxes.model, inp.ndim - 1, inp.ndim - 1, tiled=True)
-
-    return lax.all_to_all(inp, ParallelAxes.model, inp.ndim - 1, inp.ndim - 1, tiled=True), _grad
-
-
 @with_context()
 def block(ctx: Context):
     name_cache = ctx.name_cache
 
-    def _fn(src: jax.Array, inp: Tuple[jax.Array, jax.Array]):
-        new, position = inp
-        out = dense_block(ctx, src, inp, position)
-        out = jnp.concatenate([out, all2all(out)], -1)
-        src = src.at[:, position].set(out)
+    def _fn(src: jax.Array, inp: jax.Array):  # TODO: integrate embedding and loss into loop
+        out = dense_block(ctx, src, inp)
+        src = jnp.concatenate([src[:, :-1], out], 1)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src
@@ -52,14 +42,14 @@ def block(ctx: Context):
 
 @with_context()
 def stem(ctx: Context, src: jax.Array) -> jax.Array:
-    src = jnp.concatenate([src, all2all(src)], -1)
     if ctx.is_initializing:
         ctx.add_depth = True
         ctx.parameters, *src = block(ctx)(src, (src, jnp.zeros([], dtype=jnp.int32)))
         ctx.add_depth = False
         return src
 
-    src, _ = lax.scan(block(ctx), jnp.zeros_like(src), (src, jnp.arange(ctx.dims.sequence)), ctx.dims.sequence)
+    src, _ = lax.scan(block(ctx), jnp.zeros_like(src[:, ctx.dims.spatial_mixing_kernel]), src.transpose(1, 0, 2),
+                      ctx.dims.sequence)
     return src
 
 
