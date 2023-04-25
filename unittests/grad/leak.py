@@ -7,7 +7,7 @@ from jax import lax, numpy as jnp
 
 from src.constants import ParallelAxes
 from src.context import Context
-from src.model.main import stem
+from src.model.main import body_ctx
 from src.model.reversible import revnet_out
 from unittests.grad.backend import grad_fn, randn_fn, trials
 
@@ -41,11 +41,11 @@ def test(samples: int):
     ctx.dims.features = 8
     ctx.dims.inner_bottleneck_features = 4
     ctx.dims.pointwise_features = 16
-    ctx.dims.spatial_mixing_kernel = ctx.dims.sequence // 2
+    ctx.dims.memory_slots = ctx.dims.sequence // 2
     src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features).astype(jnp.bfloat16)
 
     def _fn(x: jax.Array):
-        stem(ctx, (x, jnp.zeros_like(x), x, jnp.zeros_like(x)))
+        body_ctx(ctx, x, jnp.zeros((x.shape[0],), jnp.int32))
         params = ctx.parameters
         ctx.parameters = {}
         return params
@@ -57,7 +57,7 @@ def test(samples: int):
         params, x = inp
         ctx.name_cache = {}
         ctx.parameters = params
-        out = stem(ctx, (x, jnp.zeros_like(x), x, jnp.zeros_like(x)))
+        out = body_ctx(ctx, (x, jnp.zeros_like(x), x, jnp.zeros_like(x)))
         ctx.parameters = {}
         return revnet_out(out)
 

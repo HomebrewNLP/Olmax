@@ -1,7 +1,7 @@
 import jax
 from jax import numpy as jnp, lax
 
-from src.backend import conv as matmul, get_param, square_grad, with_context
+from src.backend import matmul, get_param, square_grad, with_context, dot
 from src.context import Context
 from src.model.norm import scale_norm_act
 from src.constants import ParallelAxes
@@ -29,19 +29,28 @@ def all2all(inp):
 
 @with_context()
 def dense_block(ctx: Context, past: jnp.ndarray, new: jnp.ndarray) -> jax.Array:
-    # compute-heavy ops (MLP Mixer + first half of pointwise MLP)
-    inp = scale_norm_act(ctx, past.transpose(0, 2, 1), ctx.dims.spatial_mixing_kernel)
-    inp = linear(ctx, inp, 1, ctx.dims.spatial_mixing_kernel, ctx.dims.mixing_features)
+    fused_out = ctx.dims.pointwise_features + ctx.dims.write_heads * ctx.dims.memory_slots
+    # first half of input linear (compute heavy, MLP-Mixer-like read from memory)
+    inp = scale_norm_act(ctx, past.transpose(0, 2, 1), ctx.dims.memory_slots)
+    inp = linear(ctx, inp, 1, ctx.dims.memory_slots, ctx.dims.mixing_features)  # 2048 params
     inp = inp.reshape(ctx.dims.batch, ctx.dims.features * ctx.dims.mixing_features)
-    inp = linear(ctx, inp, 1, ctx.dims.features * ctx.dims.mixing_features, ctx.dims.pointwise_features)  # 500M
+    inp = linear(ctx, inp, 1, ctx.dims.features * ctx.dims.mixing_features, fused_out)  # 250M + Gate
 
     # bandwidth heavy ops (in parallel)
-    last_item = past[:, -1]
-    local_input = jnp.concatenate([last_item, new], 1)
+    local_input = jnp.concatenate([past[:, -1], new], 1)
     local_input = scale_norm_act(ctx, local_input, ctx.dims.features * 2)
     local_input = jnp.concatenate([all2all(local_input), local_input], 1)
 
-    # second half of compute heavy ops / pointwise mlp
-    inp += linear(ctx, local_input, 1, ctx.dims.features * 4, ctx.dims.pointwise_features)  # 500M
+    # second half input linear (compute heavy, 250M params + Gate)
+    inp += linear(ctx, local_input, 1, ctx.dims.features * 4, fused_out)
+    gate, inp = inp[:, ctx.dims.pointwise_features:], inp[:, :ctx.dims.pointwise_features]
+
+    # output linear (compute heavy, after all ops above)
     inp = scale_norm_act(ctx, inp, ctx.dims.pointwise_features)
-    return linear(ctx, inp, 1, ctx.dims.pointwise_features, ctx.dims.features)  # 67M (increase size?)
+    out = linear(ctx, inp, 1, ctx.dims.pointwise_features, ctx.dims.features * ctx.dims.write_heads)
+
+    gate = jax.nn.softmax(gate.reshape(ctx.dims.batch, ctx.dims.memory_slots, ctx.dims.write_heads))
+    return dot(gate, out, -1, -1, (0,), (0,)).reshape(ctx.dims.batch, ctx.dims.memory_slots * ctx.dims.features)
+
+
+

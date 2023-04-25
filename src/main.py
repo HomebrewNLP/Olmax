@@ -33,7 +33,7 @@ def train_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     add_zeros(params)
     scalars, grads = grad_fn(params, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
-    wctx.scalars += jnp.stack(scalars) / steps  # higher numerical accuracy if we divide before summing
+    wctx.scalars += scalars / steps  # higher numerical accuracy if we divide before summing
     wctx.current_step += 1
     return wctx.serialize()
 

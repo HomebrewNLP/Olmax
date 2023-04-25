@@ -1,5 +1,5 @@
 import math
-from typing import Tuple
+from typing import Tuple, Callable
 
 import jax
 from jax import lax, numpy as jnp
@@ -9,12 +9,10 @@ from src.constants import ParallelAxes
 from src.context import Context
 
 
-def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Array],
-                       outer_tgt: jax.Array) -> Tuple[jax.Array, jax.Array]:
+def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Array, jax.Array], jax.Array]:
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - one_hot(target) + softmax(x) * logsumexp(x) * z_loss
-    src, param, param_sq = src_wgt
     devices = jax.device_count()
     total_items = ctx.dims.batch * ctx.dims.sequence
     steps = ctx.dims.vocab // 128
@@ -32,14 +30,14 @@ def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Ar
 
         loss = loss + (lse / total_items).sum()
         loss = loss - (jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1) / total_items).sum()
-        acc = acc + lax.eq(lax.argmax(tmp, 1, outer_tgt.dtype), tgt_slice).sum() / total_items
+        acc = acc + lax.eq(lax.argmax(tmp, 1, jnp.int32), tgt_slice).sum() / total_items
 
         dy = lax.exp(tmp - (lse + math.log(total_items)))  # [LocalBatch, Vocab]
         zloss = dy * lse * ctx.training.z_loss * 2
         dy = dy.at[jnp.arange(local_batch).reshape(-1, 1), tgt_slice.reshape(-1, 1)].add(-1 / total_items)
         dy = dy + zloss
         dy = dy * jax.device_count()
-        dy = dy.astype(src.dtype)
+        dy = dy.astype(ctx.model.computation_dtype)
         dy = lax.all_gather(dy, ParallelAxes.model)
         dy = dy.reshape(step_batch, ctx.dims.vocab).transpose(1, 0)
         dx = matmul(wgt, dy)  # [Features, Vocab] @ [Vocab, StepBatch] -> [Features, StepBatch]
@@ -74,6 +72,6 @@ def cross_entropy_loss(ctx: Context, src_wgt: Tuple[jax.Array, jax.Array, jax.Ar
 
         loss = lax.psum(loss, ParallelAxes.model)
         acc = lax.psum(acc, ParallelAxes.model)
-        return (loss, acc), _grad
+        return jnp.stack([loss, acc]).reshape(-1), _grad
 
-    return _fn(src, outer_tgt, param, param_sq)
+    return _fn  # _fn(src, outer_tgt, param, param_sq)

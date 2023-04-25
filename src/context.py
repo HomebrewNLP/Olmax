@@ -76,8 +76,9 @@ class Dims(DataClass):
     inner_bottleneck_kernel: int = 49
     inner_bottleneck_features: int = 128
     pointwise_kernel: int = 5
-    features: int = 2 ** 11  #
-    spatial_mixing_kernel: int = 512
+    features: int = 2 ** 11
+    write_heads: int = 8
+    memory_slots: int = 512
     mixing_features: int = 4
     pointwise_features: int = 2 ** 15
     sequence: int = 4096
