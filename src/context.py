@@ -78,7 +78,10 @@ class Dims(DataClass):
     pointwise_kernel: int = 5
     features: int = 2 ** 11
     write_heads: int = 8
-    memory_slots: int = 512
+    memory_slots: int = 2 ** 20
+    memory_slots_read_per_head: int = 16
+    memory_features: int = 128
+    memory_read_heads: int = 8
     mixing_features: int = 4
     pointwise_features: int = 2 ** 15
     sequence: int = 4096

@@ -6,7 +6,7 @@ from jax import lax, numpy as jnp
 from src.backend import get_param, square_grad, with_context
 from src.constants import ParallelAxes
 from src.context import Context
-from src.model.linear import dense_block
+from src.model.linear import read, pointwise
 from src.model.loss import cross_entropy_loss
 from src.model.norm import scale_norm_act
 from src.model.reversible import reversible, REVERSIBLE_CTX
@@ -59,8 +59,8 @@ def block(ctx: Context):
         inp, tgt = inp
         src, original_loss = src
         inp = input_embed(ctx, inp)
-        src = reversible(ctx, dense_block, src, inp)
-        src = reversible(ctx, dense_block, src)
+        src = reversible(ctx, read, src, inp)
+        src = reversible(ctx, pointwise, src)
         src, loss = loss_fn(ctx, src, tgt)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
