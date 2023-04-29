@@ -17,8 +17,6 @@ dims:
     moe_intermediate: 4096
     one: 1
     outer_bottleneck_kernel: 25
-    pointwise_features: 512
-    pointwise_kernel: 5
     sequence: 4096
     vocab: 256
 global_prefix: ''
@@ -46,7 +44,6 @@ optimizer:
     momentum_beta: 0.1
     norm_scale: 1
     output_scale: 1
-    pointwise_scale: 1
     preconditioning_compute_steps: 128
     qrnn_scale: 1
     skip_preconditioning_dim_size_gt: 1024

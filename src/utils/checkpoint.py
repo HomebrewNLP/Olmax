@@ -24,7 +24,7 @@ from src.context import Context, WhileTrainContext
 UPLOAD_RETRIES = 8
 WCTX_VALUES = ("scalars", "current_step")
 TMP_PATH_ADDON = "_____TEMPORARY"
-GSUTIL_PATH = "/opt/google-cloud-sdk/bin/gsutil"
+GSUTIL_PATH = "/snap/bin/gsutil"
 
 
 def log(arg: str, verbose: bool):
