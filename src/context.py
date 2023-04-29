@@ -72,20 +72,14 @@ class DataContext(DataClass):
 
 class Dims(DataClass):
     batch: int = 512
-    outer_bottleneck_kernel: int = 25
-    inner_bottleneck_kernel: int = 49
-    inner_bottleneck_features: int = 128
-    pointwise_kernel: int = 5
     features: int = 2 ** 11
-    write_heads: int = 8
-    memory_slots: int = 2 ** 20
-    memory_slots_read_per_head: int = 16
-    memory_features: int = 128
-    memory_read_heads: int = 8
-    mixing_features: int = 4
     pointwise_features: int = 2 ** 15
     sequence: int = 4096
     vocab: int = 256
+    memory_slots: int = 2 ** 20
+    memory_slots_per_head: int = 16
+    memory_features: int = 128
+    memory_heads: int = 8
 
 
 class TensorboardTrace(DataClass):
@@ -116,7 +110,6 @@ class Optimizer(DataClass):
     gradient_clip: float = 0.001
     adam_beta1: float = 0.03
     adam_beta2: float = 0.003
-    adam_beta3: float = 0.001
     weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
@@ -129,8 +122,6 @@ class Normalization(DataClass):
 class Model(DataClass):
     norm: Normalization = Normalization()
     autoregressive: bool = True
-    conv_scale: float = 4.
-    conv_shift: float = 8.
     storage_dtype: str = "float32"  # valid jax.numpy.dtype
     computation_dtype: str = "bfloat16"
 

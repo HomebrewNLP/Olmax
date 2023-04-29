@@ -43,14 +43,14 @@ def pos_and_scale(ctx: Context, inp: jax.Array) -> Tuple[jax.Array, jax.Array]:
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
     assert gate_sqrt ** 2 == ctx.dims.memory_slots
 
-    gates = linear(ctx, inp, ctx.dims.pointwise_features, gate_sqrt * 2 * ctx.dims.memory_read_heads)
+    gates = linear(ctx, inp, ctx.dims.pointwise_features, gate_sqrt * 2 * ctx.dims.memory_heads)
 
-    gates = gates.reshape(ctx.dims.batch, ctx.dims.memory_read_heads, 2, gate_sqrt)
+    gates = gates.reshape(ctx.dims.batch, ctx.dims.memory_heads, 2, gate_sqrt)
     gates = scale_norm_act(ctx, gates, gate_sqrt, act=False)
     gates -= lax.stop_gradient(gates.max(-1).sum(-1))
     gates = lax.exp(gates)
     denominator = lax.reciprocal(gates.sum(-1)).prod(-1)
-    values, idx = lax.top_k(gates, ctx.dims.memory_slots_read_per_head)  # along last axis
+    values, idx = lax.top_k(gates, ctx.dims.memory_slots_per_head)  # along last axis
     idx = jnp.einsum("bhpk,p->bhk", idx, jnp.array([1, gate_sqrt]))
     values = values.prod(-2) * denominator
     # [Batch Slots MemoryFeatures] [Batch Heads TopK] -> [Batch, Heads * TopK, MemoryFeatures]
@@ -72,7 +72,7 @@ def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Arr
 @with_context()
 def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, position: jax.Array
          ) -> Tuple[jax.Array, jax.Array]:
-    total_read = ctx.dims.memory_features * ctx.dims.memory_read_heads * ctx.dims.memory_slots_read_per_head
+    total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
 
     offset0, offset1, inp = input_fn(ctx, token, position, dense0, total_read)
     idx, val = pos_and_scale(ctx, inp)
@@ -87,7 +87,7 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
 @with_context()
 def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
           ) -> Tuple[jax.Array, jax.Array, jax.Array]:
-    total_read = ctx.dims.memory_features * ctx.dims.memory_read_heads * ctx.dims.memory_slots_read_per_head
+    total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
 
     dense_parallel = scale_norm_act_linear(ctx, dense1, ctx.dims.features, ctx.dims.pointwise_features, act=False)
     offset0, offset1, _ = input_fn(ctx, token, position, dense1, ctx.dims.pointwise_features)

@@ -39,7 +39,6 @@ def test(samples: int):
     ctx, randn = initialize(samples)
     ctx.is_initializing = True
     ctx.dims.features = 8
-    ctx.dims.inner_bottleneck_features = 4
     ctx.dims.pointwise_features = 16
     ctx.dims.memory_slots = ctx.dims.sequence // 2
     src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features).astype(jnp.bfloat16)
