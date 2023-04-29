@@ -70,7 +70,8 @@ def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Arr
 
 
 @with_context()
-def read(ctx: Context, token: jax.Array, position: jax.Array, dense0: jax.Array, sparse: jax.Array) -> jax.Array:
+def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, position: jax.Array
+         ) -> Tuple[jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_read_heads * ctx.dims.memory_slots_read_per_head
 
     offset0, offset1, inp = input_fn(ctx, token, position, dense0, total_read)
@@ -80,11 +81,11 @@ def read(ctx: Context, token: jax.Array, position: jax.Array, dense0: jax.Array,
     inp0 = scale_norm_act_linear(ctx, inp + offset0, total_read, ctx.dims.features)
     inp1 = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.features, act=False)
 
-    return offset1 + inp0 + inp1
+    return offset1 + inp0 + inp1, idx
 
 
 @with_context()
-def write(ctx: Context, token: jax.Array, position: jax.Array, dense1: jax.Array
+def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
           ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_read_heads * ctx.dims.memory_slots_read_per_head
 

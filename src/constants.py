@@ -10,3 +10,8 @@ class MomentumType(Enum):
 
 class ParallelAxes(Enum):
     model = "model_parallel"
+
+
+class SparseAccess(Enum):
+    read = "read"
+    write = "write"
