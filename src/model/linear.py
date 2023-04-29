@@ -6,7 +6,7 @@ from jax import numpy as jnp, lax
 from src.backend import matmul, get_param, square_grad, with_context
 from src.constants import ParallelAxes
 from src.context import Context
-from src.model.norm import scale_norm_act
+from src.model.norm import scale_norm_act, scale_norm_act_linear
 
 
 @with_context()
@@ -76,12 +76,6 @@ def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Arr
 
 
 @with_context()
-def normalized_linear(ctx: Context, inp: jax.Array, in_features: int, out_features: int, act: bool = True
-                      ) -> jax.Array:
-    return linear(ctx, scale_norm_act(ctx, inp, in_features, act=act), in_features, out_features)
-
-
-@with_context()
 def read(ctx: Context, token: jax.Array, position: jax.Array, dense0: jax.Array, sparse: jax.Array) -> jax.Array:
     total_read = ctx.dims.memory_features * ctx.dims.memory_read_heads * ctx.dims.memory_slots_read_per_head
 
@@ -89,8 +83,8 @@ def read(ctx: Context, token: jax.Array, position: jax.Array, dense0: jax.Array,
     idx, val = pos_and_scale(ctx, inp)
     inp = (jnp.take_along_axis(sparse, idx, 1) * val).reshape(ctx.dims.batch, total_read)
 
-    inp0 = normalized_linear(ctx, inp + offset0, total_read, ctx.dims.features)
-    inp1 = normalized_linear(ctx, inp, total_read, ctx.dims.features, act=False)
+    inp0 = scale_norm_act_linear(ctx, inp + offset0, total_read, ctx.dims.features)
+    inp1 = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.features, act=False)
 
     return offset1 + inp0 + inp1
 
@@ -100,7 +94,7 @@ def write(ctx: Context, token: jax.Array, position: jax.Array, dense1: jax.Array
           ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_read_heads * ctx.dims.memory_slots_read_per_head
 
-    dense_parallel = normalized_linear(ctx, dense1, ctx.dims.features, ctx.dims.pointwise_features, act=False)
+    dense_parallel = scale_norm_act_linear(ctx, dense1, ctx.dims.features, ctx.dims.pointwise_features, act=False)
     offset0, offset1, _ = input_fn(ctx, token, position, dense1, ctx.dims.pointwise_features)
 
     inp = scale_norm_act(ctx, dense_parallel + offset0 + offset1, ctx.dims.pointwise_features)
