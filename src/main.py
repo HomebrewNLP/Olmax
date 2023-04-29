@@ -10,7 +10,7 @@ import numpy as np
 import wandb
 from jax import lax, numpy as jnp
 
-from src.backend import add_sq, deep_replace, device_id, loop
+from src.backend import deep_replace, device_id, loop
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
@@ -20,9 +20,6 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-def add_zeros(params: Dict[str, jax.Array]):
-    params.update({add_sq(k): jnp.zeros_like(v) for k, v in params.items()})
-
 
 def train_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     wctx = WhileTrainContext(while_ctx_dict)
@@ -30,7 +27,6 @@ def train_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     grad_fn = jax.value_and_grad(compute, 0, True)
     data_slice = wctx.data[wctx.current_step % steps]
     params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
-    add_zeros(params)
     scalars, grads = grad_fn(params, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.scalars += scalars / steps  # higher numerical accuracy if we divide before summing
@@ -87,7 +83,6 @@ def get_optimizer_state(ctx: Context):
         new_ctx.parameters = {}
         new_ctx = copy.deepcopy(new_ctx)
         new_ctx.parameters = parameters.copy()
-        add_zeros(parameters)
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
         grads = {name: jax.random.uniform(key, param.shape, ctx.model.computation_dtype, 1e-6, 1e-3)
                  for key, (name, param) in zip(keys, parameters.items())}

@@ -14,12 +14,11 @@ def general_test(act: bool, samples: int, dim: int, double: bool):  # skipcq: PY
         src = randn(int(samples ** 0.5), int(samples ** 0.5), ctx.dims.features)
         out_shape = list(src.shape)[1:]
         wgt = randn(out_shape[dim])
-        wgt_sq = randn(out_shape[dim])
         if double:
             out_shape[dim] *= 2
         dy = randn(*out_shape)
         print(dy.shape, src.shape, wgt.shape)
-        grad = grad_fn(dy, src, wgt, wgt_sq)
+        grad = grad_fn(dy, src, wgt)
 
         print(trial)
         shape = (1,) * dim + (-1,) + (1,) * (src.ndim - 2 - dim)

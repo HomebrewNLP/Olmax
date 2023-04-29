@@ -18,24 +18,8 @@ PRECISION = "highest"
 jax.config.update("jax_default_matmul_precision", PRECISION)
 
 
-def square_grad(fn: Callable[[jax.Array, jax.Array], jax.Array], src: jax.Array, weight: jax.Array,
-                weight_sq: jax.Array):
-    @jax.custom_gradient
-    def _fn(x: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
-        def _grad(dy: jax.Array):
-            d_x, d_wgt = jax.vjp(fn, x, wgt)[1](dy)
-            _, d_wgt_sq = jax.vjp(fn, lax.square(x), wgt)[1](lax.square(dy))
-            return d_x, d_wgt, d_wgt_sq * x.shape[0]
-
-        return fn(x, wgt), _grad
-
-    return _fn(src, weight, weight_sq)
 
 
-def add_sq(name: str) -> str:
-    if name.endswith('_stacked'):
-        return name[:-len('_stacked')] + '_sq_stacked'
-    return name + '_sq'
 
 
 def promote_to(inp: jax.Array, dtype: jnp.dtype) -> jax.Array:
@@ -147,14 +131,7 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
               lr_scale: float = 1, dtype: Optional[jnp.dtype] = None,
               init_val: Optional[jax.Array] = None,
               tied: bool = False,
-              return_sq: bool = False,
               add_parameter_usages: bool = True) -> Union[Tuple[jax.Array, Optional[jax.Array]], jax.Array]:
-    if return_sq:
-        args = [shape, std, mean, column_axes, scale, post_variance_scale, lr_scale, dtype, init_val, tied, False]
-        out0 = get_param(ctx, name, *args)
-        if ctx.is_initializing:
-            return out0, None
-        return out0, get_param(ctx, add_sq(name), *args, add_parameter_usages=False)
     if not tied:
         name = name + '_stacked'
     add_depth = ctx.add_depth and not tied

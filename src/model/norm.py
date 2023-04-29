@@ -35,7 +35,7 @@ def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, 
     return out, norm_out, multiplied, src_fp64, std
 
 
-def norm_backward(ctx: Context, src: jax.Array, wgt: jax.Array, std: jax.Array, dy: jax.Array, act: bool,
+def norm_backward(src: jax.Array, wgt: jax.Array, std: jax.Array, dy: jax.Array, act: bool,
                   dim: int, double: bool, weight_shape: List[int], run_type: jnp.dtype,
                   src_fp64: Optional[jax.Array] = None, norm_out: Optional[jax.Array] = None,
                   bw_out: Optional[jax.Array] = None):
@@ -63,9 +63,8 @@ def norm_backward(ctx: Context, src: jax.Array, wgt: jax.Array, std: jax.Array, 
     summed = list(range(src.ndim))
     del summed[dim]
     d_wgt = dy * norm_out
-    d_wgt_sq = (lax.square(d_wgt).sum(summed) * ctx.dims.batch).reshape(weight_shape).astype(run_type)
     d_wgt = d_wgt.sum(summed).reshape(weight_shape).astype(run_type)
-    return dx, d_wgt, d_wgt_sq
+    return dx, d_wgt
 
 
 @with_context()
@@ -74,37 +73,37 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
                    double: bool = False) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
-        weight, weight_sq = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type, return_sq=True)
+        weight = get_param(ctx, "scale", [feature_dim], std=0, mean=1, dtype=run_type)
     elif weight is False:
-        weight_sq = weight = 1
+        weight = 1
     else:
-        weight, weight_sq = weight
+        weight = weight
 
     if ctx.is_initializing:
         return inp
 
     @jax.custom_gradient
-    def _fn(src: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
+    def _fn(src: jax.Array, wgt: jax.Array):
         if isinstance(wgt, jax.Array):
             wgt = wgt.reshape((1,) * dim + (-1,) + (1,) * (src.ndim - 1 - dim))
 
         out, _, _, _, std = norm_forward(ctx, src, wgt, act, dim, double)
 
-        def _grad(dy: jax.Array) -> Union[Tuple[jax.Array, jax.Array, jax.Array], Tuple[jax.Array, None, None]]:
-            shp = _wgt_dummy.shape if isinstance(weight, jax.Array) else ()
-            return norm_backward(ctx, src, wgt, std, dy, act, dim, double, shp, run_type)
+        def _grad(dy: jax.Array) -> Union[Tuple[jax.Array, jax.Array], Tuple[jax.Array, None]]:
+            shp = weight.shape if isinstance(weight, jax.Array) else ()
+            return norm_backward(src, wgt, std, dy, act, dim, double, shp, run_type)
 
         return out, _grad
 
-    return _fn(inp, weight, weight_sq)
+    return _fn(inp, weight)
 
 
 @with_context()
 def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_features: int,
                           act: bool = True) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
-    scale, scale_sq = get_param(ctx, "scale", [in_features], std=0, mean=1, dtype=run_type, return_sq=True)
-    weight, weight_sq = get_param(ctx, "conv_weight", [out_features, in_features], column_axes=2, return_sq=True)
+    scale = get_param(ctx, "scale", [in_features], std=0, mean=1, dtype=run_type)
+    weight = get_param(ctx, "conv_weight", [out_features, in_features], column_axes=2)
 
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,), dtype=inp.dtype)
@@ -112,18 +111,17 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
     dim = inp.ndim - 1
 
     @jax.custom_gradient
-    def _fn(src: jax.Array, scl: jax.Array, _scl_dummy: jax.Array, wgt: jax.Array, _wgt_dummy: jax.Array):
+    def _fn(src: jax.Array, scl: jax.Array, wgt: jax.Array):
         scl = scl.reshape((1,) * dim + (-1,))
         out, _, _, _, std = norm_forward(ctx, src, scl, act, dim, False)
 
-        def _grad(dy: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+        def _grad(dy: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
             out2, norm_out, bw_out, src_fp64, _ = norm_forward(ctx, src, scl, True, dim, False, std)
-            _, d_wgt_sq = jax.vjp(matmul, lax.square(out2), wgt)[1](lax.square(dy))
             dy, d_wgt = jax.vjp(matmul, out2, wgt)[1](dy)
-            dx, d_scl, d_scl_sq = norm_backward(ctx, src, scl, std, dy, act, dim, False, _scl_dummy.shape, run_type,
-                                                src_fp64, norm_out, bw_out)
-            return dx, d_scl, d_scl_sq, d_wgt, d_wgt_sq
+            dx, d_scl = norm_backward(src, scl, std, dy, act, dim, False, weight.shape, run_type, src_fp64,
+                                      norm_out, bw_out)
+            return dx, d_scl, d_wgt
 
         return matmul(out, wgt), _grad
 
-    return _fn(inp, scale, scale_sq, weight, weight_sq)
+    return _fn(inp, scale, weight)

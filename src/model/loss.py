@@ -21,7 +21,7 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
 
     def _xent_slice(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
                     x: Tuple[jax.Array, jax.Array], wgt: jax.Array):
-        d_wgt, d_wgt_sq, loss, acc = carry
+        d_wgt, loss, acc = carry
         inp_slice, tgt_slice = x
         tmp = matmul(inp_slice, wgt)
         tmp = promote_to(tmp, jnp.float32)
@@ -44,11 +44,10 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
         d_wgt = d_wgt + matmul(dy, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
-        d_wgt_sq = d_wgt_sq + matmul(lax.square(dy), lax.square(inp_slice))
-        return (d_wgt, d_wgt_sq, loss.astype(jnp.float64), acc.astype(jnp.float64)), dx
+        return (d_wgt, loss.astype(jnp.float64), acc.astype(jnp.float64)), dx
 
     @jax.custom_gradient
-    def _fn(inp: jax.Array, tgt: jax.Array, wgt: jax.Array, _wgt_sq: jax.Array):
+    def _fn(inp: jax.Array, tgt: jax.Array, wgt: jax.Array):
         inp = inp.reshape(steps, devices, local_batch, ctx.dims.features)
         tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
         tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
@@ -58,20 +57,19 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
 
         init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros(wgt.shape[::-1]), jnp.zeros((), dtype=jnp.float64),
                 jnp.zeros((), dtype=jnp.float64))
-        (d_wgt, d_wgt_sq, loss, acc), dx = lax.scan(_slice_fn, init, (inp, tgt))
+        (d_wgt, loss, acc), dx = lax.scan(_slice_fn, init, (inp, tgt))
 
         dx = dx.transpose(0, 2, 1)  # [Steps, Features, StepBatch] -> [Steps, StepBatch, Features]
         dx = dx.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         d_wgt = d_wgt.transpose(1, 0)  # [Vocab, Features]  ->  [Features, Vocab]
-        d_wgt_sq = d_wgt_sq.transpose(1, 0) * ctx.dims.batch
 
-        def _grad(dy: Tuple[jax.Array, None]) -> Tuple[jax.Array, None, jax.Array, jax.Array]:
+        def _grad(dy: Tuple[jax.Array, None]) -> Tuple[jax.Array, None, jax.Array]:
             # dy == 1 since this is the last function before the output
             dy, _ = dy
-            return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype), (d_wgt_sq * dy).astype(wgt.dtype)
+            return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype)
 
         loss = lax.psum(loss, ParallelAxes.model)
         acc = lax.psum(acc, ParallelAxes.model)
         return jnp.stack([loss, acc]).reshape(-1), _grad
 
-    return _fn  # _fn(src, outer_tgt, param, param_sq)
+    return _fn  # _fn(src, outer_tgt, param)

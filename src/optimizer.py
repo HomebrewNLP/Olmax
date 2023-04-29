@@ -3,7 +3,7 @@ from typing import Optional, Dict
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import add_sq, assign, default, get_param, is_stacked, stable_rsqrt, with_context
+from src.backend import assign, default, get_param, is_stacked, stable_rsqrt, with_context
 from src.constants import MomentumType
 from src.context import Context
 
@@ -63,17 +63,14 @@ def graft(param_name: str, magnitude: jax.Array, direction: jax.Array) -> jax.Ar
     return direction * jnp.sqrt(norm(param_name, magnitude) / jnp.maximum(norm(param_name, direction), 1e-16))
 
 
-def tg_adam(ctx: Context, param_name: str, grad: jax.Array, tg_grad: jax.Array, step: jax.Array) -> jax.Array:
-    ema_g = ema(ctx, grad, step, 1 - ctx.optimizer.adam_beta1)
+def laprop(ctx: Context, param_name: str, grad: jax.Array, step: jax.Array) -> jax.Array:
     ema_gsq = ema(ctx, grad ** 2, step, 1 - ctx.optimizer.adam_beta2)
-    ema_tgsq = ema(ctx, tg_grad, step, 1 - ctx.optimizer.adam_beta3)
+    ema_g = ema(ctx, grad * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon), step, 1 - ctx.optimizer.adam_beta1)
 
     if ctx.is_initializing:
         return grad
 
-    adam_update = ema_g * stable_rsqrt(ema_gsq, ctx.optimizer.epsilon)
-    tg_update = ema_g * stable_rsqrt(ema_tgsq, ctx.optimizer.epsilon)
-    return graft(param_name, adam_update, tg_update)
+    return graft(param_name, ema_g, lax.sign(ema_g))
 
 
 def get_current_lr(ctx: Context, step: jax.Array) -> jax.Array:
@@ -90,7 +87,7 @@ def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
     lr = -get_current_lr(ctx, step)
 
     for param_name, grad in grads.items():
-        if "optimizer" in param_name or param_name.endswith('_sq') or param_name.endswith('_sq_stacked'):
+        if "optimizer" in param_name:
             continue
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
         ctx.name_cache = {}
@@ -98,8 +95,7 @@ def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
 
         grad = adaptive_gradient_clipping(ctx, param_name, grad, False)
-        grad_sq = adaptive_gradient_clipping(ctx, param_name, grads[add_sq(param_name)], True)
-        weight_update = tg_adam(ctx, param_name, grad, grad_sq, step) * parameter_lr
+        weight_update = laprop(ctx, param_name, grad, step) * parameter_lr
 
         if ctx.is_initializing:
             continue

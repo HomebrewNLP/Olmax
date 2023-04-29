@@ -3,7 +3,7 @@ from typing import Tuple
 import jax
 from jax import numpy as jnp, lax
 
-from src.backend import matmul, get_param, square_grad, with_context
+from src.backend import matmul, get_param, with_context
 from src.constants import ParallelAxes
 from src.context import Context
 from src.model.norm import scale_norm_act, scale_norm_act_linear
@@ -11,14 +11,11 @@ from src.model.norm import scale_norm_act, scale_norm_act_linear
 
 @with_context()
 def linear(ctx: Context, inp: jax.Array, in_features: int, out_features: int):
-    weight, weight_sq = get_param(ctx, "conv_weight", [out_features, in_features], column_axes=2, return_sq=True)
+    weight = get_param(ctx, "conv_weight", [out_features, in_features], column_axes=2)
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,), dtype=inp.dtype)
 
-    def _mm(x, y):
-        return matmul(x, y)
-
-    return square_grad(_mm, inp, weight, weight_sq)
+    return matmul(inp, weight)
 
 
 @jax.custom_gradient
@@ -31,16 +28,13 @@ def all2all(inp):
 
 @with_context()
 def input_embed(ctx: Context, inp: jax.Array, dim: int) -> jax.Array:
-    param, param_sq = get_param(ctx, "inp_embd", [dim, ctx.dims.pointwise_features],
-                                std=1 / ctx.dims.pointwise_features, return_sq=True)
+    param = get_param(ctx, "inp_embd", [dim, ctx.dims.pointwise_features],
+                      std=1 / ctx.dims.pointwise_features)
 
     def _fn(src, wgt):
         return jnp.take(wgt, src, 0)
 
-    if ctx.is_initializing:
-        return _fn(inp, param)
-
-    return square_grad(_fn, inp, param, param_sq)
+    return _fn(inp, param)
 
 
 @with_context()
