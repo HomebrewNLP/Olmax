@@ -1,3 +1,4 @@
+import hashlib
 from typing import Optional, Dict
 
 import jax
@@ -52,7 +53,6 @@ def clip_norm(param_name: str, val: jax.Array, min_norm: float, is_squared: bool
 
 
 def adaptive_gradient_clipping(ctx: Context, param_name: str, grad: jax.Array, is_squared: bool) -> jax.Array:
-    grad = grad.astype(jnp.float64)
     grd_norm = clip_norm(param_name, grad, ctx.optimizer.epsilon, is_squared)
     wgt_norm = clip_norm(param_name, ctx.parameters[param_name].astype(jnp.float64), 1e-3)
     grad_scale = jnp.minimum(wgt_norm / grd_norm * ctx.optimizer.gradient_clip, 1)
@@ -89,12 +89,17 @@ def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
     for param_name, grad in grads.items():
         if "optimizer" in param_name:
             continue
+        name_hash = int.from_bytes(hashlib.blake2b(param_name.encode()).digest()[:4], "little")
         ctx = outer_ctx.add_to_prefix(param_name, count=False)
         ctx.name_cache = {}
         dtype = ctx.parameters[param_name].dtype
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
 
-        grad = adaptive_gradient_clipping(ctx, param_name, grad, False)
+        grad = grad.astype(jnp.float64)
+        noise = jax.random.normal(jax.random.PRNGKey(step + name_hash), grad.shape, grad.dtype)
+        noise *= ctx.optimizer.gradient_noise_factor * grad.std
+        grad += noise
+        grad = adaptive_gradient_clipping(ctx, param_name, grad, step, False)
         weight_update = laprop(ctx, param_name, grad, step) * parameter_lr
 
         if ctx.is_initializing:

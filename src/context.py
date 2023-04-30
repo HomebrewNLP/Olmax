@@ -113,6 +113,7 @@ class Optimizer(DataClass):
     weight_decay: float = 0.01
     warmup_end: int = 16384
     exponential_decay: float = 3e-6
+    gradient_noise_factor: float = 0.01
 
 
 class Normalization(DataClass):
