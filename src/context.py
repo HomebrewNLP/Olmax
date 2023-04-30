@@ -71,15 +71,15 @@ class DataContext(DataClass):
 
 
 class Dims(DataClass):
-    batch: int = 512
+    batch: int = 8
     features: int = 2 ** 14
-    pointwise_features: int = 2 ** 15
-    sequence: int = 4096
+    pointwise_features: int = 2 ** 12
+    sequence: int = 256  # Start with small sequence and curriculum-learn up to O(memory_slots)
     vocab: int = 256
     memory_slots: int = 2 ** 20
-    memory_slots_per_head: int = 16
+    memory_slots_per_head: int = 4
     memory_features: int = 128
-    memory_heads: int = 8
+    memory_heads: int = 32
 
 
 class TensorboardTrace(DataClass):
