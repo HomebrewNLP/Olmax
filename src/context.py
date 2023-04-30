@@ -72,7 +72,7 @@ class DataContext(DataClass):
 
 class Dims(DataClass):
     batch: int = 512
-    features: int = 2 ** 11
+    features: int = 2 ** 14
     pointwise_features: int = 2 ** 15
     sequence: int = 4096
     vocab: int = 256

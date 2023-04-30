@@ -38,12 +38,10 @@ def input_embed(ctx: Context, inp: jax.Array, dim: int) -> jax.Array:
 
 
 @with_context()
-def pos_and_scale(ctx: Context, inp: jax.Array) -> Tuple[jax.Array, jax.Array]:
+def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]:
     # from https://github.com/HomebrewNLP/HomebrewNLP-MTF/blob/v1.16.0/src/model/basic.py#L93
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
     assert gate_sqrt ** 2 == ctx.dims.memory_slots
-
-    gates = linear(ctx, inp, ctx.dims.pointwise_features, gate_sqrt * 2 * ctx.dims.memory_heads)
 
     gates = gates.reshape(ctx.dims.batch, ctx.dims.memory_heads, 2, gate_sqrt)
     gates = scale_norm_act(ctx, gates, gate_sqrt, act=False)
@@ -58,26 +56,27 @@ def pos_and_scale(ctx: Context, inp: jax.Array) -> Tuple[jax.Array, jax.Array]:
 
 
 @with_context
-def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Array, output_features: int
-             ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Array, *out: int
+             ) -> Tuple[jax.Array, ...]:
     token_embedding = input_embed(ctx, token, ctx.dims.vocab)
     position_embedding = input_embed(ctx, position, ctx.dims.sequence)
     dense = linear(ctx, dense, ctx.dims.features, ctx.dims.pointwise_features)
-    inp = scale_norm_act(ctx, token_embedding + position_embedding + dense, ctx.dims.pointwise_features)
-    offset0 = linear(ctx, inp, ctx.dims.pointwise_features, output_features)
-    offset1 = linear(ctx, all2all(inp), ctx.dims.pointwise_features, ctx.dims.features)
-    return offset0, offset1, inp
+    return scale_norm_act_linear(ctx, token_embedding + position_embedding + dense, ctx.dims.pointwise_features,
+                                 list(out), [(all2all, all2all)])
 
 
 @with_context()
 def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, position: jax.Array
          ) -> Tuple[jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
+    gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
-    offset0, offset1, inp = input_fn(ctx, token, position, dense0, total_read)
-    idx, val = pos_and_scale(ctx, inp)
+    offset1, offset0, gates = input_fn(ctx, token, position, dense0, ctx.dims.features, total_read,
+                                       gate_sqrt * 2 * ctx.dims.memory_heads)
+    idx, val = pos_and_scale(ctx, gates)
     inp = (jnp.take_along_axis(sparse, idx, 1) * val).reshape(ctx.dims.batch, total_read)
 
+    # TODO: Broadcast first to pointwise, then to features
     inp0 = scale_norm_act_linear(ctx, inp + offset0, total_read, ctx.dims.features)
     inp1 = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.features, act=False)
 
@@ -88,14 +87,15 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
 def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
           ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
+    gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
     dense_parallel = scale_norm_act_linear(ctx, dense1, ctx.dims.features, ctx.dims.pointwise_features, act=False)
-    offset0, offset1, _ = input_fn(ctx, token, position, dense1, ctx.dims.pointwise_features)
+    offset0, offset1 = input_fn(ctx, token, position, dense1,
+                                ctx.dims.pointwise_features, ctx.dims.pointwise_features)
 
-    inp = scale_norm_act(ctx, dense_parallel + offset0 + offset1, ctx.dims.pointwise_features)
-
-    dense0 = linear(ctx, inp, ctx.dims.pointwise_features, ctx.dims.features)
-    scatter_values = linear(ctx, inp, ctx.dims.pointwise_features, total_read)
-    idx, val = pos_and_scale(ctx, inp)
+    out = scale_norm_act_linear(ctx, dense_parallel + offset0 + offset1, ctx.dims.pointwise_features,
+                                ctx.dims.features, total_read, gate_sqrt * 2 * ctx.dims.memory_heads)
+    dense0, scatter_values, gates = out
+    idx, val = pos_and_scale(ctx, gates, is_gates=True)
 
     return dense0, idx, scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val
