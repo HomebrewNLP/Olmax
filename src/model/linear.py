@@ -71,14 +71,14 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
-    offset1, offset0, gates = input_fn(ctx, token, position, dense0, ctx.dims.features, total_read,
+    offset1, offset0, gates = input_fn(ctx, token, position, dense0, ctx.dims.features, ctx.dims.pointwise_features,
                                        gate_sqrt * 2 * ctx.dims.memory_heads)
     idx, val = pos_and_scale(ctx, gates)
     inp = (jnp.take_along_axis(sparse, idx, 1) * val).reshape(ctx.dims.batch, total_read)
 
-    # TODO: Broadcast first to pointwise, then to features
-    inp0 = scale_norm_act_linear(ctx, inp + offset0, total_read, ctx.dims.features)
-    inp1 = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.features, act=False)
+    inp = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.pointwise_features)
+    inp0 = scale_norm_act_linear(ctx, inp + offset0, ctx.dims.pointwise_features, ctx.dims.features)
+    inp1 = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, ctx.dims.features, act=False)
 
     return offset1 + inp0 + inp1, idx
 
