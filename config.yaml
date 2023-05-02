@@ -1,88 +1,54 @@
 data:
-    datasets_used_per_step: 2
-    interleaved_datasets: 2
-    parallel_workers: 2
-    path: gs://homebrewnlp-eu/the-char-pile/*
-    prefetch_buffer: 2
-    seed: 0
-    shuffle_buffer: 0
-    vocab_size: 256
+  datasets_used_per_step: 64
+  deterministic: true
+  interleaved_datasets: 64
+  parallel_workers: 64
+  path: gs://homebrewnlp-us/the-char-pile/*
+  prefetch_buffer: 1
+  seed: 0
+  shuffle_buffer_gb: 0
 dims:
-    batch: 16
-    features: 256
-    heads: 8
-    inner_bottleneck_features: 128
-    inner_bottleneck_kernel: 49
-    intermediate: 512
-    moe_intermediate: 4096
-    one: 1
-    outer_bottleneck_kernel: 25
-    sequence: 4096
-    vocab: 256
-global_prefix: ''
+  batch: 256
+  depth: 16
+  features: 16384
+  pointwise_features: 4096
+  sequence: 256
+  vocab: 256
+  memory_slots: 1048576
+  memory_slots_per_head:  4
+  memory_features: 128
+  memory_heads:  32
 model:
-    activation_std: 0.5893595616022745
-    computation_dtype: bfloat16
-    conv_scale: 4.0
-    conv_shift: 8.0
-    leaky_relu_slope: 0.02
-    norm_eps: 1.0e-16
-    qrnn_frequency: 8
-    rezero_lr_scale: 0.01
-    storage_dtype: float32
+  autoregressive: true
+  computation_dtype: bfloat16
+  conv_scale: 8
+  conv_shift: 80
+  norm:
+    eps: 1.0e-16
+  storage_dtype: float32
 optimizer:
-    adam_beta1: 0.03
-    adam_beta2: 0.003
-    block_size: 512
-    bottleneck_scale: 1
-    epsilon: 1.0e-16
-    exponential_decay: 3.0e-06
-    gradient_clip: 0.001
-    input_scale: 1
-    learning_rate: 0.01
-    moe_scale: 1
-    momentum_beta: 0.1
-    norm_scale: 1
-    output_scale: 1
-    preconditioning_compute_steps: 128
-    qrnn_scale: 1
-    skip_preconditioning_dim_size_gt: 1024
-    start_preconditioning_step: 16
-    statistics_compute_steps: 4
-    warmup_end: 1024
-    weight_decay: 0.001
-seed: 0
+  adam_beta1: 0.1
+  adam_beta2: 0.01
+  epsilon: 1.0e-16
+  exponential_decay: 7.0e-06
+  gradient_clip: 0.001
+  learning_rate: 0.01
+  momentum_dtype: float32
+  momentum_type: debiased
+  warmup_end: 1024
+  weight_decay: 0.03
 training:
-    checkpoint_interval: 2048
-    checkpoint_load_path: ""
-    checkpoint_path: gs://homebrewnlp-eu/homebrewnlp-checkpoint-deep
-    device_steps: 1
-    device_unroll: 1
-    do_checkpoint: true
-    early_stopping:
-        expected_loss:
-            exponent: -0.3642513
-            offset: 6.165868
-            scale: 39.08037
-        loss_patience: 0.875
-        maximum_spike_duration: 24
-        maximum_spike_size: 3
-        minimum_relative_loss_change: 0.003
-    print_interval: 1
-    steps: 65536
-    trace:
-        do_trace: false
-        output_path: trace
-        start_step: 16
-        stop_step: 80
-    z_loss: 0.01
-wandb:
-    entity: homebrewnlp
-    log_frequency: 1
-    median_sizes:
-    - 64
-    - 256
-    - 1024
-    percentile: 25
-    project: gpt
-    use_wandb: true
+  checkpoint_interval: 64
+  checkpoint_load_path: ''
+  checkpoint_path: gs://homebrewnlp-us/homebrewnlp-checkpoint
+  debug: false
+  device_steps: 1
+  device_unroll: 1
+  do_checkpoint: true
+  steps: 65536
+  trace:
+    do_trace: true
+    output_path: trace
+    start_step: 16
+    stop_step: 80
+  z_loss: 0
