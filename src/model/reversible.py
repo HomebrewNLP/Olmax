@@ -13,7 +13,8 @@ ReversibleFn = Callable[[Context, jax.Array, jax.Array, jax.Array], Output]
 FourArrays = Tuple[jax.Array, jax.Array, jax.Array, jax.Array]
 
 
-def _reversible_at_init(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src: REVERSIBLE_CTX, *args) -> REVERSIBLE_CTX:
+def _reversible_at_init(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src: REVERSIBLE_CTX,
+                        *args) -> REVERSIBLE_CTX:
     params, _x00, x01, x10, x11, sparse, d_sparse = src
     new_ctx = ctx.add_to_prefix("reversible")
     new_ctx.parameters = params
@@ -26,7 +27,8 @@ def _reversible_at_init(ctx: Context, fn: ReversibleFn, sparse_access: SparseAcc
     return new_ctx.parameters, x10, x11, out, x01, sparse, d_sparse
 
 
-def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src: REVERSIBLE_CTX, *args) -> REVERSIBLE_CTX:
+def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src: REVERSIBLE_CTX,
+               *args) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         return _reversible_at_init(ctx, fn, sparse_access, src, *args)
 

@@ -20,7 +20,6 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-
 def train_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     steps = wctx.ctx.training.device_steps * jax.process_count()

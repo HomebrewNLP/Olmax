@@ -2,10 +2,10 @@ import math
 
 import jax
 from jax import numpy as jnp, lax
+from src.model.conv import conv
 
 from src.backend import with_context, pattern_match
 from src.context import Context
-from src.model.conv import conv
 from src.model.norm import prenorm, scale_norm_act_conv
 
 

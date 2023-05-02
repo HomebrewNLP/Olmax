@@ -18,10 +18,6 @@ PRECISION = "highest"
 jax.config.update("jax_default_matmul_precision", PRECISION)
 
 
-
-
-
-
 def promote_to(inp: jax.Array, dtype: jnp.dtype) -> jax.Array:
     return jnp.asarray(inp, jnp.promote_types(dtype, jnp.result_type(inp)))
 
