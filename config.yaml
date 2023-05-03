@@ -1,53 +1,67 @@
 data:
-  datasets_used_per_step: 64
-  deterministic: true
-  interleaved_datasets: 64
-  parallel_workers: 64
-  path: gs://homebrewnlp-us/the-char-pile/*
-  prefetch_buffer: 1
-  seed: 0
-  shuffle_buffer_gb: 0
+    datasets_used_per_step: 8
+    deterministic: true
+    interleaved_datasets: 64
+    parallel_workers: 64
+    path: gs://homebrewnlp-us/the-char-pile/*
+    prefetch_buffer: 1
+    seed: 0
+    shuffle_buffer_gb: 0
 dims:
-  batch: 8
-  features: 16384
-  pointwise_features: 4096
-  sequence: 256
-  vocab: 256
-  memory_slots: 1048576
-  memory_slots_per_head:  4
-  memory_features: 128
-  memory_heads:  32
+    batch: 8
+    features: 16384
+    memory_features: 128
+    memory_heads: 32
+    memory_slots: 1048576
+    memory_slots_per_head: 4
+    pointwise_features: 4096
+    sequence: 256
+    vocab: 256
+fail_on_missing_parameter: true
+global_prefix: ''
 model:
-  autoregressive: true
-  computation_dtype: bfloat16
-  conv_scale: 8
-  conv_shift: 80
-  norm:
-    eps: 1.0e-16
-  storage_dtype: float32
+    autoregressive: true
+    computation_dtype: bfloat16
+    norm:
+        eps: 1.0e-16
+    storage_dtype: float32
+name_cache_offsets: {}
 optimizer:
-  adam_beta1: 0.1
-  adam_beta2: 0.01
-  epsilon: 1.0e-16
-  exponential_decay: 7.0e-06
-  gradient_clip: 0.001
-  learning_rate: 0.01
-  momentum_dtype: float32
-  momentum_type: debiased
-  warmup_end: 1024
-  weight_decay: 0.03
+    adam_beta1: 0.1
+    adam_beta2: 0.01
+    epsilon: 1.0e-16
+    exponential_decay: 7.0e-06
+    gradient_clip: 0.001
+    gradient_noise_factor: 0.01
+    learning_rate: 0.01
+    momentum_dtype: float32
+    momentum_type: debiased
+    warmup_end: 1024
+    weight_decay: 0.03
+parameter_usages: {}
+seed: 0
 training:
-  checkpoint_interval: 64
-  checkpoint_load_path: ''
-  checkpoint_path: gs://homebrewnlp-us/homebrewnlp-checkpoint
-  debug: false
-  device_steps: 1
-  device_unroll: 1
-  do_checkpoint: true
-  steps: 65536
-  trace:
-    do_trace: true
-    output_path: trace
-    start_step: 16
-    stop_step: 80
-  z_loss: 0
+    checkpoint_interval: 64
+    checkpoint_load_path: ''
+    checkpoint_path: gs://homebrewnlp-us/homebrewnlp-checkpoint-sequential-architecutre
+    debug: false
+    device_steps: 1
+    device_unroll: 1
+    do_checkpoint: true
+    steps: 65536
+    trace:
+        do_trace: true
+        output_path: trace
+        start_step: 16
+        stop_step: 80
+    z_loss: 0
+wandb:
+    entity: homebrewnlp
+    group: lucas-rnn
+    id: 24rz8wg13jqr1bd8qjy037u04b86q6ir
+    median_sizes:
+    - 64
+    - 256
+    - 1024
+    name: lucas-rnn-0
+    project: gpt
