@@ -55,7 +55,7 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
     return idx.reshape(ctx.dims.batch, -1, 1), values.reshape(ctx.dims.batch, -1, 1)
 
 
-@with_context
+@with_context()
 def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Array, *out: int
              ) -> Tuple[jax.Array, ...]:
     token_embedding = input_embed(ctx, token, ctx.dims.vocab)

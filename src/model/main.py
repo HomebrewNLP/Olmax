@@ -12,7 +12,7 @@ from src.model.norm import scale_norm_act
 from src.model.reversible import reversible, REVERSIBLE_CTX
 
 
-@with_context
+@with_context()
 def loss_fn(ctx: Context, src: REVERSIBLE_CTX, tgt: jax.Array) -> Tuple[REVERSIBLE_CTX, jax.Array]:
     xent = cross_entropy_loss(ctx)
     wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
