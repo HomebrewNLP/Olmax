@@ -39,7 +39,7 @@ def loss_fn(ctx: Context, src: REVERSIBLE_CTX, tgt: jax.Array) -> Tuple[REVERSIB
 def block(ctx: Context):
     name_cache = ctx.name_cache
 
-    def _fn(src: Tuple[REVERSIBLE_CTX, jax.Array], inp: Tuple[jax.Array, jax.Array]):
+    def _fn(src: Tuple[REVERSIBLE_CTX, jax.Array], inp: Tuple[jax.Array, jax.Array, jax.Array]):
         inp, tgt, position = inp
         src, original_loss = src
         src = reversible(ctx, read, SparseAccess.read, src, inp, position)
@@ -62,16 +62,17 @@ def batch_embedding(ctx: Context, name: str, *shape: int) -> Tuple[jax.Array, ja
 
 @with_context()
 def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> jax.Array:
-    if ctx.is_initializing:
-        ctx.add_depth = True
-        ctx.parameters, *src = block(ctx)(src, (src, jnp.zeros([], dtype=jnp.int32)))
-        ctx.add_depth = False
-        return src
-
     dense0 = batch_embedding(ctx, "dense0", ctx.dims.features)
     dense1 = batch_embedding(ctx, "dense1", ctx.dims.features)
     sparse = batch_embedding(ctx, "sparse", ctx.dims.memory_slots, ctx.dims.memory_features)
     carry = ((*dense0, *dense1, *sparse), jnp.zeros((2,)))
+
+    if ctx.is_initializing:
+        ctx.add_depth = True
+        ctx.parameters, *src = block(ctx)(carry, (src, tgt, jnp.zeros([], dtype=jnp.int32)))
+        ctx.add_depth = False
+        return src
+
     (_, loss), _ = lax.scan(block(ctx), carry, (src, tgt, jnp.arange(ctx.dims.sequence)), ctx.dims.sequence)
     return loss
 
