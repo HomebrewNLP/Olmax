@@ -124,7 +124,7 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
               lr_scale: float = 1, dtype: Optional[jnp.dtype] = None,
               init_val: Optional[jax.Array] = None,
               add_parameter_usages: bool = True) -> Union[Tuple[jax.Array, Optional[jax.Array]], jax.Array]:
-K    prefix_name = prefixed_name(ctx, name)
+    prefix_name = prefixed_name(ctx, name)
 
     if dtype is None:
         computation_dtype = ctx.model.computation_dtype
