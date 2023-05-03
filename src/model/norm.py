@@ -35,10 +35,9 @@ def norm_forward(ctx: Context, src: jax.Array, wgt: Optional[jax.Array] = None, 
     return out, norm_out, multiplied, src_fp64, std
 
 
-def norm_backward(src: jax.Array, wgt: jax.Array, std: jax.Array, dy: jax.Array, act: bool,
-                  dim: int, double: bool, weight_shape: List[int], run_type: jnp.dtype,
-                  src_fp64: Optional[jax.Array] = None, norm_out: Optional[jax.Array] = None,
-                  bw_out: Optional[jax.Array] = None):
+def norm_backward(src: jax.Array, wgt: jax.Array, std: jax.Array, dy: jax.Array, act: bool, dim: int, double: bool,
+                  weight_shape: List[int], run_type: jnp.dtype, src_fp64: Optional[jax.Array] = None,
+                  norm_out: Optional[jax.Array] = None, bw_out: Optional[jax.Array] = None):
     src_fp64 = promote_to(src, run_type) if src_fp64 is None else src_fp64
     norm_out = (src_fp64 * std) if norm_out is None else norm_out
     dy = promote_to(dy, run_type)
@@ -100,8 +99,8 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
 
 @with_context()
 def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_features: Union[int, List[int]],
-                          transform_fns: Optional[List[Tuple[Callable, Callable]]] = None, act: bool = True
-                          ) -> Union[jax.Array, Tuple[jax.Array, ...]]:
+                          transform_fns: Optional[List[Tuple[Callable, Callable]]] = None, act: bool = True) -> Union[
+    jax.Array, Tuple[jax.Array, ...]]:
     if isinstance(out_features, int):
         out_features = [out_features]
     if transform_fns is None:
@@ -113,7 +112,7 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
 
     if ctx.is_initializing:
         if len(out_features) == 1:
-            return jnp.zeros(inp.shape[:-1] + (out_features,), dtype=inp.dtype)
+            return jnp.zeros(list(inp.shape[:-1]) + list(out_features), dtype=inp.dtype)
         return tuple(jnp.zeros(inp.shape[:-1] + (o,), dtype=inp.dtype) for o in out_features)
 
     dim = inp.ndim - 1
