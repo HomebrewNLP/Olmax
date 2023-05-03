@@ -40,7 +40,7 @@ class Args:
 
 
 def start_fn(ctx: TPUContext, worker: int):
-    setup = '(bash setup.sh ; mv ~/config.yaml ~/HomebrewNLP-Jax/config.yaml ; exit 0)'
+    setup = '(bash setup.sh ; cp ~/config.yaml ~/HomebrewNLP-Jax/config.yaml ; exit 0)'
     send_to_tpu(ctx.host, ctx.zone, "config.yaml", yaml.dump(ctx.config), worker)
     cmd = exec_command(repository="https://github.com/HomebrewNLP/HomebrewNLP-Jax", wandb_key=wandb_key,
                        setup_command=setup, run_command="CONFIG=config.yaml bash run.sh", branch=ctx.branch,

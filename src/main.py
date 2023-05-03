@@ -62,7 +62,7 @@ def get_parameters(ctx: Context, inp: jax.Array):
         initial_prng_key = ctx.prng_key
         ctx.seed += device_id()
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
-        body_ctx(ctx, x)
+        body_ctx(ctx, x, x)
         params = ctx.parameters
         var = ctx.parameter_variance
         ctx.parameters = {}
