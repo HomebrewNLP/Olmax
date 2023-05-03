@@ -5,7 +5,7 @@ import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from jax import lax, numpy as jnp, random
-from pydantic import BaseModel
+from pydantic import BaseModelacke
 from transformers import GPT2TokenizerFast
 
 from src.backend import matmul, promote_to

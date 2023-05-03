@@ -4,7 +4,7 @@ from typing import Optional, Dict
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import assign, default, get_param, is_stacked, stable_rsqrt, with_context
+from src.backend import assign, default, get_param, is_model, stable_rsqrt, with_context
 from src.constants import MomentumType
 from src.context import Context
 
@@ -12,7 +12,7 @@ from src.context import Context
 def small_parameter(param_name: str, grad: jax.Array) -> bool:
     param_name = param_name.lower()
     is_small = any(f'{k}' in param_name for k in ("norm", "rezero"))
-    is_small |= grad.ndim < (2 + is_stacked(param_name))
+    is_small |= grad.ndim < (2 + is_model(param_name))
     return is_small
 
 
@@ -20,7 +20,7 @@ def small_parameter(param_name: str, grad: jax.Array) -> bool:
 def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
         momentum_type: Optional[MomentumType] = None) -> jax.Array:
     default(momentum_type, ctx.optimizer.momentum_type)
-    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype, tied=True,
+    state = get_param(ctx, "momentum_buffer", inp.shape, dtype=ctx.optimizer.momentum_dtype,
                       init_val=jnp.zeros_like(inp))
     if ctx.is_initializing:
         return state
@@ -43,7 +43,7 @@ def ema(ctx: Context, inp: jax.Array, step: jax.Array, beta: float,
 def norm(param_name: str, val: jax.Array, is_squared: bool = False):
     if not is_squared:
         val = lax.square(val)
-    if not is_stacked(param_name):
+    if not is_model(param_name):
         return val.sum()
     return val.sum(tuple(range(1, val.ndim))).reshape((-1,) + (1,) * (val.ndim - 1))
 

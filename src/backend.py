@@ -62,9 +62,6 @@ def is_model(param_name: str):
     return "/stem:" in param_name and '/optimizer' not in param_name
 
 
-def is_stacked(param_name: str):
-    return param_name.endswith('_stacked') and is_model(param_name)
-
 
 def conv(inp: jax.Array, weight: jax.Array, padding: List[Tuple[int, int]], groups: int):
     ndim = weight.ndim
@@ -127,10 +124,7 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
               lr_scale: float = 1, dtype: Optional[jnp.dtype] = None,
               init_val: Optional[jax.Array] = None,
               add_parameter_usages: bool = True) -> Union[Tuple[jax.Array, Optional[jax.Array]], jax.Array]:
-    if not tied:
-        name = name + '_stacked'
-
-    prefix_name = prefixed_name(ctx, name)
+K    prefix_name = prefixed_name(ctx, name)
 
     if dtype is None:
         computation_dtype = ctx.model.computation_dtype
