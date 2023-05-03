@@ -94,7 +94,7 @@ def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
                                 ctx.dims.pointwise_features, ctx.dims.pointwise_features)
 
     out = scale_norm_act_linear(ctx, dense_parallel + offset0 + offset1, ctx.dims.pointwise_features,
-                                ctx.dims.features, total_read, gate_sqrt * 2 * ctx.dims.memory_heads)
+                                [ctx.dims.features, total_read, gate_sqrt * 2 * ctx.dims.memory_heads])
     dense0, scatter_values, gates = out
     idx, val = pos_and_scale(ctx, gates, is_gates=True)
 
