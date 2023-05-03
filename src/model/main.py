@@ -65,7 +65,7 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> jax.Array:
     dense0 = batch_embedding(ctx, "dense0", ctx.dims.features)
     dense1 = batch_embedding(ctx, "dense1", ctx.dims.features)
     sparse = batch_embedding(ctx, "sparse", ctx.dims.memory_slots, ctx.dims.memory_features)
-    carry = ((*dense0, *dense1, *sparse), jnp.zeros((2,)))
+    carry = ((ctx.parameters, *dense0, *dense1, *sparse), jnp.zeros((2,)))
 
     if ctx.is_initializing:
         ctx.parameters, *src = block(ctx)(carry, (src, tgt, jnp.zeros([], dtype=jnp.int32)))
