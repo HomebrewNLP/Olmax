@@ -1,3 +1,4 @@
+import math
 from typing import Sequence
 from typing import Tuple, List, Any, Optional, TypeVar, Union, Callable
 
@@ -109,7 +110,7 @@ def deep_replace(d, value):
 def orthogonal_init(ctx: Context, shape: List[int], column_axes=(-1,)) -> jax.Array:
     column_axes = tuple(column_axes)
     axes = tuple(shape[c] for c in column_axes)
-    n_rows, n_cols = util.prod(shape) // util.prod(axes), util.prod(axes)
+    n_rows, n_cols = math.prod(shape) // math.prod(axes), math.prod(axes)
     matrix_shape = (n_rows, n_cols) if n_rows > n_cols else (n_cols, n_rows)
     out, r = jnp.linalg.qr(normal(ctx, matrix_shape))
     out *= lax.broadcast_to_rank(jnp.sign(jnp.diag(r)), rank=out.ndim)
