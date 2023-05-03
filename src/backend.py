@@ -126,11 +126,9 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
               scale: float = 1., post_variance_scale: float = 1,
               lr_scale: float = 1, dtype: Optional[jnp.dtype] = None,
               init_val: Optional[jax.Array] = None,
-              tied: bool = False,
               add_parameter_usages: bool = True) -> Union[Tuple[jax.Array, Optional[jax.Array]], jax.Array]:
     if not tied:
         name = name + '_stacked'
-    add_depth = ctx.add_depth and not tied
 
     prefix_name = prefixed_name(ctx, name)
 
@@ -153,11 +151,9 @@ def get_param(ctx: Context, name: str, shape: Optional[List[int]] = None,
         param = init_val * scale * post_variance_scale
     elif std is None and mean is None:
         param = orthogonal_init(ctx, shape, range(len(shape) - column_axes, len(shape)))
-        if add_depth:
-            param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * param.std() + param.mean()
         param *= scale * post_variance_scale
     else:
-        param = normal(ctx, [ctx.dims.depth] * add_depth + list(shape)) * scale
+        param = normal(ctx, list(shape)) * scale
         if std is not None:
             param *= std
         if mean is not None:

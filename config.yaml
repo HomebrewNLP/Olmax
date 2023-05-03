@@ -9,7 +9,6 @@ data:
   shuffle_buffer_gb: 0
 dims:
   batch: 256
-  depth: 16
   features: 16384
   pointwise_features: 4096
   sequence: 256

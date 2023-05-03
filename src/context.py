@@ -178,8 +178,6 @@ class Context(DataClass):
         self.prng_key = random.PRNGKey(self.seed)
         self.is_initializing = False
         self.fail_on_missing_parameter = True
-        self.add_depth = False
-        self.depth = 0
 
     def add_to_prefix(self, appended="", count=True):
         new = copy.copy(self)
