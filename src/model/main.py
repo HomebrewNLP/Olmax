@@ -68,10 +68,10 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> jax.Array:
     carry = ((ctx.parameters, *dense0, *dense1, *sparse), jnp.zeros((2,)))
 
     if ctx.is_initializing:
-        ctx.parameters, *src = block(ctx)(carry, (src, tgt, jnp.zeros([], dtype=jnp.int32)))
+        ctx.parameters, *src = block(ctx)(carry, (src[:, 0], tgt[:, 0], jnp.zeros([], dtype=jnp.int32)))
         return src
 
-    (_, loss), _ = lax.scan(block(ctx), carry, (src, tgt, jnp.arange(ctx.dims.sequence)), ctx.dims.sequence)
+    (_, loss), _ = lax.scan(block(ctx), carry, (src.transpose(1, 0), tgt.transpose(1, 0), jnp.arange(ctx.dims.sequence)), ctx.dims.sequence)
     return loss
 
 

@@ -8,7 +8,7 @@ data:
   seed: 0
   shuffle_buffer_gb: 0
 dims:
-  batch: 256
+  batch: 8
   features: 16384
   pointwise_features: 4096
   sequence: 256
