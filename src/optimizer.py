@@ -96,7 +96,7 @@ def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
         parameter_lr = lr * ctx.parameter_variance.get(param_name, 1)
 
         grad = grad.astype(jnp.float64)
-        noise = jax.random.normal(jax.random.PRNGKey(step + name_hash), grad.shape, grad.dtype)
+        noise = jax.random.normal(jax.random.PRNGKey(step.astype(jnp.int64) + name_hash), grad.shape, grad.dtype)
         noise *= ctx.optimizer.gradient_noise_factor * grad.std()
         grad += noise
         grad = adaptive_gradient_clipping(ctx, param_name, grad, False)
