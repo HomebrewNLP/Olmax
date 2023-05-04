@@ -97,7 +97,7 @@ def update(ctx: Context, grads: Dict[str, jax.Array], step: jax.Array):
 
         grad = grad.astype(jnp.float64)
         noise = jax.random.normal(jax.random.PRNGKey(step + name_hash), grad.shape, grad.dtype)
-        noise *= ctx.optimizer.gradient_noise_factor * grad.std
+        noise *= ctx.optimizer.gradient_noise_factor * grad.std()
         grad += noise
         grad = adaptive_gradient_clipping(ctx, param_name, grad, step, False)
         weight_update = laprop(ctx, param_name, grad, step) * parameter_lr
