@@ -64,7 +64,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
                 x0, vals = x0
                 y_sparse = at_sparse(y_sparse, keys).add(-vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys.reshape(*keys.shape, 1), 1)
-                d_params, dx0, _ = grad_fn((dy1, sparse_items.reshape(ctx.dims.batch, -1)))
+                d_params, dx0, _ = grad_fn((dy1, sparse_items.reshape(*vals.shape)))
             elif sparse_access == SparseAccess.read:
                 d_params, dx0, (dsparse, *_) = grad_fn(dy1)
                 dy_sparse = dy_sparse + dsparse  # TODO: Find a way to get the sparse gradients and scatter-add manually
