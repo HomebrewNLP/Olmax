@@ -95,4 +95,4 @@ def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
     dense0, scatter_values, gates = out
     idx, val = pos_and_scale(ctx, gates)
 
-    return dense0, idx, scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val
+    return dense0, scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val, idx
