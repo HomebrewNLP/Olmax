@@ -108,7 +108,7 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
     transform_fns.extend([(lambda x: x, lambda x: x)] * (len(out_features) - len(transform_fns)))
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     scale = get_param(ctx, "scale", [in_features], std=0, mean=1, dtype=run_type)
-    weights = [get_param(ctx, f"weight{i}", [o, in_features], column_axes=2) for i, o in enumerate(out_features)]
+    weights = [get_param(ctx, f"weight{i}", [o, in_features]) for i, o in enumerate(out_features)]
 
     if ctx.is_initializing:
         if len(out_features) == 1:
@@ -131,7 +131,7 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
                                       norm_out, bw_out)
             return dx, d_scl, d_wgt
 
-        return [matmul(fn[0](out), w) for fn, w in zip(transform_fns, wgt)], _grad
+        return [dot(fn[0](out), w, -1, -1) for fn, w in zip(transform_fns, wgt)], _grad
 
     out = _fn(inp, scale, weights)
     if len(out) == 1:
