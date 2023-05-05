@@ -35,12 +35,14 @@ def loss_fn(ctx: Context, src: REVERSIBLE_CTX, tgt: jax.Array) -> Tuple[REVERSIB
     return _fn(src, tgt, wgt)
 
 
+SIX_ARRAYS = Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]
+
+
 @with_context()
 def block(ctx: Context):
     name_cache = ctx.name_cache
 
-    def _fn(src: Tuple[Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array], jax.Array],
-            inp: Tuple[jax.Array, jax.Array, jax.Array]):
+    def _fn(src: Tuple[SIX_ARRAYS, jax.Array], inp: Tuple[jax.Array, jax.Array, jax.Array]):
         inp, tgt, position = inp
         src, original_loss = src
         src = (ctx.parameters, *src)
@@ -62,6 +64,16 @@ def batch_embedding(ctx: Context, name: str, *shape: int) -> Tuple[jax.Array, ja
     return param, jnp.zeros_like(param)
 
 
+@jax.custom_gradient
+def reversible_output(x: SIX_ARRAYS, loss: jax.Array) -> jax.Array:
+    x0, _, x1, _, x2, _ = x
+
+    def _grad(dy):
+        return (jnp.zeros_like(x0), x0, jnp.zeros_like(x1), x1, jnp.zeros_like(x2), x2), dy
+
+    return loss, _grad
+
+
 @with_context()
 def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax.Array, jax.Array]]:
     dense0 = batch_embedding(ctx, "dense0", ctx.dims.features)
@@ -75,7 +87,8 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax
         ctx.parameters, *src = block(ctx)(carry, (src[0], tgt[0], jnp.zeros([], dtype=jnp.int32)))
         return
 
-    (_, loss), _ = lax.scan(block(ctx), carry, (src, tgt, jnp.arange(ctx.dims.sequence)))
+    (out, loss), _ = lax.scan(block(ctx), carry, (src, tgt, jnp.arange(ctx.dims.sequence)))
+    loss = reversible_output(out, loss)
     return loss[0], loss[1]
 
 
