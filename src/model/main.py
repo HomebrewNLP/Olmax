@@ -25,15 +25,12 @@ def loss_fn(ctx: Context, src: REVERSIBLE_CTX, tgt: jax.Array) -> Tuple[REVERSIB
 
     @jax.custom_gradient
     def _fn(inp: REVERSIBLE_CTX, tgt: jax.Array, p: jax.Array):
-        def _grad(dy):
-            rev_ctx, d_loss = dy
-            rev_ctx: REVERSIBLE_CTX = rev_ctx
-            d_loss: jax.Array = d_loss
+        def _grad(rev_ctx: REVERSIBLE_CTX, d_loss: jax.Array):
             d_params, dx0, x0, dx1, x1, d_sparse, sparse = rev_ctx
-            dx, _, d_p = jax.vjp(_xent, x0 + x1, tgt, p)[1](d_loss[0])
+            dx, _, d_p = jax.vjp(_xent, x0 + x1, tgt, p, has_aux=True)[1](d_loss[0])
             return (d_params, dx0 + dx, x0, dx1 + dx, x1, d_sparse, sparse), None, d_p
 
-        return (inp, _xent(inp[1] + inp[3], tgt, p)), _grad
+        return inp, _xent(inp[1] + inp[3], tgt, p), _grad
 
     return _fn(src, tgt, wgt)
 
@@ -74,7 +71,9 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> jax.Array:
         ctx.parameters, *src = block(ctx)(carry, (src[:, 0], tgt[:, 0], jnp.zeros([], dtype=jnp.int32)))
         return src
 
-    (_, loss), _ = lax.scan(block(ctx), carry, (src.transpose(1, 0), tgt.transpose(1, 0), jnp.arange(ctx.dims.sequence)), ctx.dims.sequence)
+    (_, loss), _ = lax.scan(block(ctx), carry,
+                            (src.transpose(1, 0), tgt.transpose(1, 0), jnp.arange(ctx.dims.sequence)),
+                            ctx.dims.sequence)
     return loss
 
 

@@ -69,6 +69,6 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
 
         loss = lax.psum(loss, ParallelAxes.model)
         acc = lax.psum(acc, ParallelAxes.model)
-        return jnp.stack([loss, acc]).reshape(-1), _grad
+        return loss, acc, _grad
 
     return _fn  # _fn(src, outer_tgt, param)
