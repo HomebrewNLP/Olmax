@@ -30,7 +30,7 @@ def loss_fn(ctx: Context, src: REVERSIBLE_CTX, tgt: jax.Array) -> Tuple[REVERSIB
             dx, _, d_p = jax.vjp(_xent, x0 + x1, tgt, p, has_aux=True)[1](d_loss[0])
             return (d_params, dx0 + dx, x0, dx1 + dx, x1, d_sparse, sparse), None, d_p
 
-        return inp, _xent(inp[1] + inp[3], tgt, p), _grad
+        return inp, jnp.stack(_xent(inp[1] + inp[3], tgt, p)), _grad
 
     return _fn(src, tgt, wgt)
 
@@ -61,7 +61,7 @@ def batch_embedding(ctx: Context, name: str, *shape: int) -> Tuple[jax.Array, ja
 
 
 @with_context()
-def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> jax.Array:
+def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Tuple[jax.Array, jax.Array]:
     dense0 = batch_embedding(ctx, "dense0", ctx.dims.features)
     dense1 = batch_embedding(ctx, "dense1", ctx.dims.features)
     sparse = batch_embedding(ctx, "sparse", ctx.dims.memory_slots, ctx.dims.memory_features)
@@ -74,10 +74,10 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> jax.Array:
     (_, loss), _ = lax.scan(block(ctx), carry,
                             (src.transpose(1, 0), tgt.transpose(1, 0), jnp.arange(ctx.dims.sequence)),
                             ctx.dims.sequence)
-    return loss
+    return loss[0], loss[1]
 
 
-def compute(params: Dict[str, jax.Array], inp: jax.Array) -> jax.Array:
+def compute(params: Dict[str, jax.Array], inp: jax.Array) -> Tuple[jax.Array, jax.Array]:
     ctx = Context()
     ctx.parameters = params
     src, tgt = inp
