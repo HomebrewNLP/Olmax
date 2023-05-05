@@ -38,13 +38,12 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
-        print(sparse_access, sparse_access == SparseAccess.read, len(inner_args))
         out = fn(new_ctx, inp, *inner_args)
         ctx.name_cache = new_ctx.name_cache
         return out
 
     @jax.custom_gradient
-    def _fn(inputs: REVERSIBLE_CTX, *inner_args: jax.Array):
+    def _fn(inputs: REVERSIBLE_CTX, inner_args: jax.Array):
         params, x0, _dx0, x1, _dx1, sparse, d_sparse = inputs
 
         def _grad(dy):
