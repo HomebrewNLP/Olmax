@@ -66,7 +66,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
 
         out = base(params, x1, *(sparse,) * (sparse_access == SparseAccess.read), *inner_args)
         if sparse_access == SparseAccess.write:
-            out, vals, keys = out
+            out, keys, vals = out
             sparse = sparse.at[jnp.arange(keys.size).reshape(keys.shape) // ctx.dims.memory_slots, keys].add(vals)
         elif sparse_access == SparseAccess.read:
             out, keys = out
