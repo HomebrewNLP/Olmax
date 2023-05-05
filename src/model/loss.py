@@ -14,7 +14,7 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - one_hot(target) + softmax(x) * logsumexp(x) * z_loss
     devices = jax.device_count()
-    total_items = ctx.dims.batch * ctx.dims.sequence
+    total_items = ctx.dims.batch
     steps = ctx.dims.vocab // 128
     step_batch = total_items // steps
     local_batch = step_batch // devices
@@ -59,8 +59,7 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
                 jnp.zeros((), dtype=jnp.float64))
         (d_wgt, loss, acc), dx = lax.scan(_slice_fn, init, (inp, tgt))
 
-        dx = dx.transpose(0, 2, 1)  # [Steps, Features, StepBatch] -> [Steps, StepBatch, Features]
-        dx = dx.reshape(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
+        dx = dx.reshape(ctx.dims.batch, ctx.dims.features)
         d_wgt = d_wgt.transpose(1, 0)  # [Vocab, Features]  ->  [Features, Vocab]
 
         def _grad(dy: Tuple[jax.Array, None]) -> Tuple[jax.Array, None, jax.Array]:
