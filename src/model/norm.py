@@ -68,7 +68,7 @@ def norm_backward(src: jax.Array, wgt: jax.Array, std: jax.Array, dy: jax.Array,
 
 @with_context()
 def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
-                   weight: Union[bool, None, Tuple[jax.Array, jax.Array]] = None, act: bool = True, dim: int = 2,
+                   weight: Union[bool, None, Tuple[jax.Array, jax.Array]] = None, act: bool = True, dim: int = -1,
                    double: bool = False) -> jax.Array:
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     if weight is None:
@@ -80,6 +80,8 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
 
     if ctx.is_initializing:
         return inp
+
+    dim = dim % inp.ndim
 
     @jax.custom_gradient
     def _fn(src: jax.Array, wgt: jax.Array):
