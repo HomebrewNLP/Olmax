@@ -3,7 +3,7 @@ from typing import Tuple
 import jax
 from jax import numpy as jnp, lax
 
-from src.backend import matmul, get_param, with_context
+from src.backend import dot, get_param, with_context
 from src.constants import ParallelAxes
 from src.context import Context
 from src.model.norm import scale_norm_act, scale_norm_act_linear
@@ -11,11 +11,11 @@ from src.model.norm import scale_norm_act, scale_norm_act_linear
 
 @with_context()
 def linear(ctx: Context, inp: jax.Array, in_features: int, out_features: int):
-    weight = get_param(ctx, "conv_weight", [out_features, in_features], column_axes=2)
+    weight = get_param(ctx, "conv_weight", [out_features, in_features])
     if ctx.is_initializing:
         return jnp.zeros(inp.shape[:-1] + (out_features,), dtype=inp.dtype)
 
-    return matmul(inp, weight)
+    return dot(inp, weight, -1, -1)
 
 
 @jax.custom_gradient
@@ -28,8 +28,7 @@ def all2all(inp):
 
 @with_context()
 def input_embed(ctx: Context, inp: jax.Array, dim: int) -> jax.Array:
-    param = get_param(ctx, "inp_embd", [dim, ctx.dims.pointwise_features],
-                      std=1 / ctx.dims.pointwise_features)
+    param = get_param(ctx, "inp_embd", [dim, ctx.dims.pointwise_features], std=1 / ctx.dims.pointwise_features)
 
     def _fn(src, wgt):
         return jnp.take(wgt, src, 0)
@@ -56,8 +55,7 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
 
 
 @with_context()
-def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Array, *out: int
-             ) -> Tuple[jax.Array, ...]:
+def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Array, *out: int) -> Tuple[jax.Array, ...]:
     token_embedding = input_embed(ctx, token, ctx.dims.vocab)
     position_embedding = input_embed(ctx, position, ctx.dims.sequence)
     dense = linear(ctx, dense, ctx.dims.features, ctx.dims.pointwise_features)
@@ -66,8 +64,8 @@ def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Arr
 
 
 @with_context()
-def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, position: jax.Array
-         ) -> Tuple[jax.Array, jax.Array]:
+def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, position: jax.Array) -> Tuple[
+    jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
@@ -84,14 +82,13 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
 
 
 @with_context()
-def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
-          ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array) -> Tuple[
+    jax.Array, jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
     dense_parallel = scale_norm_act_linear(ctx, dense1, ctx.dims.features, ctx.dims.pointwise_features, act=False)
-    offset0, offset1 = input_fn(ctx, token, position, dense1,
-                                ctx.dims.pointwise_features, ctx.dims.pointwise_features)
+    offset0, offset1 = input_fn(ctx, token, position, dense1, ctx.dims.pointwise_features, ctx.dims.pointwise_features)
 
     out = scale_norm_act_linear(ctx, dense_parallel + offset0 + offset1, ctx.dims.pointwise_features,
                                 [ctx.dims.features, total_read, gate_sqrt * 2 * ctx.dims.memory_heads])
