@@ -56,8 +56,7 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
         def _slice_fn(carry, x):
             return _xent_slice(carry, x, wgt)
 
-        init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros(wgt.shape[::-1]), jnp.zeros((), dtype=jnp.float64),
-                jnp.zeros((), dtype=jnp.float64))
+        init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
         (d_wgt, loss, acc), dx = lax.scan(_slice_fn, init, (inp, tgt))
 
         dx = dx.reshape(ctx.dims.batch, ctx.dims.features)
