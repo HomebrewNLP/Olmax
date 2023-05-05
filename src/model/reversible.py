@@ -8,7 +8,7 @@ from src.constants import SparseAccess
 from src.context import Context
 
 REVERSIBLE_CTX = Tuple[Dict[str, jax.Array], jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]
-Output = Union[jax.Array, Tuple[jax.Array, jax.Array], Tuple[jax.Array, jax.Array, jax.Array]]
+Output = Union[jax.Array, Tuple[Union[jax.Array, Tuple[jax.Array, jax.Array]], jax.Array]]
 ReversibleFn = Callable[[Context, jax.Array, jax.Array, jax.Array], Output]
 FourArrays = Tuple[jax.Array, jax.Array, jax.Array, jax.Array]
 
@@ -40,6 +40,8 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         new_ctx.parameters = params
         out = fn(new_ctx, inp, *inner_args)
         ctx.name_cache = new_ctx.name_cache
+        if sparse_access == SparseAccess.write:
+            return (out[0], out[1]), out[2]
         return out
 
     @jax.custom_gradient
@@ -48,14 +50,17 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
 
         def _grad(dy):
             d_params_old, dy0, y0, dy1, y1, dy_sparse, y_sparse = dy
-            x0, grad_fn = jax.vjp(base, params, y0, [*(y_sparse,) * (sparse_access == SparseAccess.read), *inner_args])
+            x0, grad_fn, *keys = jax.vjp(base, params, y0,
+                                         [*(y_sparse,) * (sparse_access == SparseAccess.read), *inner_args],
+                                         has_aux=sparse_access in (SparseAccess.read, SparseAccess.write))
+            if sparse_access in (SparseAccess.read, SparseAccess.write):
+                keys = keys[0]
             if sparse_access == SparseAccess.write:
-                x0, keys, vals = x0
+                x0, vals = x0
                 y_sparse = y_sparse.at[jnp.arange(keys.size) // ctx.dims.memory_slots, keys].sub(vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys, 1).reshape(ctx.dims.batch, -1)
                 d_params, dx0, _ = grad_fn((dy1, jnp.zeros_like(keys), sparse_items))
             elif sparse_access == SparseAccess.read:
-                x0, keys = x0
                 d_params, dx0, (dsparse, *_) = grad_fn((dy1, jnp.zeros_like(keys)))
                 dy_sparse = dy_sparse.at[jnp.arange(keys.size) // ctx.dims.memory_slots, keys].add(dsparse)
             else:
@@ -65,7 +70,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
 
         out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
-            out, keys, vals = out
+            (out, vals), keys = out
             sparse = sparse.at[jnp.arange(keys.size).reshape(keys.shape) // ctx.dims.memory_slots, keys].add(vals)
         elif sparse_access == SparseAccess.read:
             out, keys = out
