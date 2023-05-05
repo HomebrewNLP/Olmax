@@ -51,7 +51,7 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
     idx = jnp.einsum("bhpk,p->bhk", idx, jnp.array([1, gate_sqrt]))
     values = values.prod(-2, keepdims=True) * denominator
     # [Batch Slots MemoryFeatures] [Batch Heads TopK] -> [Batch, Heads * TopK, MemoryFeatures]
-    return idx.reshape(ctx.dims.batch, -1, 1), values.reshape(ctx.dims.batch, -1, 1)
+    return idx, values.reshape(ctx.dims.batch, -1, 1)
 
 
 @with_context()
@@ -72,7 +72,7 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
     offset1, offset0, gates = input_fn(ctx, token, position, dense0, ctx.dims.features, ctx.dims.pointwise_features,
                                        gate_sqrt * 2 * ctx.dims.memory_heads)
     idx, val = pos_and_scale(ctx, gates)
-    inp = (jnp.take_along_axis(sparse, idx, 1) * val).reshape(ctx.dims.batch, total_read)
+    inp = (jnp.take_along_axis(sparse, idx.reshape(ctx.dims.batch, -1, 1), 1) * val).reshape(ctx.dims.batch, total_read)
 
     inp = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.pointwise_features)
     inp0 = scale_norm_act_linear(ctx, inp + offset0, ctx.dims.pointwise_features, ctx.dims.features)
