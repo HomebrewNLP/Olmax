@@ -62,7 +62,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
                 keys = keys[0]
             if sparse_access == SparseAccess.write:
                 x0, vals = x0
-                y_sparse = at_sparse(y_sparse, keys).sub(vals)
+                y_sparse = at_sparse(y_sparse, keys).add(-vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys, 1).reshape(ctx.dims.batch, -1)
                 d_params, dx0, _ = grad_fn((dy1, sparse_items))
             elif sparse_access == SparseAccess.read:
