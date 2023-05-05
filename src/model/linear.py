@@ -48,7 +48,7 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
     gates = lax.exp(gates)
     denominator = lax.reciprocal(gates.sum(-1, keepdims=True)).prod(-2, keepdims=True)
     values, idx = lax.top_k(gates, ctx.dims.memory_slots_per_head)  # along last axis
-    idx = jnp.einsum("bhpk,p->bhk", idx, jnp.array([1, gate_sqrt]))
+    idx = idx[:, 0] + idx[:, 1] * gate_sqrt
     values = values.prod(-2, keepdims=True) * denominator
     # [Batch Slots MemoryFeatures] [Batch Heads TopK] -> [Batch, Heads * TopK, MemoryFeatures]
     return idx.reshape(ctx.dims.batch, -1), values.reshape(ctx.dims.batch, -1, 1)
