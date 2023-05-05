@@ -15,7 +15,6 @@ class WandbLog:
         self.device_steps = device_steps
         self.param_count = param_count
         self.tokens_per_step = tokens_per_step
-        self.first_step = None
 
     def _log(self, prefix: str, value: float, sizes: List[int]):
         scalars = self.scalars[prefix]
@@ -28,9 +27,7 @@ class WandbLog:
 
     def __call__(self, wctx: WhileTrainContext, step: int, current_lr) -> bool:
         rate = self.device_steps / (time.time() - self.previous_step_time)
-        if self.first_step is None:
-            self.first_step = step - self.device_steps
-            self.previous_step_time = time.time()
+        self.previous_step_time = time.time()
 
         ctx = wctx.ctx
         sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
