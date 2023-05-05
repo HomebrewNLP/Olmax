@@ -10,13 +10,14 @@ from src.context import Context
 
 
 def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Array, jax.Array], jax.Array]:
+    # TODO: This forces ctx.dims.batch to be divisible by jax.device_count(). Dependence has to be removed.
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
     # -> softmax(x) - one_hot(target) + softmax(x) * logsumexp(x) * z_loss
     devices = jax.device_count()
     total_items = ctx.dims.batch
-    steps = ctx.dims.vocab // 128
-    step_batch = total_items // steps
+    steps = 1
+    step_batch = total_items
     local_batch = step_batch // devices
 
     def _xent_slice(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
