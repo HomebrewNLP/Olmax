@@ -62,7 +62,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
                 d_params, dx0, *_ = grad_fn(dy1)
                 dx0, *_ = dx0
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
-            return (d_params, dy1, y1 - x0, dx0 + dy0, y0, dy_sparse, y_sparse), (None,) * len(inner_args)
+            return (d_params, dy1, y1 - x0, dx0 + dy0, y0, dy_sparse, y_sparse), [jnp.zeros_like(a) for a in args]
 
         out = base(params, x1, *(sparse,) * (sparse_access == SparseAccess.read), *inner_args)
         if sparse_access == SparseAccess.write:
@@ -73,7 +73,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         out = x0 + out
         return (params, x1, x1, out, out, sparse, sparse), _grad
 
-    return _fn(src, args)
+    return _fn(src, list(args))
 
 
 def revnet_out(src: FourArrays) -> jax.Array:
