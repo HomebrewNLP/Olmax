@@ -38,6 +38,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
+        print(sparse_access, sparse_access == SparseAccess.read, len(inner_args))
         out = fn(new_ctx, inp, *inner_args)
         ctx.name_cache = new_ctx.name_cache
         return out
