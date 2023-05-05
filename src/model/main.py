@@ -26,11 +26,11 @@ def loss_fn(ctx: Context, src: REVERSIBLE_CTX, tgt: jax.Array) -> Tuple[REVERSIB
     @jax.custom_gradient
     def _fn(inp: REVERSIBLE_CTX, tgt: jax.Array, p: jax.Array):
         def _grad(rev_ctx: REVERSIBLE_CTX, d_loss: jax.Array):
-            dx0, x0, dx1, x1, d_sparse, sparse = rev_ctx
+            d_params, dx0, x0, dx1, x1, d_sparse, sparse = rev_ctx
             dx, _, d_p = jax.vjp(_xent, x0 + x1, tgt, p)[1](d_loss[0])
-            return (dx0 + dx, x0, dx1 + dx, x1, d_sparse, sparse), None, d_p
+            return (d_params, dx0 + dx, x0, dx1 + dx, x1, d_sparse, sparse), None, d_p
 
-        return (inp, _xent(inp[0] + inp[2], tgt, p)), _grad
+        return (inp, _xent(inp[1] + inp[3], tgt, p)), _grad
 
     return _fn(src, tgt, wgt)
 
