@@ -9,7 +9,7 @@ from src.context import WhileTrainContext
 
 class WandbLog:
     def __init__(self, run, device_steps: int, param_count: int, tokens_per_step: int):
-        self.start_time = time.time()
+        self.previous_step_time = time.time()
         self.run = run
         self.scalars = collections.defaultdict(list)
         self.device_steps = device_steps
@@ -27,9 +27,10 @@ class WandbLog:
         return items
 
     def __call__(self, wctx: WhileTrainContext, step: int, current_lr) -> bool:
+        rate = self.device_steps / (time.time() - self.previous_step_time)
         if self.first_step is None:
             self.first_step = step - self.device_steps
-        rate = (step - self.first_step) / (time.time() - self.start_time)
+            self.previous_step_time = time.time()
 
         ctx = wctx.ctx
         sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
