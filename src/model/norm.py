@@ -3,7 +3,7 @@ from typing import Tuple, Optional, Union, Callable, List
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, promote_to, stable_rsqrt, with_context, matmul
+from src.backend import get_param, promote_to, stable_rsqrt, with_context, dot
 from src.context import Context
 from src.model.activate import activate_forward, activate_grad
 
@@ -117,6 +117,9 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
 
     dim = inp.ndim - 1
 
+    def _mm(x, w):
+        return dot(x, w, -1, -1)
+
     @jax.custom_gradient
     def _fn(src: jax.Array, scl: jax.Array, wgt: jax.Array):
         scl = scl.reshape((1,) * dim + (-1,))
@@ -126,12 +129,12 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
             if len(weights) == 1:
                 dy = [dy]
             out2, norm_out, bw_out, src_fp64, _ = norm_forward(ctx, src, scl, True, dim, False, std)
-            dy, d_wgt = zip(*[jax.vjp(matmul, out2, w)[1](fn[1](dy)) for fn, w, dy in zip(transform_fns, wgt, dy)])
+            dy, d_wgt = zip(*[jax.vjp(_mm, out2, w)[1](fn[1](dy)) for fn, w, dy in zip(transform_fns, wgt, dy)])
             dx, d_scl = norm_backward(src, scl, std, sum(dy), act, dim, False, scale.shape, run_type, src_fp64,
                                       norm_out, bw_out)
             return dx, d_scl, d_wgt
 
-        return [dot(fn[0](out), w, -1, -1) for fn, w in zip(transform_fns, wgt)], _grad
+        return [_mm(fn[0](out), w) for fn, w in zip(transform_fns, wgt)], _grad
 
     out = _fn(inp, scale, weights)
     if len(out) == 1:
