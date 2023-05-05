@@ -57,7 +57,7 @@ def norm_backward(src: jax.Array, wgt: jax.Array, std: jax.Array, dy: jax.Array,
     dx = dx.astype(src.dtype)
 
     if not isinstance(wgt, jax.Array):
-        return dx, None, None
+        return dx, None
 
     summed = list(range(src.ndim))
     del summed[dim]
