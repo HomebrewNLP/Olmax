@@ -52,7 +52,7 @@ def block(ctx: Context):
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src
-        return (src[1:], original_loss + loss), None
+        return (src[1:], original_loss + loss / ctx.dims.sequence), None
 
     return _fn
 
