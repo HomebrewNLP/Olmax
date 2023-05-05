@@ -68,6 +68,8 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         if sparse_access == SparseAccess.write:
             out, vals, keys = out
             sparse = sparse.at[jnp.arange(keys.size) // ctx.dims.memory_slots, keys].add(vals)
+        elif sparse_access == SparseAccess.read:
+            out, keys = out
         out = x0 + out
         return (params, x1, x1, out, out, sparse, sparse), _grad
 
