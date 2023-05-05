@@ -34,7 +34,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
 
     name_cache = copy.deepcopy(ctx.name_cache)
 
-    def base(params: Dict[str, jax.Array], inp: jax.Array, *inner_args) -> Output:
+    def base(params: Dict[str, jax.Array], inp: jax.Array, inner_args) -> Output:
         ctx.name_cache = copy.deepcopy(name_cache)
         new_ctx = ctx.add_to_prefix("reversible")
         new_ctx.parameters = params
@@ -48,23 +48,22 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
 
         def _grad(dy):
             d_params_old, dy0, y0, dy1, y1, dy_sparse, y_sparse = dy
-            x0, grad_fn = jax.vjp(base, params, y0, *(y_sparse,) * (sparse_access == SparseAccess.read), *inner_args)
+            x0, grad_fn = jax.vjp(base, params, y0, [*(y_sparse,) * (sparse_access == SparseAccess.read), *inner_args])
             if sparse_access == SparseAccess.write:
                 x0, keys, vals = x0
                 y_sparse = y_sparse.at[jnp.arange(keys.size) // ctx.dims.memory_slots, keys].sub(vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys, 1).reshape(ctx.dims.batch, -1)
-                d_params, dx0, *_ = grad_fn((dy1, jnp.zeros_like(keys), sparse_items))
+                d_params, dx0, _ = grad_fn((dy1, jnp.zeros_like(keys), sparse_items))
             elif sparse_access == SparseAccess.read:
                 x0, keys = x0
-                d_params, dx0, dsparse, *_ = grad_fn((dy1, jnp.zeros_like(keys)))
+                d_params, dx0, (dsparse, *_) = grad_fn((dy1, jnp.zeros_like(keys)))
                 dy_sparse = dy_sparse.at[jnp.arange(keys.size) // ctx.dims.memory_slots, keys].add(dsparse)
             else:
-                d_params, dx0, *_ = grad_fn(dy1)
-                dx0, *_ = dx0
+                d_params, dx0, _ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
             return (d_params, dy1, y1 - x0, dx0 + dy0, y0, dy_sparse, y_sparse), [jnp.zeros_like(a) for a in args]
 
-        out = base(params, x1, *(sparse,) * (sparse_access == SparseAccess.read), *inner_args)
+        out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
             out, keys, vals = out
             sparse = sparse.at[jnp.arange(keys.size).reshape(keys.shape) // ctx.dims.memory_slots, keys].add(vals)
