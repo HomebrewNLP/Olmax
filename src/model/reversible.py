@@ -27,6 +27,11 @@ def _reversible_at_init(ctx: Context, fn: ReversibleFn, sparse_access: SparseAcc
     return new_ctx.parameters, x10, x11, out, x01, sparse, d_sparse
 
 
+def at_sparse(sparse, keys):
+    batch_size, memory_slots = keys.shape
+    return sparse.at[jnp.repeat(jnp.arange(batch_size)[:, None], memory_slots, 1), keys]
+
+
 def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src: REVERSIBLE_CTX,
                *args) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
@@ -57,12 +62,12 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
                 keys = keys[0]
             if sparse_access == SparseAccess.write:
                 x0, vals = x0
-                y_sparse = y_sparse.at[jnp.arange(keys.size) // ctx.dims.memory_slots, keys].sub(vals)
+                y_sparse = at_sparse(y_sparse, keys).sub(vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys, 1).reshape(ctx.dims.batch, -1)
                 d_params, dx0, _ = grad_fn((dy1, sparse_items))
             elif sparse_access == SparseAccess.read:
                 d_params, dx0, (dsparse, *_) = grad_fn(dy1)
-                dy_sparse = dy_sparse.at[jnp.arange(keys.size) // ctx.dims.memory_slots, keys].add(dsparse)
+                dy_sparse = at_sparse(dy_sparse, keys).add(dsparse)
             else:
                 d_params, dx0, _ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
@@ -71,7 +76,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
             (out, vals), keys = out
-            sparse = sparse.at[jnp.arange(keys.size).reshape(keys.shape) // ctx.dims.memory_slots, keys].add(vals)
+            sparse = at_sparse(sparse, keys).add(vals)
         elif sparse_access == SparseAccess.read:
             out, keys = out
         out = x0 + out
