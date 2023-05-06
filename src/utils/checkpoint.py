@@ -7,6 +7,7 @@ import functools
 import io
 import json
 import multiprocessing
+import os
 import re
 import subprocess
 import time
@@ -24,7 +25,12 @@ from src.context import Context, WhileTrainContext
 UPLOAD_RETRIES = 8
 WCTX_VALUES = ("scalars", "current_step")
 TMP_PATH_ADDON = "_____TEMPORARY"
-GSUTIL_PATH = "/snap/bin/gsutil"
+for path in ['/opt/google-cloud-sdk/bin/gsutil', '/snap/bin/gsutil']:
+    if os.path.exists(path):
+        GSUTIL_PATH = path
+        break
+else:
+    GSUTIL_PATH = "gsutil"  # fallback. preferably we use known/trusted path
 
 
 def log(arg: str, verbose: bool):
