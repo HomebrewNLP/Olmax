@@ -46,10 +46,21 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
     gates = scale_norm_act(ctx, gates, gate_sqrt, act=False)
     gates -= lax.stop_gradient(gates.max(-1, keepdims=True).sum(-2, keepdims=True))
     gates = lax.exp(gates)
-    denominator = lax.reciprocal(gates.sum(-1, keepdims=True)).prod(-2, keepdims=True)
+    denominator = lax.reciprocal(gates.sum(-1, keepdims=True))
     values, idx = lax.top_k(gates, ctx.dims.memory_slots_per_head)  # along last axis
-    idx = idx[:, :, 0] + idx[:, :, 1] * gate_sqrt
-    values = values.prod(-2, keepdims=True) * denominator
+    values = values * denominator
+
+    if ctx.dims.memory_slots_per_head == 1:
+        idx = idx[:, :, 0] + idx[:, :, 1] * gate_sqrt
+        values = values.prod(-2, keepdims=True)
+    else:
+        idx = idx[:, :, 0, :, None] + idx[:, :, 1, None, :] * gate_sqrt
+        values = values[:, :, 0, :, None] + values[:, :, 1, None, :]
+        idx = idx.reshape(ctx.dims.batch, ctx.dims.memory_heads, ctx.dims.memory_slots_per_head ** 2)
+        values = values.reshape(ctx.dims.batch, ctx.dims.memory_heads, ctx.dims.memory_slots_per_head ** 2)
+        new_idx, values = lax.top_k(values, ctx.dims.memory_slots_per_head)
+        idx = jnp.take_along_axis(idx, new_idx, 2)
+
     # [Batch Slots MemoryFeatures] [Batch Heads TopK] -> [Batch, Heads * TopK, MemoryFeatures]
     return idx.reshape(ctx.dims.batch, -1), values.reshape(ctx.dims.batch, -1, 1)
 
@@ -74,9 +85,9 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
     idx, val = pos_and_scale(ctx, gates)
     inp = (jnp.take_along_axis(sparse, idx.reshape(*idx.shape, 1), 1) * val).reshape(ctx.dims.batch, total_read)
 
-    inp = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.pointwise_features)
+    inp = scale_norm_act_linear(ctx, inp, total_read, ctx.dims.pointwise_features, act=False)
     inp0 = scale_norm_act_linear(ctx, inp + offset0, ctx.dims.pointwise_features, ctx.dims.features)
-    inp1 = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, ctx.dims.features, act=False)
+    inp1 = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, ctx.dims.features)
 
     return offset1 + inp0 + inp1, idx
 
