@@ -30,7 +30,7 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         def _grad(dy: Tuple[Tuple[jax.Array, jax.Array], jax.Array]):
             (dx, x), d_loss = dy
             dx, _, d_p = jax.vjp(_xent, x, tgt, p, has_aux=True)[1](d_loss[0])
-            return (dx, x), None, d_p
+            return dx, x, None, d_p
 
         return ((x, _dx), jnp.stack(_xent(x, tgt, p))), _grad
 
