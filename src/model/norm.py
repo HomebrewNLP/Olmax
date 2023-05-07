@@ -129,10 +129,9 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
 
         def _grad(dy: jax.Array) -> Tuple[jax.Array, jax.Array, List[jax.Array]]:
             out2, norm_out, bw_out, src_fp64, _ = norm_forward(ctx, src, scl, True, dim, False, std)
-            dy, d_wgt = zip(*[jax.vjp(lambda x, y: _mm(fn(x), y), out2, w)[1](tmp)
-                              for fn, w, tmp in zip(transform_fns, wgt, dy)])
-            dx, d_scl = norm_backward(src, scl, std, sum(dy), act, dim, False, scale.shape, run_type, src_fp64,
-                                      norm_out, bw_out)
+            dy, d_wgt = jax.vjp(lambda x, y: [_mm(fn(x), b) for fn, b in zip(transform_fns, y)], out2, wgt)[1](dy)
+            dx, d_scl = norm_backward(src, scl, std, dy, act, dim, False, scale.shape, run_type, src_fp64, norm_out,
+                                      bw_out)
             return dx, d_scl, list(d_wgt)
 
         return [_mm(fn(out), w) for fn, w in zip(transform_fns, wgt)], _grad
