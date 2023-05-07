@@ -58,7 +58,7 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
         values = values[:, :, 0, :, None] + values[:, :, 1, None, :]
         idx = idx.reshape(ctx.dims.batch, ctx.dims.memory_heads, ctx.dims.memory_slots_per_head ** 2)
         values = values.reshape(ctx.dims.batch, ctx.dims.memory_heads, ctx.dims.memory_slots_per_head ** 2)
-        new_idx, values = lax.top_k(values, ctx.dims.memory_slots_per_head)
+        values, new_idx = lax.top_k(values, ctx.dims.memory_slots_per_head)
         idx = jnp.take_along_axis(idx, new_idx, 2)
 
     # [Batch Slots MemoryFeatures] [Batch Heads TopK] -> [Batch, Heads * TopK, MemoryFeatures]
