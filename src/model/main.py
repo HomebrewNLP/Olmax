@@ -9,9 +9,10 @@ from src.context import Context
 from src.model.linear import read, write
 from src.model.loss import cross_entropy_loss
 from src.model.norm import scale_norm_act
-from src.model.reversible import reversible, REVERSIBLE_CTX
+from src.model.reversible import reversible
 
 SIX_ARRAYS = Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]
+
 
 @with_context()
 def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, jax.Array]:
@@ -25,17 +26,16 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         return xent(scale_norm_act(ctx, x, ctx.dims.features, act=False, weight=False), *args)
 
     @jax.custom_gradient
-    def _fn(inp: REVERSIBLE_CTX, tgt: jax.Array, p: jax.Array):
-        def _grad(dy: Tuple[REVERSIBLE_CTX, jax.Array]):
-            (dx0, x0, dx1, x1, d_sparse, sparse), d_loss = dy
-            dx, _, d_p = jax.vjp(_xent, x0 + x1, tgt, p, has_aux=True)[1](d_loss[0])
-            return (dx0 + dx, x0, dx1 + dx, x1, d_sparse, sparse), None, d_p
+    def _fn(x: jax.Array, _dx: jax.Array, tgt: jax.Array, p: jax.Array):
+        def _grad(dy: Tuple[Tuple[jax.Array, jax.Array], jax.Array]):
+            (dx, x), d_loss = dy
+            dx, _, d_p = jax.vjp(_xent, x, tgt, p, has_aux=True)[1](d_loss[0])
+            return (dx, x), None, d_p
 
-        return (inp, jnp.stack(_xent(inp[0] + inp[2], tgt, p))), _grad
+        return ((x, _dx), jnp.stack(_xent(x, tgt, p))), _grad
 
-    return _fn(src, tgt, wgt)
-
-
+    (x1, dx1), loss = _fn(src[2], src[3], tgt, wgt)
+    return (src[0], src[1], x1, dx1, src[4], src[5]), loss
 
 
 @with_context()
