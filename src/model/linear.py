@@ -60,7 +60,7 @@ def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Arr
     position_embedding = input_embed(ctx, position, ctx.dims.sequence)
     dense = linear(ctx, dense, ctx.dims.features, ctx.dims.pointwise_features)
     return scale_norm_act_linear(ctx, token_embedding + position_embedding + dense, ctx.dims.pointwise_features,
-                                 list(out), [(all2all, all2all)])
+                                 list(out), [all2all])
 
 
 @with_context()

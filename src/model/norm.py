@@ -101,13 +101,13 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
 
 @with_context()
 def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_features: Union[int, List[int]],
-                          transform_fns: Optional[List[Tuple[Callable, Callable]]] = None, act: bool = True) -> Union[
-    jax.Array, Tuple[jax.Array, ...]]:
+                          transform_fns: Optional[List[Callable]] = None, act: bool = True
+                          ) -> Union[jax.Array, Tuple[jax.Array, ...]]:
     if isinstance(out_features, int):
         out_features = [out_features]
     if transform_fns is None:
         transform_fns = []
-    transform_fns.extend([(lambda x: x, lambda x: x)] * (len(out_features) - len(transform_fns)))
+    transform_fns.extend([lambda x: x] * (len(out_features) - len(transform_fns)))
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
     scale = get_param(ctx, "scale", [in_features], std=0, mean=1, dtype=run_type)
     weights = [get_param(ctx, f"weight{i}", [o, in_features]) for i, o in enumerate(out_features)]
@@ -129,8 +129,8 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
 
         def _grad(dy: jax.Array) -> Tuple[jax.Array, jax.Array, List[jax.Array]]:
             out2, norm_out, bw_out, src_fp64, _ = norm_forward(ctx, src, scl, True, dim, False, std)
-            dy, d_wgt = zip(*[jax.vjp(_mm, fn[0](out2), w)[1](tmp) for fn, w, tmp in zip(transform_fns, wgt, dy)])
-            dy = sum(fn[1](d) for fn, d in zip(transform_fns, dy))
+            dy, d_wgt = zip(*[jax.vjp(lambda x, y: _mm(fn[0](x), y), out2, w)[1](tmp)
+                              for fn, w, tmp in zip(transform_fns, wgt, dy)])
             dx, d_scl = norm_backward(src, scl, std, dy, act, dim, False, scale.shape, run_type, src_fp64, norm_out,
                                       bw_out)
             return dx, d_scl, list(d_wgt)
