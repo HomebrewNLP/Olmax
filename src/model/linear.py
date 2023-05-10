@@ -84,6 +84,7 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
                                        gate_sqrt * 2 * ctx.dims.memory_heads)
     idx, val = pos_and_scale(ctx, gates)
     inp = (jnp.take_along_axis(sparse, idx.reshape(*idx.shape, 1), 1) * val).reshape(ctx.dims.batch, total_read)
+    inp = jnp.zeros_like(inp)
 
     inp = linear(ctx, inp, total_read, ctx.dims.pointwise_features)
     inp0 = scale_norm_act_linear(ctx, inp + offset0, ctx.dims.pointwise_features, ctx.dims.features)
@@ -106,4 +107,4 @@ def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
     dense0, scatter_values, gates = out
     idx, val = pos_and_scale(ctx, gates)
 
-    return dense0, scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val, idx
+    return dense0, jnp.zeros_like(scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val), idx
