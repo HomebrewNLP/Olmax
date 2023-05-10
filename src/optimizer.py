@@ -70,7 +70,9 @@ def laprop(ctx: Context, param_name: str, grad: jax.Array, step: jax.Array) -> j
     if ctx.is_initializing:
         return grad
 
-    return graft(param_name, ema_g, lax.sign(ema_g))
+    if ctx.optimizer.graft_to_sign:
+        return graft(param_name, ema_g, lax.sign(ema_g))
+    return ema_g
 
 
 def get_current_lr(ctx: Context, step: jax.Array) -> jax.Array:

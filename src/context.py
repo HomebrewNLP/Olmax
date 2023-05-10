@@ -103,6 +103,7 @@ class WandB(DataClass):
 
 
 class Optimizer(DataClass):
+    graft_to_sign: bool = False
     momentum_dtype: str = "float32"
     momentum_type: str = "debiased"  # see src.constants.MomentumType for options
     epsilon: float = 1e-16
