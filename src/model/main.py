@@ -91,8 +91,9 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax
     name_cache = copy.deepcopy(ctx.name_cache)
     for i in range(ctx.dims.sequence):
         ctx.name_cache = copy.deepcopy(name_cache)
-        (carry, loss), _ = block(ctx)(carry, (src[i], tgt[i], jnp.full((), i, dtype=jnp.int32)))
-    loss = reversible_output(carry, loss)
+        carry, _ = block(ctx)(carry, (src[i], tgt[i], jnp.full((), i, dtype=jnp.int32)))
+    out, loss = carry
+    loss = reversible_output(out, loss)
     return loss[0], loss[1]
 
 
