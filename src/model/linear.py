@@ -84,11 +84,13 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
                                        gate_sqrt * 2 * ctx.dims.memory_heads)
     idx, val = pos_and_scale(ctx, gates)
     inp = (jnp.take_along_axis(sparse, idx.reshape(*idx.shape, 1), 1) * val).reshape(ctx.dims.batch, total_read)
-    inp = jnp.zeros_like(inp)
 
     inp = linear(ctx, inp, total_read, ctx.dims.pointwise_features)
+    inp = jnp.zeros_like(inp)
+
     inp0 = scale_norm_act_linear(ctx, inp + offset0, ctx.dims.pointwise_features, ctx.dims.features)
     inp1 = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, ctx.dims.features)
+    inp1 = jnp.zeros_like(inp1)
 
     return offset1 + inp0 + inp1, idx
 
