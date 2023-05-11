@@ -18,22 +18,16 @@ def linear(ctx: Context, inp: jax.Array, in_features: int, out_features: int):
     return dot(inp, weight, -1, -1)
 
 
-@jax.custom_gradient
 def all2all(inp):
-    def _grad(dy):
-        return lax.all_to_all(dy, ParallelAxes.model, inp.ndim - 1, inp.ndim - 1, tiled=True)
-
-    return lax.all_to_all(inp, ParallelAxes.model, inp.ndim - 1, inp.ndim - 1, tiled=True), _grad
+    out = out.reshape(*inp.shape[:-1], jax.device_count(), 1, -1)
+    out = lax.all_to_all(out, ParallelAxes.model, out.ndim - 3, out.ndim - 2, tiled=False)
+    return out.reshape(*inp.shape)
 
 
 @with_context()
 def input_embed(ctx: Context, inp: jax.Array, dim: int) -> jax.Array:
     param = get_param(ctx, "inp_embd", [dim, ctx.dims.pointwise_features], std=1 / ctx.dims.pointwise_features)
-
-    def _fn(src, wgt):
-        return jnp.take(wgt, src, 0)
-
-    return _fn(inp, param)
+    return jnp.take(param, inp, 0)
 
 
 @with_context()
