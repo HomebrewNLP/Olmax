@@ -19,7 +19,7 @@ def linear(ctx: Context, inp: jax.Array, in_features: int, out_features: int):
 
 
 def all2all(inp):
-    out = out.reshape(*inp.shape[:-1], jax.device_count(), 1, -1)
+    out = inp.reshape(*inp.shape[:-1], jax.device_count(), 1, -1)
     out = lax.all_to_all(out, ParallelAxes.model, out.ndim - 3, out.ndim - 2, tiled=False)
     return out.reshape(*inp.shape)
 
