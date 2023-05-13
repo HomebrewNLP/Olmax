@@ -79,6 +79,7 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         def _slice_fn_grad(carry, x):
             x, tgt_slice = x
             out, norm_out, multiplied, src_fp64, std = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
+            out = out.reshape(devices, local_batch, ctx.dims.features)
             dwgt, dx = _xent_slice_derivative(carry, (out, tgt_slice), wgt)
             dx, _ = norm_backward(x.reshape(dx.shape), 1, std, dx, False, x.ndim - 1, False, (), src_fp64.dtype)
             return dwgt, dx
@@ -91,7 +92,7 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
             prev_dx, x, d_loss = dy
             dy = d_loss[0]
             init = (jnp.zeros_like(wgt), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
-            dwgt, dx = lax.scan(_slice_fn_grad, init, (x.reshape(steps, devices, local_batch, ctx.dims.features), tgt))
+            dwgt, dx = lax.scan(_slice_fn_grad, init, (x.reshape(steps, step_batch, ctx.dims.features), tgt))
             dx = (dx.reshape(ctx.dims.batch, ctx.dims.features) * dy).astype(inp.dtype)
             dwgt = (dwgt * dy).astype(wgt.dtype)
             return dx + prev_dx, x, None, dwgt
