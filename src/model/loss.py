@@ -90,7 +90,7 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
             # dy == 1 since this is the last function before the output
             prev_dx, x, d_loss = dy
             dy = d_loss[0]
-            init = (jnp.zeros(wgt), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
+            init = (jnp.zeros_like(wgt), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
             dwgt, dx = lax.scan(_slice_fn_grad, init, (x.reshape(steps, devices, local_batch, ctx.dims.features), tgt))
             dx = (dx.reshape(ctx.dims.batch, ctx.dims.features) * dy).astype(inp.dtype)
             dwgt = (dwgt * dy).astype(wgt.dtype)
