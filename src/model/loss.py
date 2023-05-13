@@ -4,9 +4,11 @@ from typing import Tuple, Callable
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import device_id, matmul, promote_to
+from src.backend import device_id, matmul, promote_to, with_context, get_param, SIX_ARRAYS
 from src.constants import ParallelAxes
 from src.context import Context
+from src.model.norm import scale_norm_act
+
 
 
 def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Array, jax.Array], jax.Array]:
@@ -70,3 +72,27 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
         return (loss, acc), _grad
 
     return _fn  # _fn(src, outer_tgt, param)
+
+
+@with_context()
+def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, jax.Array]:
+    xent = cross_entropy_loss(ctx)
+    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
+
+    if ctx.is_initializing:
+        return src, jnp.zeros((2,))
+
+    def _xent(x, *args):
+        return xent(scale_norm_act(ctx, x, ctx.dims.features, act=False, weight=False), *args)
+
+    @jax.custom_gradient
+    def _fn(x: jax.Array, _dx: jax.Array, tgt: jax.Array, p: jax.Array):
+        def _grad(dy: Tuple[jax.Array, jax.Array, jax.Array]):
+            prev_dx, x, d_loss = dy
+            dx, _, d_p = jax.vjp(_xent, x, tgt, p, has_aux=True)[1](d_loss[0])
+            return prev_dx + dx, x, None, d_p
+
+        return (x, _dx, jnp.stack(_xent(x, tgt, p))), _grad
+
+    x1, dx1, loss = _fn(src[2], src[3], tgt, wgt)
+    return (src[0], src[1], x1, dx1, src[4], src[5]), loss

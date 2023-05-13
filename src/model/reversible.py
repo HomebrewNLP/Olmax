@@ -4,6 +4,7 @@ from typing import Callable, Dict, Tuple, Union
 import jax
 from jax import numpy as jnp
 
+from src.backend import SIX_ARRAYS
 from src.constants import SparseAccess
 from src.context import Context
 
@@ -85,12 +86,11 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
     return _fn(src, list(args))
 
 
-def revnet_out(src: FourArrays) -> jax.Array:
-    @jax.custom_gradient
-    def _fn(x0: jax.Array, _x0_back: jax.Array, x1: jax.Array, _x1_back: jax.Array):
-        def _grad(dy) -> FourArrays:
-            return dy, x0, dy, x1
+@jax.custom_gradient
+def revnet_out(x: SIX_ARRAYS, loss: jax.Array) -> jax.Array:
+    x0, _, x1, _, x2, _ = x
 
-        return x0 + x1, _grad
+    def _grad(dy):
+        return (jnp.zeros_like(x0), x0, jnp.zeros_like(x1), x1, jnp.zeros_like(x2), x2), dy
 
-    return _fn(*src)
+    return loss, _grad

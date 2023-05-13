@@ -4,39 +4,12 @@ from typing import Tuple, Dict, Optional
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, with_context
+from src.backend import get_param, with_context, SIX_ARRAYS
 from src.constants import SparseAccess
 from src.context import Context
 from src.model.linear import read, write
-from src.model.loss import cross_entropy_loss
-from src.model.norm import scale_norm_act
-from src.model.reversible import reversible
-
-SIX_ARRAYS = Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]
-
-
-@with_context()
-def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, jax.Array]:
-    xent = cross_entropy_loss(ctx)
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
-
-    if ctx.is_initializing:
-        return src, jnp.zeros((2,))
-
-    def _xent(x, *args):
-        return xent(scale_norm_act(ctx, x, ctx.dims.features, act=False, weight=False), *args)
-
-    @jax.custom_gradient
-    def _fn(x: jax.Array, _dx: jax.Array, tgt: jax.Array, p: jax.Array):
-        def _grad(dy: Tuple[Tuple[jax.Array, jax.Array], jax.Array]):
-            (prev_dx, x), d_loss = dy
-            dx, _, d_p = jax.vjp(_xent, x, tgt, p, has_aux=True)[1](d_loss[0])
-            return prev_dx + dx, x, None, d_p
-
-        return ((x, _dx), jnp.stack(_xent(x, tgt, p))), _grad
-
-    (x1, dx1), loss = _fn(src[2], src[3], tgt, wgt)
-    return (src[0], src[1], x1, dx1, src[4], src[5]), loss
+from src.model.loss import loss_fn
+from src.model.reversible import reversible, revnet_out
 
 
 @with_context()
@@ -65,15 +38,6 @@ def batch_embedding(ctx: Context, name: str, *shape: int) -> Tuple[jax.Array, ja
     return param, jnp.zeros_like(param)
 
 
-@jax.custom_gradient
-def reversible_output(x: SIX_ARRAYS, loss: jax.Array) -> jax.Array:
-    x0, _, x1, _, x2, _ = x
-
-    def _grad(dy):
-        return (jnp.zeros_like(x0), x0, jnp.zeros_like(x1), x1, jnp.zeros_like(x2), x2), dy
-
-    return loss, _grad
-
 
 @with_context()
 def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax.Array, jax.Array]]:
@@ -93,7 +57,7 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax
         ctx.name_cache = copy.deepcopy(name_cache)
         carry, _ = block(ctx)(carry, (src[i], tgt[i], jnp.full((), i, dtype=jnp.int32)))
     out, loss = carry
-    loss = reversible_output(out, loss)
+    loss = revnet_out(out, loss)
     return loss[0], loss[1]
 
 

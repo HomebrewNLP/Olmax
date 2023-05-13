@@ -3,7 +3,6 @@ from typing import Sequence
 from typing import Tuple, List, Any, Optional, TypeVar, Union, Callable
 
 import jax
-import jax._src.util as util
 import numpy as np
 from jax import lax, numpy as jnp, random
 
@@ -11,6 +10,7 @@ from src.constants import ParallelAxes
 from src.context import Context
 
 INT_OR_TUPLE = Union[int, Sequence[int]]
+SIX_ARRAYS = Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]
 
 Output = TypeVar("Output")
 CtxFn = TypeVar("CtxFn")
