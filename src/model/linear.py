@@ -80,11 +80,9 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
     inp = (jnp.take_along_axis(sparse, idx.reshape(*idx.shape, 1), 1) * val).reshape(ctx.dims.batch, total_read)
 
     inp = linear(ctx, inp, total_read, ctx.dims.pointwise_features)
-    inp = jnp.zeros_like(inp)
 
     inp0 = scale_norm_act_linear(ctx, inp + offset0, ctx.dims.pointwise_features, ctx.dims.features)
     inp1 = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, ctx.dims.features)
-    inp1 = jnp.zeros_like(inp1)
 
     return offset1 + inp0 + inp1, idx
 
@@ -95,12 +93,11 @@ def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
-    dense_parallel = scale_norm_act_linear(ctx, dense1, ctx.dims.features, ctx.dims.pointwise_features, act=False)
     offset0, offset1 = input_fn(ctx, token, position, dense1, ctx.dims.pointwise_features, ctx.dims.pointwise_features)
 
-    out = scale_norm_act_linear(ctx, dense_parallel + offset0 + offset1, ctx.dims.pointwise_features,
+    out = scale_norm_act_linear(ctx, offset0 + offset1, ctx.dims.pointwise_features,
                                 [ctx.dims.features, total_read, gate_sqrt * 2 * ctx.dims.memory_heads])
     dense0, scatter_values, gates = out
     idx, val = pos_and_scale(ctx, gates)
 
-    return dense0, jnp.zeros_like(scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val), idx
+    return dense0, scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val, idx

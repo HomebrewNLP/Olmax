@@ -4,7 +4,7 @@ from typing import Tuple, Dict, Optional
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import get_param, with_context, SIX_ARRAYS
+from src.backend import with_context, SIX_ARRAYS
 from src.constants import SparseAccess
 from src.context import Context
 from src.model.linear import read, write
@@ -33,10 +33,9 @@ def block(ctx: Context):
 
 @with_context()
 def batch_embedding(ctx: Context, name: str, *shape: int) -> Tuple[jax.Array, jax.Array]:
-    param = get_param(ctx, name, shape, std=1 / shape[-1])
+    param = jnp.zeros(shape, dtype=ctx.model.computation_dtype)  # get_param(ctx, name, shape, std=1 / shape[-1])
     param = lax.broadcast_in_dim(param, (ctx.dims.batch, *shape), tuple(range(1, 1 + len(shape))))
     return param, jnp.zeros_like(param)
-
 
 
 @with_context()
