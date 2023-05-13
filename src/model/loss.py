@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, Callable
+from typing import Tuple
 
 import jax
 from jax import lax, numpy as jnp
@@ -7,11 +7,11 @@ from jax import lax, numpy as jnp
 from src.backend import device_id, matmul, promote_to, with_context, get_param, SIX_ARRAYS
 from src.constants import ParallelAxes
 from src.context import Context
-from src.model.norm import scale_norm_act
+from src.model.norm import norm_forward, norm_backward
 
 
-
-def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Array, jax.Array], jax.Array]:
+@with_context()
+def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, jax.Array]:
     # TODO: This forces ctx.dims.batch to be divisible by jax.device_count(). Dependence has to be removed.
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
@@ -22,18 +22,35 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
     step_batch = total_items
     local_batch = step_batch // devices
 
-    def _xent_slice(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
-                    x: Tuple[jax.Array, jax.Array], wgt: jax.Array):
-        d_wgt, loss, acc = carry
+    param = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
+
+    if ctx.is_initializing:
+        return src, jnp.zeros((2,))
+
+    def _input(x: Tuple[jax.Array, jax.Array], wgt: jax.Array):
         inp_slice, tgt_slice = x
         tmp = matmul(inp_slice, wgt)
         tmp = promote_to(tmp, jnp.float32)
         tmp = lax.psum_scatter(tmp, ParallelAxes.model).reshape(local_batch, ctx.dims.vocab)
         lse = jax.nn.logsumexp(promote_to(tmp, jnp.float64), 1, keepdims=True)
+        return tmp, lse
+
+    def _xent_slice_loss(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array], x: Tuple[jax.Array, jax.Array],
+                         wgt: jax.Array):
+        d_wgt, loss, acc = carry
+        inp_slice, tgt_slice = x
+        tmp, lse = _input(x, wgt)
 
         loss = loss + (lse / total_items).sum()
         loss = loss - (jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1) / total_items).sum()
         acc = acc + lax.eq(lax.argmax(tmp, 1, jnp.int32), tgt_slice).sum() / total_items
+        return (loss.astype(jnp.float64), acc.astype(jnp.float64)), None
+
+    def _xent_slice_derivative(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+                               x: Tuple[jax.Array, jax.Array], wgt: jax.Array):
+        d_wgt, loss, acc = carry
+        inp_slice, tgt_slice = x
+        tmp, lse = _input(x, wgt)
 
         dy = lax.exp(tmp - (lse + math.log(total_items)))  # [LocalBatch, Vocab]
         zloss = dy * lse * ctx.training.z_loss * 2
@@ -47,52 +64,37 @@ def cross_entropy_loss(ctx: Context) -> Callable[[jax.Array, jax.Array, jax.Arra
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
         d_wgt = d_wgt + matmul(dy, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
-        return (d_wgt, loss.astype(jnp.float64), acc.astype(jnp.float64)), dx
+        return d_wgt, dx
 
     @jax.custom_gradient
-    def _fn(inp: jax.Array, tgt: jax.Array, wgt: jax.Array):
-        inp = inp.reshape(steps, devices, local_batch, ctx.dims.features)
+    def _fn(inp: jax.Array, _dx: jax.Array, tgt: jax.Array, wgt: jax.Array):
         tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
         tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
 
-        def _slice_fn(carry, x):
-            return _xent_slice(carry, x, wgt)
+        def _slice_fn_loss(carry, x):
+            out, _, _, _, _ = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
+            return _xent_slice_loss(carry, out, wgt)
 
-        init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
-        (d_wgt, loss, acc), dx = lax.scan(_slice_fn, init, (inp, tgt))
+        def _slice_fn_grad(carry, x):
+            out, norm_out, multiplied, src_fp64, std = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
+            dwgt, dx = _xent_slice_derivative(carry, out, wgt)
+            dx, _ = norm_backward(x, 1, std, dx, False, x.ndim - 1, False, (), src_fp64.dtype)
+            return dwgt, dx
 
-        dx = dx.reshape(ctx.dims.batch, ctx.dims.features)
-        d_wgt = d_wgt.transpose(1, 0)  # [Vocab, Features]  ->  [Features, Vocab]
+        (loss, acc), _ = lax.scan(_slice_fn_loss, (jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64)),
+                                  (inp.reshape(steps, devices, local_batch, ctx.dims.features), tgt))
 
-        def _grad(dy: Tuple[jax.Array, None]) -> Tuple[jax.Array, None, jax.Array]:
-            # dy == 1 since this is the last function before the output
-            dy, _ = dy
-            return (dx * dy).astype(inp.dtype), None, (d_wgt * dy).astype(wgt.dtype)
-
-        return (loss, acc), _grad
-
-    return _fn  # _fn(src, outer_tgt, param)
-
-
-@with_context()
-def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, jax.Array]:
-    xent = cross_entropy_loss(ctx)
-    wgt = get_param(ctx, "out_embd", [ctx.dims.features, ctx.dims.vocab], std=1, scale=1 / jax.device_count())
-
-    if ctx.is_initializing:
-        return src, jnp.zeros((2,))
-
-    def _xent(x, *args):
-        return xent(scale_norm_act(ctx, x, ctx.dims.features, act=False, weight=False), *args)
-
-    @jax.custom_gradient
-    def _fn(x: jax.Array, _dx: jax.Array, tgt: jax.Array, p: jax.Array):
         def _grad(dy: Tuple[jax.Array, jax.Array, jax.Array]):
+            # dy == 1 since this is the last function before the output
             prev_dx, x, d_loss = dy
-            dx, _, d_p = jax.vjp(_xent, x, tgt, p, has_aux=True)[1](d_loss[0])
-            return prev_dx + dx, x, None, d_p
+            dy = d_loss[0]
+            init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
+            dwgt, dx = lax.scan(_slice_fn_grad, init, (x, tgt))
+            dx = (dx.reshape(ctx.dims.batch, ctx.dims.features) * dy).astype(inp.dtype)
+            dwgt = (dwgt.transpose(1, 0) * dy).astype(wgt.dtype)
+            return dx + prev_dx, x, None, dwgt
 
-        return (x, _dx, jnp.stack(_xent(x, tgt, p))), _grad
+        return (inp, _dx, (loss, acc)), _grad
 
-    x1, dx1, loss = _fn(src[2], src[3], tgt, wgt)
+    x1, dx1, loss = _fn(src[2], src[3], tgt, param)
     return (src[0], src[1], x1, dx1, src[4], src[5]), loss
