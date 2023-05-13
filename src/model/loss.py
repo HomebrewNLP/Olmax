@@ -37,7 +37,7 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
 
     def _xent_slice_loss(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array], x: Tuple[jax.Array, jax.Array],
                          wgt: jax.Array):
-        d_wgt, loss, acc = carry
+        loss, acc = carry
         inp_slice, tgt_slice = x
         tmp, lse = _input(x, wgt)
 
