@@ -1,4 +1,3 @@
-import copy
 from typing import Tuple, Dict, Optional
 
 import jax
@@ -51,11 +50,7 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax
         ctx.parameters, *src = block(ctx)(carry, (src[0], tgt[0], jnp.zeros([], dtype=jnp.int32)))
         return
 
-    name_cache = copy.deepcopy(ctx.name_cache)
-    for i in range(ctx.dims.sequence):
-        ctx.name_cache = copy.deepcopy(name_cache)
-        carry, _ = block(ctx)(carry, (src[i], tgt[i], jnp.full((), i, dtype=jnp.int32)))
-    out, loss = carry
+    (out, loss), _ = lax.scan(block(ctx), carry, (src, tgt, jnp.arange(ctx.dims.sequence)))
     loss = revnet_out(out, loss)
     return loss[0], loss[1]
 
