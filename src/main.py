@@ -53,7 +53,10 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
     wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
 
-    return loop(train_step, wctx.serialize(), steps, training.device_unroll)
+    wctx = loop(train_step, wctx.serialize(), steps, training.device_unroll)
+    wctx = WhileTrainContext(wctx)
+    wctx.scalars = lax.psum(wctx.scalars, ParallelAxes.model)
+    return wctx.scalars
 
 
 def get_parameters(ctx: Context, inp: jax.Array):
