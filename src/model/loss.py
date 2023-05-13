@@ -72,12 +72,14 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
 
         def _slice_fn_loss(carry, x):
+            x, tgt_slice = x
             out, _, _, _, _ = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
-            return _xent_slice_loss(carry, out, wgt)
+            return _xent_slice_loss(carry, (out, tgt_slice), wgt)
 
         def _slice_fn_grad(carry, x):
+            x, tgt_slice = x
             out, norm_out, multiplied, src_fp64, std = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
-            dwgt, dx = _xent_slice_derivative(carry, out, wgt)
+            dwgt, dx = _xent_slice_derivative(carry, (out, tgt_slice), wgt)
             dx, _ = norm_backward(x, 1, std, dx, False, x.ndim - 1, False, (), src_fp64.dtype)
             return dwgt, dx
 
