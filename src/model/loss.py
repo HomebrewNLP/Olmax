@@ -46,9 +46,8 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         acc = acc + lax.eq(lax.argmax(tmp, 1, jnp.int32), tgt_slice).sum() / total_items
         return (loss.astype(jnp.float64), acc.astype(jnp.float64)), None
 
-    def _xent_slice_derivative(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+    def _xent_slice_derivative(d_wgt: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
                                x: Tuple[jax.Array, jax.Array], wgt: jax.Array):
-        d_wgt, loss, acc = carry
         inp_slice, tgt_slice = x
         tmp, lse = _input(x, wgt)
 
@@ -91,8 +90,8 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
             # dy == 1 since this is the last function before the output
             prev_dx, x, d_loss = dy
             dy = d_loss[0]
-            init = (jnp.zeros_like(wgt), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
-            dwgt, dx = lax.scan(_slice_fn_grad, init, (x.reshape(steps, step_batch, ctx.dims.features), tgt))
+            dwgt, dx = lax.scan(_slice_fn_grad, jnp.zeros_like(wgt),
+                                (x.reshape(steps, step_batch, ctx.dims.features), tgt))
             dx = (dx.reshape(ctx.dims.batch, ctx.dims.features) * dy).astype(inp.dtype)
             dwgt = (dwgt * dy).astype(wgt.dtype)
             return dx + prev_dx, x, None, dwgt
