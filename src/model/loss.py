@@ -4,7 +4,7 @@ from typing import Tuple
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import device_id, matmul, promote_to, with_context, get_param, SIX_ARRAYS
+from src.backend import device_id, matmul, promote_to, with_context, get_param, SIX_ARRAYS, dot
 from src.constants import ParallelAxes
 from src.context import Context
 from src.model.norm import norm_forward, norm_backward
@@ -60,10 +60,10 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         dy = dy.astype(ctx.model.computation_dtype)
         dy = lax.all_gather(dy, ParallelAxes.model)
         dy = dy.reshape(step_batch, ctx.dims.vocab).transpose(1, 0)
-        dx = matmul(wgt, dy)  # [Features, Vocab] @ [Vocab, StepBatch] -> [Features, StepBatch]
+        dx = dot(dy, wgt, 0, 1)  # [Vocab (Reduced), StepBatch] x [Features, Vocab (Reduced)]  -> [StepBatch, Features]
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
-        d_wgt = d_wgt + matmul(dy, inp_slice)  # [Vocab, StepBatch] @ [StepBatch, Features] -> [Vocab, Features]
+        d_wgt = d_wgt + dot(inp_slice, dy, 0, 1)  # [StepBatch, Features] x [Vocab, StepBatch] -> [Vocab, Features]
         return d_wgt, dx
 
     @jax.custom_gradient
@@ -80,7 +80,7 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
             x, tgt_slice = x
             out, norm_out, multiplied, src_fp64, std = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
             dwgt, dx = _xent_slice_derivative(carry, (out, tgt_slice), wgt)
-            dx, _ = norm_backward(x, 1, std, dx, False, x.ndim - 1, False, (), src_fp64.dtype)
+            dx, _ = norm_backward(x.reshape(dx.shape), 1, std, dx, False, x.ndim - 1, False, (), src_fp64.dtype)
             return dwgt, dx
 
         (loss, acc), _ = lax.scan(_slice_fn_loss, (jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64)),
@@ -90,10 +90,10 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
             # dy == 1 since this is the last function before the output
             prev_dx, x, d_loss = dy
             dy = d_loss[0]
-            init = (jnp.zeros(wgt.shape[::-1]), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
+            init = (jnp.zeros(wgt), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64))
             dwgt, dx = lax.scan(_slice_fn_grad, init, (x.reshape(steps, devices, local_batch, ctx.dims.features), tgt))
             dx = (dx.reshape(ctx.dims.batch, ctx.dims.features) * dy).astype(inp.dtype)
-            dwgt = (dwgt.transpose(1, 0) * dy).astype(wgt.dtype)
+            dwgt = (dwgt * dy).astype(wgt.dtype)
             return dx + prev_dx, x, None, dwgt
 
         return (inp, _dx, (loss, acc)), _grad
