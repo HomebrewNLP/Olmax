@@ -1,5 +1,5 @@
 import copy
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, Tuple, Union, List
 
 import jax
 from jax import numpy as jnp
@@ -34,7 +34,7 @@ def at_sparse(sparse, keys):
 
 
 def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src: REVERSIBLE_CTX,
-               *args) -> REVERSIBLE_CTX:
+               *args: jax.Array) -> REVERSIBLE_CTX:
     if ctx.is_initializing:
         return _reversible_at_init(ctx, fn, sparse_access, src, *args)
 
@@ -51,7 +51,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         return out
 
     @jax.custom_gradient
-    def _fn(inputs: REVERSIBLE_CTX, inner_args: jax.Array):
+    def _fn(inputs: REVERSIBLE_CTX, inner_args: List[jax.Array]):
         params, x0, _dx0, x1, _dx1, sparse, d_sparse = inputs
 
         def _grad(dy):

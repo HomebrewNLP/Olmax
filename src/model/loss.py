@@ -58,11 +58,11 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         dy = dy * jax.device_count()
         dy = dy.astype(ctx.model.computation_dtype)
         dy = lax.all_gather(dy, ParallelAxes.model)
-        dy = dy.reshape(step_batch, ctx.dims.vocab).transpose(1, 0)
-        dx = dot(dy, wgt, 0, 1)  # [Vocab (Reduced), StepBatch] x [Features, Vocab (Reduced)]  -> [StepBatch, Features]
+        dy = dy.reshape(step_batch, ctx.dims.vocab)
+        dx = dot(dy, wgt, 1, 1)  # [StepBatch, Vocab (Reduced)] x [Features, Vocab (Reduced)]  -> [StepBatch, Features]
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
-        d_wgt = d_wgt + dot(inp_slice, dy, 0, 1)  # [StepBatch, Features] x [Vocab, StepBatch] -> [Vocab, Features]
+        d_wgt = d_wgt + dot(inp_slice, dy, 0, 0)  # [StepBatch, Features] x [StepBatch, Vocab] -> [Features, Vocab]
         return d_wgt, dx
 
     @jax.custom_gradient
