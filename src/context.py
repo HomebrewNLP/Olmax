@@ -71,6 +71,7 @@ class DataContext(DataClass):
 
 
 class Dims(DataClass):
+    depth: int = 4
     batch: int = 8
     features: int = 2 ** 14
     pointwise_features: int = 2 ** 12
