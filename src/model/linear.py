@@ -70,7 +70,7 @@ def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Arr
 
 @with_context()
 def _output(ctx: Context, inp: jax.Array, offset: jax.Array) -> Tuple[jax.Array, jax.Array]:
-    out, scale = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, ctx.dims.features, ctx.dims.features)
+    out, scale = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, [ctx.dims.features, ctx.dims.features])
     out = scale_norm_act(ctx, out + offset, ctx.dims.features)
     return out, jax.nn.sigmoid(scale)
 
