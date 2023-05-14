@@ -1,4 +1,5 @@
 import os
+import pathlib
 import random
 from typing import Iterator
 
@@ -54,7 +55,10 @@ def text_dataset(ctx: Context, skipped_steps: int) -> Iterator[np.ndarray]:
     if ctx.training.debug:
         return debug_generator(ctx)
 
-    filenames = tf.io.gfile.glob(ctx.data.path)
+    if ctx.data.path.startswith('gs://'):
+        filenames = tf.io.gfile.glob(ctx.data.path)
+    else:
+        filenames = [str(p) for p in pathlib.Path(ctx.data.path).iterdir()]
 
     rng = random.Random(ctx.data.seed)
     rng.shuffle(filenames)
