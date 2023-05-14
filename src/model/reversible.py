@@ -62,14 +62,14 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
             if sparse_access in (SparseAccess.read, SparseAccess.write):
                 keys = keys[0]
             if sparse_access == SparseAccess.write:
-                x0, gate, vals = x0
+                x0, inner_gate, vals = x0
                 y_sparse = at_sparse(y_sparse, keys).add(-vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys.reshape(*keys.shape, 1), 1).reshape(*vals.shape)
             elif sparse_access == SparseAccess.read:
-                x0, gate = x0
+                x0, inner_gate = x0
             else:
-                gate = 1
-            prev_x0 = (y1 - x0) / gate
+                inner_gate = 1
+            prev_x0 = (y1 - x0) / inner_gate
             if sparse_access == SparseAccess.write:
                 d_params, dx0, _ = grad_fn((dy1, prev_x0, sparse_items))
             elif sparse_access == SparseAccess.read:
@@ -78,8 +78,8 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
             else:
                 d_params, dx0, _ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
-            arg_grads = [jnp.zeros_like(a) for a in args]
-            return (d_params, dy1 * gate, prev_x0, dx0 + dy0, y0, dy_sparse, y_sparse), arg_grads
+            arg_grads = [jnp.zeros_like(a) for a in inner_args]
+            return (d_params, dy1 * inner_gate, prev_x0, dx0 + dy0, y0, dy_sparse, y_sparse), arg_grads
 
         out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
