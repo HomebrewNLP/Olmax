@@ -66,7 +66,8 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         return d_wgt, dx
 
     @jax.custom_gradient
-    def _fn(inp: jax.Array, _dx: jax.Array, tgt: jax.Array, wgt: jax.Array):
+    def _fn(inp: SIX_ARRAYS, _dx: jax.Array, tgt: jax.Array, wgt: jax.Array):
+        inp = inp[0] * inp[2]
         tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
         tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
 
@@ -88,14 +89,14 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
 
         def _grad(dy: Tuple[jax.Array, jax.Array, jax.Array]):
             # dy == 1 since this is the last function before the output
-            prev_dx, x, d_loss, d_acc = dy
+            (pdx0, x0, pdx1, x1, dsp, sp), x, d_loss, d_acc = dy
             dwgt, dx = lax.scan(_slice_fn_grad, jnp.zeros_like(wgt),
                                 (x.reshape(steps, step_batch, ctx.dims.features), tgt))
             dx = (dx.reshape(ctx.dims.batch, ctx.dims.features) * d_loss).astype(inp.dtype)
             dwgt = (dwgt * d_loss).astype(wgt.dtype)
-            return dx + prev_dx, x, None, dwgt
+            return (dx + pdx0, x0, dx + pdx1, x1, dsp, sp), None, dwgt
 
-        return (inp, _dx, loss, acc), _grad
+        return (src, loss, acc), _grad
 
-    x1, dx1, loss, acc = _fn(src[2], src[3], tgt, param)
-    return (src[0], src[1], x1, dx1, src[4], src[5]), jnp.stack([loss, acc])
+    src, loss, acc = _fn(src, tgt, param)
+    return src, jnp.stack([loss, acc])
