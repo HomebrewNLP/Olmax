@@ -63,7 +63,7 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
 def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Array, *out: int) -> Tuple[jax.Array, ...]:
     token_embedding = input_embed(ctx, token, ctx.dims.vocab)
     position_embedding = input_embed(ctx, position, ctx.dims.sequence)
-    dense = linear(ctx, dense, ctx.dims.features, ctx.dims.pointwise_features)
+    dense = scale_norm_act_linear(ctx, dense, ctx.dims.features, ctx.dims.pointwise_features)
     return scale_norm_act_linear(ctx, token_embedding + position_embedding + dense, ctx.dims.pointwise_features,
                                  list(out), transform_fns=[all2all])
 
