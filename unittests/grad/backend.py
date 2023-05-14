@@ -1,4 +1,5 @@
 import random
+from typing import Union, List
 
 import jax
 from jax import numpy as jnp
@@ -25,8 +26,12 @@ def randn_fn():
     return _fn
 
 
-def grad_fn(dy: jax.Array, *args):
+def grad_fn(dy: Union[jax.Array, List[jax.Array]], *args):
     def _fn(fn):
-        return jax.pmap(jax.grad(lambda x, y: (fn(x) * y).sum()), ParallelAxes.model)(args, dy)
+        def _g(x, y):
+            out = fn(x)
+            return sum((o * k).sum() for o, k in zip(out, y))
+
+        return jax.pmap(jax.grad(_g), ParallelAxes.model)(args, dy)
 
     return _fn

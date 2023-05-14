@@ -99,8 +99,14 @@ def scale_norm_act(ctx: Context, inp: jax.Array, feature_dim: int,
     return _fn(inp, weight)
 
 
+class ShapeMismatch(ValueError):
+    pass
+
+
 @with_context()
 def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_features: Union[int, List[int]],
+                          scale: Union[bool, None, jax.Array] = None,
+                          weights: Union[None, List[jax.Array]] = None,
                           transform_fns: Optional[List[Callable]] = None, act: bool = True
                           ) -> Union[jax.Array, Tuple[jax.Array, ...]]:
     if isinstance(out_features, int):
@@ -109,8 +115,19 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
         transform_fns = []
     transform_fns.extend([lambda x: x] * (len(out_features) - len(transform_fns)))
     run_type = jnp.promote_types(ctx.model.computation_dtype, jnp.float32)
-    scale = get_param(ctx, "scale", [in_features], std=0, mean=1, dtype=run_type)
-    weights = [get_param(ctx, f"weight{i}", [o, in_features]) for i, o in enumerate(out_features)]
+    if scale is None:
+        scale = get_param(ctx, "scale", [in_features], std=0, mean=1, dtype=run_type)
+    elif scale is False:
+        scale = 1
+    else:
+        scale = scale
+    if weights is None:
+        weights = [get_param(ctx, f"weight{i}", [o, in_features]) for i, o in enumerate(out_features)]
+    else:
+        for i, (w, o) in enumerate(zip(weights, out_features)):
+            shape = list(w.shape)
+            if shape != [o, in_features]:
+                raise ShapeMismatch(f"Got {shape=}, but expected {[o, in_features]} for weight {i}.")
 
     if ctx.is_initializing:
         if len(out_features) == 1:
@@ -136,7 +153,7 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
 
         return [_mm(fn(out), w) for fn, w in zip(transform_fns, wgt)], _grad
 
-    out = _fn(inp, scale, weights)
+    out = _fn(inp, scale, list(weights))
     if len(out) == 1:
         return out[0]
     return tuple(out)
