@@ -79,7 +79,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
                 d_params, dx0, _ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
             arg_grads = [jnp.zeros_like(a) for a in args]
-            return (d_params, dy1, prev_x0, (dx0 + dy0) / gate, y0, dy_sparse, y_sparse), arg_grads
+            return (d_params, dy1 * gate, prev_x0, dx0 + dy0, y0, dy_sparse, y_sparse), arg_grads
 
         out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
