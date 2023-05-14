@@ -6,7 +6,7 @@ from jax import lax, numpy as jnp
 from src.backend import is_main, matmul
 from src.constants import ParallelAxes
 from src.context import Context
-from src.model.loss import cross_entropy_loss
+from src.model.loss import loss_fn
 from unittests.grad.backend import grad_fn, randn_fn, sample_sizes, trials
 
 
@@ -51,7 +51,7 @@ def general_value_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-
         src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features)
         wgt = randn(ctx.dims.features, ctx.dims.vocab)
 
-        grad0 = float(jax.pmap(lambda x: cross_entropy_loss(ctx, x, tgt)[0], ParallelAxes.model)((src, wgt, wgt))[0])
+        grad0 = float(jax.pmap(lambda x: loss_fn(ctx, x, tgt)[0], ParallelAxes.model)((src, wgt, wgt))[0])
         grad1 = float(jax.pmap(lambda x: naive_loss(x, tgt, z_loss), ParallelAxes.model)((src, wgt, wgt))[0])
         assert np.isclose(grad0, grad1)
 
@@ -65,8 +65,7 @@ def general_grad_test(z_loss: float, samples: int, vocab: int):  # skipcq: PYL-W
         wgt = randn(ctx.dims.features, ctx.dims.vocab)
         dy = randn(2)
         grad = grad_fn(dy, src, wgt)
-
-        grad0 = grad(lambda x: cross_entropy_loss(ctx, x, tgt)[0])
+        grad0 = grad(lambda x: loss_fn(ctx, x, tgt)[0])
         grad1 = grad(lambda x: naive_loss(x, tgt, z_loss))
 
         for g0, g1 in zip(grad0, grad1):
