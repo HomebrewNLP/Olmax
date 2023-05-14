@@ -98,10 +98,10 @@ def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
     offset0, offset1, offset2 = input_fn(ctx, token, position, dense1, ctx.dims.pointwise_features,
-                                         ctx.dims.pointwise_features, ctx.dims.pointwise_features)
+                                         ctx.dims.pointwise_features, ctx.dims.features)
 
     out = scale_norm_act_linear(ctx, offset0 + offset1, ctx.dims.pointwise_features,
-                                [ctx.dims.features, total_read, gate_sqrt * 2 * ctx.dims.memory_heads])
+                                [ctx.dims.pointwise_features, total_read, gate_sqrt * 2 * ctx.dims.memory_heads])
     dense0, scatter_values, gates = out
     idx, val = pos_and_scale(ctx, gates)
     scatter_values = scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val
