@@ -9,9 +9,9 @@ from src.constants import SparseAccess
 from src.context import Context
 
 REVERSIBLE_CTX = Tuple[Dict[str, jax.Array], jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]
-Output = Union[jax.Array, Tuple[Union[jax.Array, Tuple[jax.Array, jax.Array]], jax.Array]]
-ReversibleFn = Callable[[Context, jax.Array, jax.Array, jax.Array], Output]
 FourArrays = Tuple[jax.Array, jax.Array, jax.Array, jax.Array]
+Output = Union[jax.Array, Union[FourArrays, Tuple[jax.Array, jax.Array, jax.Array]]]
+ReversibleFn = Callable[[Context, jax.Array, jax.Array, jax.Array], Output]
 
 
 def _reversible_at_init(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src: REVERSIBLE_CTX,
@@ -46,8 +46,8 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
         new_ctx.parameters = params
         out = fn(new_ctx, inp, *inner_args)
         ctx.name_cache = new_ctx.name_cache
-        if sparse_access == SparseAccess.write:
-            return (out[0], out[1]), out[2]
+        if sparse_access in (SparseAccess.write, SparseAccess.read):
+            return tuple(out[:-1]), out[-1]
         return out
 
     @jax.custom_gradient
@@ -62,25 +62,34 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
             if sparse_access in (SparseAccess.read, SparseAccess.write):
                 keys = keys[0]
             if sparse_access == SparseAccess.write:
-                x0, vals = x0
+                x0, gate, vals = x0
                 y_sparse = at_sparse(y_sparse, keys).add(-vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys.reshape(*keys.shape, 1), 1).reshape(*vals.shape)
-                d_params, dx0, _ = grad_fn((dy1, sparse_items))
             elif sparse_access == SparseAccess.read:
-                d_params, dx0, (dsparse, *_) = grad_fn(dy1)
+                x0, gate = x0
+            else:
+                gate = 1
+            prev_x0 = (y1 - x0) / gate
+            if sparse_access == SparseAccess.write:
+                d_params, dx0, _ = grad_fn((dy1, sparse_items, prev_x0))
+            elif sparse_access == SparseAccess.read:
+                d_params, dx0, (dsparse, *_) = grad_fn((dy1, prev_x0))
                 dy_sparse = dy_sparse + dsparse  # TODO: Find a way to get the sparse gradients and scatter-add manually
             else:
                 d_params, dx0, _ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
-            return (d_params, dy1, y1 - x0, dx0 + dy0, y0, dy_sparse, y_sparse), [jnp.zeros_like(a) for a in args]
+            arg_grads = [jnp.zeros_like(a) for a in args]
+            return (d_params, dy1, prev_x0, (dx0 + dy0) / gate, y0, dy_sparse, y_sparse), arg_grads
 
         out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
-            (out, vals), keys = out
+            (out, gate, vals), keys = out
             sparse = at_sparse(sparse, keys).add(vals)
         elif sparse_access == SparseAccess.read:
-            out, keys = out
-        out = x0 + out
+            (out, gate), keys = out
+        else:
+            gate = 1
+        out = x0 * gate + out
         return (params, x1, x1, out, out, sparse, sparse), _grad
 
     return _fn(src, list(args))
