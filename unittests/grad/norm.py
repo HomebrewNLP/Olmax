@@ -1,15 +1,20 @@
-from typing import List
+from typing import List, Callable, Optional
 
 import pytest
-from jax import numpy as jnp
+from jax import numpy as jnp, lax
 
 from src.backend import dot
+from src.constants import ParallelAxes
 from src.context import Context
+from src.model.linear import all2all
 from src.model.norm import norm_forward, scale_norm_act, scale_norm_act_linear
 from unittests.grad.backend import grad_fn, randn_fn, sample_sizes, trials
 
 
-def general_test(act: bool, samples: int, dim: int, double: bool, linear: List[int]):  # skipcq: PYL-W0640
+def general_test(act: bool, samples: int, dim: int, double: bool, linear: Optional[List[int]] = None,
+                 fn: Optional[List[Callable]] = None):  # skipcq: PYL-W0640
+    linear = []
+    fn = []
     ctx = Context()
     ctx.is_initializing = False
     randn = randn_fn()
@@ -30,12 +35,12 @@ def general_test(act: bool, samples: int, dim: int, double: bool, linear: List[i
 
             def _fn(x):
                 out = norm_forward(ctx, x[0], x[1].reshape(shape), act, dim, double)[0]
-                return [dot(out, w, -1, 1) for w in x[2:]]
+                return [dot(f(out), w, -1, 1) for w, f in zip(x[2:], fn)]
 
             out0 = grad(_fn)
 
             def _fn(x):
-                out = scale_norm_act_linear(ctx, x[0], ctx.dims.features, linear, x[1], x[2:], act=act)
+                out = scale_norm_act_linear(ctx, x[0], ctx.dims.features, linear, x[1], x[2:], fn, act=act)
                 if len(linear) == 1:
                     return [out]
                 return list(out)
@@ -54,22 +59,29 @@ def general_test(act: bool, samples: int, dim: int, double: bool, linear: List[i
 @pytest.mark.parametrize("act", [True, False])
 @pytest.mark.parametrize("samples", sample_sizes)
 def test_act(act: bool, samples: int):
-    general_test(act, samples, 2, False, [])
+    general_test(act, samples, 2, False)
 
 
 @pytest.mark.parametrize("dim", [0, 1, 2])
 @pytest.mark.parametrize("samples", sample_sizes)
 def test_dim(dim: int, samples: int):
-    general_test(True, samples, dim, False, [])
+    general_test(True, samples, dim, False)
 
 
 @pytest.mark.parametrize("double", [False, True])
 @pytest.mark.parametrize("samples", sample_sizes)
 def test_double(double: bool, samples: int):
-    general_test(True, samples, 2, double, [])
+    general_test(True, samples, 2, double)
 
 
 @pytest.mark.parametrize("linear", [[16, 128], [16, 128, 256]])
 @pytest.mark.parametrize("samples", sample_sizes)
 def test_linear(linear: List[int], samples: int):
     general_test(True, samples, 2, False, linear)
+
+
+@pytest.mark.parametrize("linear,fn", [([16, 128], [lambda x: lax.psum(x, ParallelAxes.model)]),
+                                       ([16, 128], [all2all])])
+@pytest.mark.parametrize("samples", sample_sizes)
+def test_transformed_linear(linear: List[int], fn: List[Callable], samples: int):
+    general_test(True, samples, 2, False, linear, fn)
