@@ -66,8 +66,8 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         return d_wgt, dx
 
     @jax.custom_gradient
-    def _fn(inp: SIX_ARRAYS, _dx: jax.Array, tgt: jax.Array, wgt: jax.Array):
-        inp = inp[0] * inp[2]
+    def _fn(inp: SIX_ARRAYS, tgt: jax.Array, wgt: jax.Array):
+        inp = inp[0] + inp[2]
         tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
         tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
 
