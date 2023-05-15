@@ -38,11 +38,11 @@ class WandbLog:
                      "Speed/Batches per Second": rate,
                      "Speed/Tokens per Day": tokens_per_day,
                      "Speed/Parameters * Tokens per Day": tokens_per_day * self.param_count,
-                     "Speed/Tokens Seen": step * self.tokens_per_step}
+                     "Speed/Tokens Seen": (step + i) * self.tokens_per_step}
 
             items.update(self._log("Loss", scl[0], sizes))
             items.update(self._log("Accuracy", scl[1], sizes))
 
-            self.run.log(items, step=step)
+            self.run.log(items, step=step + i)
 
         return any(val in (float("nan"), float("inf"), float("-inf")) for val in wctx.scalars.reshape(-1))
