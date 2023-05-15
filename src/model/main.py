@@ -34,7 +34,7 @@ def block(ctx: Context):
 
 @with_context()
 def batch_embedding(ctx: Context, name: str, *shape: int) -> Tuple[jax.Array, jax.Array]:
-    param = jnp.zeros(shape, dtype=ctx.model.computation_dtype)  # get_param(ctx, name, shape, std=1 / shape[-1])
+    param = get_param(ctx, name, shape, std=1 / shape[-1])
     param = lax.broadcast_in_dim(param, (ctx.dims.batch, *shape), tuple(range(1, 1 + len(shape))))
     return param, jnp.zeros_like(param)
 
