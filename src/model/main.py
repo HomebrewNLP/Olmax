@@ -4,7 +4,7 @@ from typing import Tuple, Dict, Optional
 import jax
 from jax import lax, numpy as jnp
 
-from src.backend import with_context, SIX_ARRAYS
+from src.backend import with_context, SIX_ARRAYS, get_param
 from src.constants import SparseAccess
 from src.context import Context
 from src.model.linear import read, write
