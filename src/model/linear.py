@@ -60,11 +60,10 @@ def pos_and_scale(ctx: Context, gates: jax.Array) -> Tuple[jax.Array, jax.Array]
 
 
 @with_context()
-def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Array, *out: int) -> Tuple[jax.Array, ...]:
+def input_fn(ctx: Context, token: jax.Array, dense: jax.Array, *out: int) -> Tuple[jax.Array, ...]:
     token_embedding = input_embed(ctx, token, ctx.dims.vocab)
-    position_embedding = input_embed(ctx, position, ctx.dims.sequence)
     dense = scale_norm_act_linear(ctx, dense, ctx.dims.features, ctx.dims.pointwise_features)
-    return scale_norm_act_linear(ctx, token_embedding + position_embedding + dense, ctx.dims.pointwise_features,
+    return scale_norm_act_linear(ctx, token_embedding + dense, ctx.dims.pointwise_features,
                                  list(out), transform_fns=[all2all])
 
 
@@ -75,12 +74,11 @@ def _output(ctx: Context, inp: jax.Array, offset: jax.Array) -> jax.Array:
 
 
 @with_context()
-def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, position: jax.Array
-         ) -> Tuple[jax.Array, jax.Array]:
+def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array) -> Tuple[jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
-    offset1, offset0, gates = input_fn(ctx, token, position, dense0, ctx.dims.features, ctx.dims.pointwise_features,
+    offset1, offset0, gates = input_fn(ctx, token, dense0, ctx.dims.features, ctx.dims.pointwise_features,
                                        gate_sqrt * 2 * ctx.dims.memory_heads)
     idx, val = pos_and_scale(ctx, gates)
     inp = (jnp.take_along_axis(sparse, idx.reshape(*idx.shape, 1), 1) * val).reshape(ctx.dims.batch, total_read)
@@ -91,12 +89,11 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
 
 
 @with_context()
-def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
-          ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+def write(ctx: Context, dense1: jax.Array, token: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
-    offset0, offset1, offset2 = input_fn(ctx, token, position, dense1, ctx.dims.pointwise_features,
+    offset0, offset1, offset2 = input_fn(ctx, token, dense1, ctx.dims.pointwise_features,
                                          ctx.dims.pointwise_features, ctx.dims.features)
 
     out = scale_norm_act_linear(ctx, offset0 + offset1, ctx.dims.pointwise_features,

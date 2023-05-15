@@ -10,7 +10,7 @@ import numpy as np
 import wandb
 from jax import lax, numpy as jnp
 
-from src.backend import deep_replace, device_id, loop
+from src.backend import deep_replace, device_id
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
@@ -20,17 +20,28 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-def train_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
+def train_step(carry: Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], dat: jax.Array) -> Tuple[
+    jax.Array, Tuple[Dict[str, Any]], Tuple[jax.Array, jax.Array]]:
+    while_ctx_dict, src = carry
     wctx = WhileTrainContext(while_ctx_dict)
-    steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
-    data_slice = wctx.data[wctx.current_step % steps]
     params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
-    scalars, grads = grad_fn(params, data_slice)
+    (loss, (src, scalars)), grads = grad_fn(params, src, dat)
     update(wctx.ctx, grads, wctx.current_step)
-    wctx.scalars += jnp.stack(scalars) / steps  # higher numerical accuracy if we divide before summing
     wctx.current_step += 1
-    return wctx.serialize()
+    return (wctx.serialize(), src), jnp.concatenate([loss.reshape(-1), scalars])
+
+
+def get_carry(ctx: Context) -> Tuple[jax.Array, jax.Array]:
+    dense = jnp.zeros([ctx.dims.batch, ctx.dims.features], dtype=ctx.model.computation_dtype)
+    sparse = jnp.zeros([ctx.dims.batch, ctx.dims.memory_slots, ctx.dims.memory_features],
+                       dtype=ctx.model.computation_dtype)
+    return dense, sparse
+
+
+def outer_step(wctx: Dict[str, Any], data: jax.Array) -> Tuple[jax.Array, Dict[str, Any]]:
+    (wctx, _), scalars = lax.scan(train_step, (wctx, get_carry(WhileTrainContext(wctx).ctx)), data)  # scan over seq
+    return wctx, scalars
 
 
 def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -39,7 +50,7 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     steps = training.device_steps * jax.process_count()
     step_batch, sequence_p1 = wctx.data.shape
 
-    # "all-to-all" / "all-concat" with jax.process_count() outputs instead of jax.device_count() outputs
+    # all_gather with jax.process_count() outputs instead of jax.device_count() outputs
     # init sparse tensor with 0s everywhere except for local input slice
     data = jnp.zeros((jax.process_count(), step_batch, sequence_p1), wctx.data.dtype)
     data = data.at[jax.process_index(), :, :].set(wctx.data)
@@ -49,13 +60,15 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
     # process_count, steps * batch, sequence
     # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
-    # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
-    data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
-    wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
+    # --transpose--> process_count * steps, sequence, batch  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
+    data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1)
+    data = data.transpose(1, 2, 0)  # [Batch, Steps, Sequence] -> [Steps, Sequence, Batch]
+    data = jnp.stack([data[:, :-1, :], data[:, 1:, :]], 2)  # Stack along dim=number_of_scan's
 
-    wctx = loop(train_step, wctx.serialize(), steps, training.device_unroll)
+    wctx, scalars = lax.scan(outer_step, wctx.serialize(), data)  # scan over samples
+
     wctx = WhileTrainContext(wctx)
-    wctx.scalars = lax.psum(wctx.scalars, ParallelAxes.model)
+    wctx.scalars = lax.psum(scalars.reshape(-1, scalars.shape[-1]) / jax.device_count(), ParallelAxes.model)
     return wctx.serialize()
 
 
@@ -65,7 +78,7 @@ def get_parameters(ctx: Context, inp: jax.Array):
         initial_prng_key = ctx.prng_key
         ctx.seed += device_id()
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
-        body_ctx(ctx, x, x)
+        body_ctx(ctx, get_carry(ctx), x[:, 0], x[:, 0])
         params = ctx.parameters
         var = ctx.parameter_variance
         ctx.parameters = {}
@@ -86,8 +99,8 @@ def get_optimizer_state(ctx: Context):
         new_ctx = copy.deepcopy(new_ctx)
         new_ctx.parameters = parameters.copy()
         keys = jax.random.split(jax.random.PRNGKey(0), len(parameters))
-        grads = {name: jax.random.uniform(key, param.shape, ctx.model.computation_dtype, 1e-6, 1e-3)
-                 for key, (name, param) in zip(keys, parameters.items())}
+        grads = {name: jax.random.uniform(key, param.shape, ctx.model.computation_dtype, 1e-6, 1e-3) for
+                 key, (name, param) in zip(keys, parameters.items())}
         update(new_ctx, grads, jnp.ones((), dtype=new_ctx.model.computation_dtype))
         return new_ctx.parameters
 
@@ -207,9 +220,8 @@ def main():
 
     wctx = WhileTrainContext()
     print(wctx.ctx)
-    device_steps = wctx.ctx.training.device_steps * jax.process_count()
+    device_steps = wctx.ctx.training.device_steps * jax.process_count() * ctx.dims.sequence
     total_steps = wctx.ctx.training.steps * device_steps
-    tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
     data = init_data_and_model(wctx)
     parameter_count = sum(param.size for name, param in wctx.ctx.parameters.items() if "optimizer" not in name)
     buffer_statistics(wctx.ctx.parameters)
@@ -226,18 +238,18 @@ def main():
 
     checkpoint_at = wctx.ctx.training.checkpoint_interval + wctx.step
     start_time = time.time()
-    wblog = WandbLog(run, int(ctx.training.device_steps * jax.process_count()), parameter_count, tokens_processed)
+    wblog = WandbLog(run, int(ctx.training.device_steps * jax.process_count()), parameter_count, wctx.ctx.dims.batch)
     for idx, dat in enumerate(data):
         step_start = time.time()
         wctx = step(dat)
         current_step = int(wctx.step)
         lr = float(get_current_lr(wctx.ctx, wctx.current_step[0]))
         print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
-              f'Loss: {wctx.scalars[0, 0]:6.3f} - '
-              f'Accuracy: {wctx.scalars[0, 1]:8.3f} | '
+              f'Loss: {wctx.scalars[0, :, 0].mean():6.3f} - '
+              f'Accuracy: {wctx.scalars[0, :, 1].mean():8.3f} | '
               f'LearningRate: {lr:.5f} | '
               f'StepTime: {time.time() - step_start:10.6f}s - '
-              f'Rate: {tokens_processed * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')
+              f'Rate: {wctx.ctx.dims.batch * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')
         if wblog(wctx, current_step, lr):
             return
         if wctx.ctx.training.trace.do_trace:

@@ -26,22 +26,23 @@ class WandbLog:
         return items
 
     def __call__(self, wctx: WhileTrainContext, step: int, current_lr) -> bool:
-        rate = self.device_steps / (time.time() - self.previous_step_time)
-        self.previous_step_time = time.time()
+        for i, scl in enumerate(wctx.scalars[0]):
+            rate = self.device_steps / (time.time() - self.previous_step_time)
+            self.previous_step_time = time.time()
 
-        ctx = wctx.ctx
-        sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
+            ctx = wctx.ctx
+            sizes = [s // self.device_steps for s in ctx.wandb.median_sizes]
 
-        tokens_per_day = 3600 * 24 * rate * ctx.dims.batch * ctx.dims.sequence
-        items = {"Optimizer/Learning Rate": current_lr,
-                 "Speed/Batches per Second": rate,
-                 "Speed/Tokens per Day": tokens_per_day,
-                 "Speed/Parameters * Tokens per Day": tokens_per_day * self.param_count,
-                 "Speed/Tokens Seen": step * self.tokens_per_step}
+            tokens_per_day = 3600 * 24 * rate * ctx.dims.batch * ctx.dims.sequence
+            items = {"Optimizer/Learning Rate": current_lr,
+                     "Speed/Batches per Second": rate,
+                     "Speed/Tokens per Day": tokens_per_day,
+                     "Speed/Parameters * Tokens per Day": tokens_per_day * self.param_count,
+                     "Speed/Tokens Seen": step * self.tokens_per_step}
 
-        items.update(self._log("Loss", wctx.scalars[0, 0], sizes))
-        items.update(self._log("Accuracy", wctx.scalars[0, 1], sizes))
+            items.update(self._log("Loss", scl[0], sizes))
+            items.update(self._log("Accuracy", scl[1], sizes))
 
-        self.run.log(items, step=step)
+            self.run.log(items, step=step)
 
-        return any(val in (float("nan"), float("inf"), float("-inf")) for val in wctx.scalars[0, :])
+        return any(val in (float("nan"), float("inf"), float("-inf")) for val in wctx.scalars.reshape(-1))

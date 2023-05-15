@@ -11,7 +11,7 @@ from src.model.norm import norm_forward, norm_backward
 
 
 @with_context()
-def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, jax.Array]:
+def loss_fn(ctx: Context, src: jax.Array, tgt: jax.Array) -> jax.Array:
     # TODO: This forces ctx.dims.batch to be divisible by jax.device_count(). Dependence has to be removed.
     # Forward: logsumexp(x) - x[target]
     # Backward: (logsumexp(x) - x[target] + logsumexp(x)^2 * z_loss).grad
@@ -35,21 +35,15 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
         lse = jax.nn.logsumexp(promote_to(tmp, jnp.float64), 1, keepdims=True)
         return tmp, lse
 
-    def _xent_slice_loss(carry: Tuple[jax.Array, jax.Array, jax.Array, jax.Array], x: Tuple[jax.Array, jax.Array],
-                         wgt: jax.Array):
-        loss, acc = carry
+    def _xent_slice(carry: Tuple[jax.Array, jax.Array, jax.Array], x: Tuple[jax.Array, jax.Array],
+                    wgt: jax.Array):
+        d_wgt, loss, acc = carry
         inp_slice, tgt_slice = x
         tmp, lse = _input(x, wgt)
 
         loss = loss + (lse / total_items).sum()
         loss = loss - (jnp.take_along_axis(tmp, tgt_slice.reshape(*tgt_slice.shape, 1), -1) / total_items).sum()
         acc = acc + lax.eq(lax.argmax(tmp, 1, jnp.int32), tgt_slice).sum() / total_items
-        return (loss.astype(jnp.float64), acc.astype(jnp.float64)), None
-
-    def _xent_slice_derivative(d_wgt: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
-                               x: Tuple[jax.Array, jax.Array], wgt: jax.Array):
-        inp_slice, tgt_slice = x
-        tmp, lse = _input(x, wgt)
 
         dy = lax.exp(tmp - (lse + math.log(total_items)))  # [LocalBatch, Vocab]
         zloss = dy * lse * ctx.training.z_loss * 2
@@ -63,42 +57,32 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
 
         inp_slice = inp_slice.reshape(step_batch, ctx.dims.features)
         d_wgt = d_wgt + dot(inp_slice, dy, 0, 0)  # [StepBatch, Features] x [StepBatch, Vocab] -> [Features, Vocab]
-        return d_wgt, dx
+        return (d_wgt, loss.astype(jnp.float64), acc.astype(jnp.float64)), dx
 
     tgt = tgt.reshape(steps, step_batch)  # [Steps, StepBatch]
     tgt = lax.dynamic_slice_in_dim(tgt, device_id() * local_batch, local_batch, 1)  # [Steps, LocalBatch]
 
     @jax.custom_gradient
-    def _fn(src: SIX_ARRAYS, wgt: jax.Array):
-        inp = src[0] + src[2]
-
-        def _slice_fn_loss(carry, x):
-            x, tgt_slice = x
-            out, _, _, _, _ = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
-            return _xent_slice_loss(carry, (out, tgt_slice), wgt)
-
-        def _slice_fn_grad(carry, x):
+    def _fn(inp: jax.Array, wgt: jax.Array):
+        def _slice_fn(carry, x):
             x, tgt_slice = x
             out, norm_out, multiplied, src_fp64, std = norm_forward(ctx, x, 1, False, x.ndim - 1, False)
             out = out.reshape(devices, local_batch, ctx.dims.features)
-            dwgt, dx = _xent_slice_derivative(carry, (out, tgt_slice), wgt)
-            dx, _ = norm_backward(x.reshape(dx.shape), 1, std, dx, False, x.ndim - 1, False, (), src_fp64.dtype)
-            return dwgt, dx
+            carry, dx = _xent_slice(carry, (out, tgt_slice), wgt)
+            dx, _ = norm_backward(x, 1, std, dx.reshape(x.shape), False, x.ndim - 1, False, (), src_fp64.dtype)
+            return carry, dx
 
-        (loss, acc), _ = lax.scan(_slice_fn_loss, (jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64)),
-                                  (inp.reshape(steps, devices, local_batch, ctx.dims.features), tgt))
+        carry = jnp.zeros_like(wgt), jnp.zeros((), dtype=jnp.float64), jnp.zeros((), dtype=jnp.float64)
+        scan_inp = inp.reshape(steps, devices, local_batch, ctx.dims.features), tgt
+        (dwgt, loss, acc), dx = lax.scan(_slice_fn, carry, scan_inp)
+        dx = dx.reshape(*inp.shape).astype(inp.dtype)
+        dwgt = dwgt.astype(wgt.dtype)
 
         def _grad(dy: Tuple[SIX_ARRAYS, jax.Array, jax.Array]) -> Tuple[SIX_ARRAYS, jax.Array]:
             # dy == 1 since this is the last function before the output
-            (pdx0, x0, pdx1, x1, dsp, sp), d_loss, d_acc = dy
-            x = x0 + x1
-            dwgt, dx = lax.scan(_slice_fn_grad, jnp.zeros_like(wgt),
-                                (x.reshape(steps, step_batch, ctx.dims.features), tgt))
-            dx = (dx.reshape(ctx.dims.batch, ctx.dims.features) * d_loss).astype(inp.dtype)
-            dwgt = (dwgt * d_loss).astype(wgt.dtype)
-            return (dx + pdx0, x0, dx + pdx1, x1, dsp, sp), dwgt
+            dy, _ = dy
+            return dx * dy.astype(inp.dtype), dwgt * dy.astype(wgt.dtype)
 
-        return (src, loss, acc), _grad
+        return jnp.stack([loss, acc]), _grad
 
-    src, loss, acc = _fn(src, param)
-    return src, jnp.stack([loss, acc])
+    return _fn(src, param)
