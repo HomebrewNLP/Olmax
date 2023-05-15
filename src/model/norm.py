@@ -128,7 +128,7 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
             shape = list(w.shape)
             if shape != [o, in_features]:
                 raise ShapeMismatch(f"Got {shape=}, but expected {[o, in_features]} for weight {i}.")
-
+        weights = list(weights)
     if ctx.is_initializing:
         if len(out_features) == 1:
             return jnp.zeros(list(inp.shape[:-1]) + list(out_features), dtype=inp.dtype)
@@ -150,10 +150,9 @@ def scale_norm_act_linear(ctx: Context, inp: jax.Array, in_features: int, out_fe
             dx, d_scl = norm_backward(src, scl, std, dy, act, dim, False, scale.shape, run_type, src_fp64, norm_out,
                                       bw_out)
             return dx, d_scl, list(d_wgt)
-
         return [_mm(fn(out), w) for fn, w in zip(transform_fns, wgt)], _grad
 
-    out = _fn(inp, scale, list(weights))
+    out = _fn(inp, scale, weights)
     if len(out) == 1:
         return out[0]
     return tuple(out)
