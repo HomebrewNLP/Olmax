@@ -149,10 +149,36 @@ def init_data_and_model(wctx: WhileTrainContext) -> Iterator[np.ndarray]:
 
 
 def dump_ctx(ctx: Context, run):
-    with open("config.yaml", 'w') as f:
+    with open(".olmax_internal_config.yaml", 'w') as f:
         f.write(str(ctx))
-    os.environ['CONFIG'] = 'config.yaml'
+    os.environ['CONFIG'] = '.olmax_internal_config.yaml'
     run.config.update(ctx.config(), allow_val_change=True)
+
+
+def dtype_bytes(dtype: jnp.dtype):
+    if dtype in (jnp.int8, jnp.uint8):
+        return 1
+    if dtype in (jnp.bfloat16, jnp.float16, jnp.int16, jnp.uint16):
+        return 2
+    if dtype in (jnp.float32, jnp.int32, jnp.uint32):
+        return 4
+    if dtype in (jnp.float64, jnp.int64, jnp.uint64):
+        return 8
+
+
+def buffer_statistics(params: Dict[str, jax.Array]):
+    index_pad = len(str(len(params)))
+    name_pad = max(len(k) for k in params.keys())
+    shape_pad = max(len(str(p.shape)) for p in params.values())
+    size_pad = max(len(f'{p.size * dtype_bytes(p.dtype):,d}') for p in params.values())
+    print('\n' * 2)
+    print(f'{"Index":<{index_pad}s} | {"Name":<{name_pad}s} | {"Shape":<{shape_pad}s} | '
+          f'{"Bytes":<{size_pad}s}')
+    print('-' * (index_pad + name_pad + shape_pad + size_pad + 3 * 3))
+    for i, (name, param) in enumerate(sorted(params.items(), key=lambda x: x[1].size * dtype_bytes(x[1].dtype))):
+        print(f'{i:{index_pad}d} | {name:<{name_pad}s} | {str(param.shape):>{shape_pad}s} | '
+              f'{param.size * dtype_bytes(param.dtype):>{size_pad},d}')
+    print('\n' * 2)
 
 
 def main():
@@ -186,6 +212,7 @@ def main():
     tokens_processed = wctx.ctx.dims.sequence * wctx.ctx.dims.batch
     data = init_data_and_model(wctx)
     parameter_count = sum(param.size for name, param in wctx.ctx.parameters.items() if "optimizer" not in name)
+    buffer_statistics(wctx.ctx.parameters)
     buffer_count = sum(param.size for name, param in wctx.ctx.parameters.items()) - parameter_count
 
     partition = deep_replace(wctx.serialize(), 0)
