@@ -97,7 +97,7 @@ def loss_fn(ctx: Context, src: SIX_ARRAYS, tgt: jax.Array) -> Tuple[SIX_ARRAYS, 
             dwgt = (dwgt * d_loss).astype(wgt.dtype)
             return (dx + pdx0, x0, dx + pdx1, x1, dsp, sp), None, dwgt
 
-        return (src, loss, acc), _grad
+        return (inp, loss, acc), _grad
 
     src, loss, acc = _fn(src, tgt, param)
     return src, jnp.stack([loss, acc])
