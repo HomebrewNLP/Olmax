@@ -23,7 +23,7 @@ def block(ctx: Context):
         for i in range(ctx.dims.depth):
             src = reversible(ctx, read, SparseAccess.read, src, inp, position)
             src = reversible(ctx, write, SparseAccess.write, src, inp, position)
-        src, loss = loss_fn(ctx, src[1:], inp)
+        src, loss = loss_fn(ctx, src[1:], tgt)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src
