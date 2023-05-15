@@ -69,15 +69,14 @@ def input_fn(ctx: Context, token: jax.Array, position: jax.Array, dense: jax.Arr
 
 
 @with_context()
-def _output(ctx: Context, inp: jax.Array, offset: jax.Array) -> Tuple[jax.Array, jax.Array]:
+def _output(ctx: Context, inp: jax.Array, offset: jax.Array) -> jax.Array:
     out, scale = scale_norm_act_linear(ctx, inp, ctx.dims.pointwise_features, [ctx.dims.features, ctx.dims.features])
-    out = scale_norm_act(ctx, out + offset, ctx.dims.features)
-    return out, jax.nn.sigmoid(scale)
+    return scale_norm_act(ctx, out + offset, ctx.dims.features)
 
 
 @with_context()
 def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, position: jax.Array
-         ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+         ) -> Tuple[jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
@@ -87,13 +86,13 @@ def read(ctx: Context, dense0: jax.Array, sparse: jax.Array, token: jax.Array, p
     inp = (jnp.take_along_axis(sparse, idx.reshape(*idx.shape, 1), 1) * val).reshape(ctx.dims.batch, total_read)
 
     inp = linear(ctx, inp, total_read, ctx.dims.pointwise_features)
-    out, scale = _output(ctx, inp + offset0, offset1)
-    return out, scale, idx
+    out = _output(ctx, inp + offset0, offset1)
+    return out, idx
 
 
 @with_context()
 def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
-          ) -> Tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+          ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     total_read = ctx.dims.memory_features * ctx.dims.memory_heads * ctx.dims.memory_slots_per_head
     gate_sqrt = int(ctx.dims.memory_slots ** 0.5)
 
@@ -105,5 +104,5 @@ def write(ctx: Context, dense1: jax.Array, token: jax.Array, position: jax.Array
     dense0, scatter_values, gates = out
     idx, val = pos_and_scale(ctx, gates)
     scatter_values = scatter_values.reshape(ctx.dims.batch, -1, ctx.dims.memory_features) * val
-    out, scale = _output(ctx, dense0, offset2)
-    return out, scale, scatter_values, idx
+    out = _output(ctx, dense0, offset2)
+    return out, scatter_values, idx

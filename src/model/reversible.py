@@ -62,38 +62,29 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
             if sparse_access in (SparseAccess.read, SparseAccess.write):
                 keys = keys[0]
             if sparse_access == SparseAccess.write:
-                x0, inner_gate, vals = x0
+                x0, vals = x0
                 y_sparse = at_sparse(y_sparse, keys).add(-vals)
                 sparse_items = jnp.take_along_axis(dy_sparse, keys.reshape(*keys.shape, 1), 1).reshape(*vals.shape)
+                d_params, dx0, _ = grad_fn((dy1, sparse_items))
             elif sparse_access == SparseAccess.read:
-                x0, inner_gate = x0
-            else:
-                inner_gate = 1
-            prev_x0 = (y1 - x0) / inner_gate
-            if sparse_access == SparseAccess.write:
-                d_params, dx0, _ = grad_fn((dy1, prev_x0, sparse_items))
-            elif sparse_access == SparseAccess.read:
-                d_params, dx0, (dsparse, *_) = grad_fn((dy1, prev_x0))
+                x0, = x0
+                d_params, dx0, (dsparse, *_) = grad_fn((dy1,))
                 dy_sparse = dy_sparse + dsparse  # TODO: Find a way to get the sparse gradients and scatter-add manually
             else:
                 d_params, dx0, _ = grad_fn(dy1)
             d_params = {k: d_params_old.get(k, 0) + d_params.get(k, 0) for k in d_params.keys()}
-            arg_grads = [jnp.zeros_like(a) for a in inner_args]
-            return (d_params, dy1 * inner_gate, prev_x0, dx0 + dy0, y0, dy_sparse, y_sparse), arg_grads
+            return (d_params, dy1, y1 - x0, dx0 + dy0, y0, dy_sparse, y_sparse), [jnp.zeros_like(a) for a in args]
 
         out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
-            (out, gate, vals), keys = out
+            (out, vals), keys = out
             sparse = at_sparse(sparse, keys).add(vals)
         elif sparse_access == SparseAccess.read:
-            (out, gate), keys = out
-        else:
-            gate = 1
-        out = x0 * gate + out
+            (out,), keys = out
+        out = x0 + out
         return (params, x1, x1, out, out, sparse, sparse), _grad
 
     return _fn(src, list(args))
-
 
 @jax.custom_gradient
 def revnet_out(x: SIX_ARRAYS, loss: jax.Array) -> jax.Array:
