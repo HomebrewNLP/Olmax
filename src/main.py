@@ -20,22 +20,27 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-def train_step(while_ctx_dict: Dict[str, Any], inp: Tuple[jax.Array, Tuple[jax.Array, jax.Array]]
+def train_step(carry: Tuple[Dict[str, Any], Dict[str, Any]], inp: Tuple[jax.Array, Tuple[jax.Array, jax.Array]]
                ) -> Tuple[Dict[str, Any], Tuple[jax.Array, Tuple[jax.Array, jax.Array]]]:
-    wctx = WhileTrainContext(while_ctx_dict)
+    while_ctx_dict0, while_ctx_dict1 = carry
+    wctx0 = WhileTrainContext(while_ctx_dict0)  # old
+    wctx1 = WhileTrainContext(while_ctx_dict1)  # new
     dat, src = inp
     grad_fn = jax.value_and_grad(compute, 0, True)
-    params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
-    (loss, (src, scalars)), grads = grad_fn(params, src, dat)
-    update(wctx.ctx, grads, wctx.current_step)
-    wctx.current_step += 1
-    return wctx.serialize(), (jnp.concatenate([loss.reshape(-1), scalars]), src)
+    params = {k: v for k, v in wctx0.ctx.parameters.items() if '/optimizer' not in k}
+    (loss, (src, scalars)), grads = grad_fn(params, src, dat)  # get grads for old weights
+    wctx0: WhileTrainContext = copy.copy(wctx1)
+    wctx0.ctx.parameters = copy.copy(wctx1.ctx.parameters)
+    update(wctx1.ctx, grads, wctx1.current_step)  # apply them to new weights
+    wctx1.current_step += 1
+    return (wctx0.serialize(), wctx1.serialize()), (jnp.concatenate([loss.reshape(-1), scalars]), src)
 
 
 def outer_step(while_ctx_dict: Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], data: jax.Array
                ) -> Tuple[Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], jax.Array]:
     wctx = WhileTrainContext(while_ctx_dict)
-    while_ctx_dict, (scalars, carry) = lax.scan(train_step, while_ctx_dict, (data, wctx.carry))  # scan over steps
+    # scan over steps
+    while_ctx_dict, (scalars, carry) = lax.scan(train_step, while_ctx_dict, (data, wctx.carry), unroll=2)
     wctx = WhileTrainContext(while_ctx_dict)
     wctx.carry = carry
     return wctx.serialize(), scalars
