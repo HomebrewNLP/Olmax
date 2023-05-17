@@ -49,9 +49,9 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
     # --transpose--> process_count * steps, sequence, batch  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
     data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1)
-    data = data.transpose(2, 1, 0)  # [Batch, Steps, Sequence] -> [Sequence, Steps, Batch]
-    input_ids = jnp.concatenate([jnp.ones([1, *data.shape[1:]], dtype=data.dtype), data[:-1]])
-    data = jnp.stack([input_ids, data], 2)  # Stack along dim=number_of_scan's
+    data = data.transpose(1, 2, 0)  # [Batch, Steps, Sequence] -> [Steps, Sequence, Batch]
+    input_ids = jnp.concatenate([jnp.ones([data.shape[0], 1, data.shape[2]], dtype=data.dtype), data[:, :-1]], 1)
+    data = jnp.stack([input_ids, data], 1)  # Stack along dim=number_of_scan's
 
     # scan over sequence
     wctx, scalars = lax.scan(train_step, wctx.serialize(), data, unroll=training.device_unroll)

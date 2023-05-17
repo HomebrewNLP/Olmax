@@ -44,8 +44,6 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax
     dense1 = batch_embedding(ctx, "dense1", ctx.dims.features)
     sparse = batch_embedding(ctx, "sparse", ctx.dims.memory_slots, ctx.dims.memory_features)
     carry = ((*dense0, *dense1, *sparse), jnp.zeros((2,), dtype=jnp.float64))
-    src = src.transpose(1, 0)
-    tgt = tgt.transpose(1, 0)
 
     if ctx.is_initializing:
         ctx.parameters, *src = block(ctx)(carry, (src[0], tgt[0], jnp.zeros([], dtype=jnp.int32)))
