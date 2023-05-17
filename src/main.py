@@ -36,14 +36,14 @@ def train_step(carry: Tuple[Dict[str, Any], Dict[str, Any]], inp: Tuple[jax.Arra
     return (wctx0.serialize(), wctx1.serialize()), (jnp.concatenate([loss.reshape(-1), scalars]), src)
 
 
-def outer_step(while_ctx_dict: Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], data: jax.Array
+def outer_step(wctxd: Tuple[Dict[str, Any], Dict[str, Any]], data: jax.Array
                ) -> Tuple[Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], jax.Array]:
-    wctx = WhileTrainContext(while_ctx_dict)
+    wctx = WhileTrainContext(wctxd[1])
     # scan over steps
-    while_ctx_dict, (scalars, carry) = lax.scan(train_step, while_ctx_dict, (data, wctx.carry), unroll=2)
-    wctx = WhileTrainContext(while_ctx_dict)
+    wctxd, (scalars, carry) = lax.scan(train_step, wctxd, (data, wctx.carry), unroll=2)
+    wctx = WhileTrainContext(wctxd[1])
     wctx.carry = carry
-    return wctx.serialize(), scalars
+    return (wctxd[0], wctx.serialize()), scalars
 
 
 def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -65,15 +65,15 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     # --transpose--> process_count * steps, sequence, batch  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
     data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1)
     data = data.transpose(2, 1, 0)  # [Batch, Steps, Sequence] -> [Sequence, Steps, Batch]
-    input_ids = jnp.concatenate([jnp.ones([data.shape[0], 1, data.shape[2]], dtype=data.dtype), data[:, :-1, :]], 1)
+    input_ids = jnp.concatenate([jnp.ones([1, *data.shape[1:]], dtype=data.dtype), data[:-1]])
     data = jnp.stack([input_ids, data], 2)  # Stack along dim=number_of_scan's
 
     # scan over sequence
-    (wctx, carry), scalars = lax.scan(outer_step, wctx.serialize(), data)
+    (_, wctx), scalars = lax.scan(outer_step, (wctx.serialize(), wctx.serialize()), data, unroll=2)
 
     wctx = WhileTrainContext(wctx)
     wctx.scalars = lax.psum(scalars.reshape(-1, scalars.shape[-1]) / jax.device_count(), ParallelAxes.model)
-    return wctx.serialize(), carry
+    return wctx.serialize()
 
 
 def get_parameters(ctx: Context, inp: jax.Array):
@@ -162,6 +162,7 @@ def init_data_and_model(wctx: WhileTrainContext) -> Iterator[np.ndarray]:
     wctx.ctx.parameter_variance = replicate(wctx.ctx.parameter_variance)
     wctx.current_step = replicate(wctx.current_step)
     wctx.scalars = replicate(wctx.scalars)
+    wctx.carry = replicate(wctx.carry)
 
     return data
 
