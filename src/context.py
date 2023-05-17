@@ -230,7 +230,7 @@ class WhileContext(DataClass):
 class WhileTrainContext(WhileContext):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
-        self.scalars = jnp.zeros([2], jnp.float64)
+        self.scalars = jnp.zeros([self.ctx.training.device_steps * jax.process_count(), 2], jnp.float64)
 
         if config is not None:
             self.scalars = config['scalars']

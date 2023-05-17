@@ -1,21 +1,22 @@
 data:
-    datasets_used_per_step: 8
+    datasets_used_per_step: 2
     deterministic: true
-    interleaved_datasets: 64
-    parallel_workers: 64
-    path: gs://homebrewnlp-us/the-char-pile/*
+    interleaved_datasets: 2
+    parallel_workers: 2
+    path: /home/lucas/PycharmProjects/Olmax/data/
     prefetch_buffer: 1
     seed: 0
     shuffle_buffer_gb: 0
 dims:
-    batch: 8
-    features: 16384
+    batch: 64
+    depth: 1
+    features: 4096
     memory_features: 128
-    memory_heads: 32
-    memory_slots: 1048576
+    memory_heads: 8
+    memory_slots: 16384
     memory_slots_per_head: 4
-    pointwise_features: 4096
-    sequence: 256
+    pointwise_features: 1024
+    sequence: 1024
     vocab: 256
 fail_on_missing_parameter: true
 global_prefix: ''
@@ -32,18 +33,19 @@ optimizer:
     epsilon: 1.0e-16
     exponential_decay: 7.0e-06
     gradient_clip: 0.001
-    gradient_noise_factor: 0.01
-    learning_rate: 0.01
+    gradient_noise_factor: 0.0001
+    graft_to_sign: false
+    learning_rate: 0.00001
     momentum_dtype: float32
     momentum_type: debiased
     warmup_end: 1024
-    weight_decay: 0.03
+    weight_decay: 0.0001
 parameter_usages: {}
 seed: 0
 training:
-    checkpoint_interval: 64
+    checkpoint_interval: 10000000
     checkpoint_load_path: ''
-    checkpoint_path: gs://homebrewnlp-us/homebrewnlp-checkpoint-sequential-architecutre
+    checkpoint_path: /home/lucas/PycharmProjects/Olmax/checkpoint
     debug: false
     device_steps: 1
     device_unroll: 1
@@ -57,11 +59,11 @@ training:
     z_loss: 0
 wandb:
     entity: homebrewnlp
-    group: lucas-rnn
-    id: 24rz8wg13jqr1bd8qjy037u04b86q6ir
+    group: rnn-gated
+    id: 34wfw3kv1j7b3vi6bhb1o0l5d0b906ki8
     median_sizes:
     - 64
     - 256
     - 1024
-    name: lucas-rnn-0
+    name: rnn-bwd-every-step
     project: gpt

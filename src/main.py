@@ -20,17 +20,15 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-def train_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
+def train_step(while_ctx_dict: Dict[str, Any], data_slice: jax.Array) -> Dict[str, Any]:
     wctx = WhileTrainContext(while_ctx_dict)
     steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
-    data_slice = wctx.data[wctx.current_step % steps]
     params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
     scalars, grads = grad_fn(params, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
-    wctx.scalars += jnp.stack(scalars) / steps  # higher numerical accuracy if we divide before summing
     wctx.current_step += 1
-    return wctx.serialize()
+    return wctx.serialize(), scalars
 
 
 def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -39,7 +37,7 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     steps = training.device_steps * jax.process_count()
     step_batch, sequence_p1 = wctx.data.shape
 
-    # "all-to-all" / "all-concat" with jax.process_count() outputs instead of jax.device_count() outputs
+    # all_gather with jax.process_count() outputs instead of jax.device_count() outputs
     # init sparse tensor with 0s everywhere except for local input slice
     data = jnp.zeros((jax.process_count(), step_batch, sequence_p1), wctx.data.dtype)
     data = data.at[jax.process_index(), :, :].set(wctx.data)
@@ -49,13 +47,16 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     # interleave samples within batch by transposing steps*process_count + batch and reshaping from (x,y).t() to x,y
     # process_count, steps * batch, sequence
     # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
-    # --transpose--> process_count * steps, batch, sequence  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
-    data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1).transpose(1, 0, 2)
-    wctx.data = jnp.stack([data[:, :, :-1], data[:, :, 1:]], 1)
+    # --transpose--> process_count * steps, sequence, batch  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
+    data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1)
+    data = data.transpose(2, 1, 0)  # [Batch, Steps, Sequence] -> [Sequence, Steps, Batch]
+    input_ids = jnp.concatenate([jnp.ones([1, *data.shape[1:]], dtype=data.dtype), data[:-1]])
+    data = jnp.stack([input_ids, data], 2)  # Stack along dim=number_of_scan's
 
-    wctx = loop(train_step, wctx.serialize(), steps, training.device_unroll)
+    # scan over sequence
+    wctx, scalars = lax.scan(train_step, wctx.serialize(), data, unroll=training.device_unroll)
     wctx = WhileTrainContext(wctx)
-    wctx.scalars = lax.psum(wctx.scalars, ParallelAxes.model)
+    wctx.scalars = lax.psum(scalars, ParallelAxes.model)
     return wctx.serialize()
 
 

@@ -5,7 +5,7 @@ if [ -f /usr/lib/x86_64-linux-gnu/libtcmalloc.so.4 ]; then  # We're on a TPU
   export XLA_FLAGS="--xla_force_host_platform_device_count=1"  # We don't use TPU-CPU for ML
 else
   export JAX_PLATFORM_NAME="cpu"  # CUDA is broken 0.4.* + CU12.x, so we enforce CPU
-  export XLA_FLAGS="--xla_force_host_platform_device_count=8"  # Here we _do_ use the host CPU for ML
+  export XLA_FLAGS="--xla_force_host_platform_device_count=1"  # Here we _do_ use the host CPU for ML
 fi
 
 export TF_CPP_MIN_LOG_LEVEL=4   # no dataset warnings
