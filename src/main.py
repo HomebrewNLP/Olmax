@@ -10,7 +10,7 @@ import numpy as np
 import wandb
 from jax import lax, numpy as jnp
 
-from src.backend import deep_replace, device_id, loop
+from src.backend import deep_replace, device_id
 from src.constants import ParallelAxes
 from src.context import Context, WhileTrainContext, init_class
 from src.data import text_dataset
@@ -27,7 +27,7 @@ def train_step(while_ctx_dict: Dict[str, Any], data_slice: jax.Array) -> Dict[st
     scalars, grads = grad_fn(params, data_slice)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.current_step += 1
-    return wctx.serialize(), scalars
+    return wctx.serialize(), jnp.stack(scalars)
 
 
 def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -234,8 +234,8 @@ def main():
         current_step = int(wctx.step)
         lr = float(get_current_lr(wctx.ctx, wctx.current_step[0]))
         print(f'[{current_step:{len(str(total_steps))}d}/{total_steps}] '
-              f'Loss: {wctx.scalars[0, 0]:6.3f} - '
-              f'Accuracy: {wctx.scalars[0, 1]:8.3f} | '
+              f'Loss: {wctx.scalars[0, :, 0].mean():6.3f} - '
+              f'Accuracy: {wctx.scalars[0, :, 1].mean():8.3f} | '
               f'LearningRate: {lr:.5f} | '
               f'StepTime: {time.time() - step_start:10.6f}s - '
               f'Rate: {tokens_processed * (current_step + 1) / (time.time() - start_time):9,.1f} Tokens/s')
