@@ -71,7 +71,7 @@ def text_dataset(ctx: Context, skipped_steps: int) -> Iterator[np.ndarray]:
     batch_size = ctx.dims.batch
     device_steps = ctx.training.device_steps
     full_batch = device_steps * batch_size
-    sequence_length_1 = sequence_length + 1
+    sequence_length_1 = sequence_length  # + 1  removed as we pad a 0 as BOS at runtime
     if full_batch % ctx.data.datasets_used_per_step != 0:
         raise ValueError(f"Can't use {full_batch=} with {ctx.data.datasets_used_per_step=} as "
                          f"{full_batch % ctx.data.datasets_used_per_step=}. Ensure full_batch="

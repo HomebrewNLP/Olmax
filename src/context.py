@@ -1,7 +1,7 @@
 import collections
 import copy
 import os
-from typing import Any, Callable, Union, Dict, Optional, List
+from typing import Any, Callable, Union, Dict, Optional, List, Tuple
 
 import jax
 import yaml
@@ -227,19 +227,29 @@ class WhileContext(DataClass):
         return self
 
 
+def get_carry(ctx: Context) -> Tuple[jax.Array, jax.Array]:
+    dense = jnp.zeros([jax.process_count(), ctx.dims.batch, ctx.dims.features], dtype=ctx.model.computation_dtype)
+    sparse = jnp.zeros([jax.process_count(), ctx.dims.batch, ctx.dims.memory_slots, ctx.dims.memory_features],
+                       dtype=ctx.model.computation_dtype)
+    return dense, sparse
+
+
 class WhileTrainContext(WhileContext):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         steps = self.ctx.dims.sequence * self.ctx.training.device_steps * jax.process_count()
         self.scalars = jnp.zeros([steps, 2], jnp.float64)
+        self.carry = get_carry(self.ctx)
 
         if config is not None:
             self.scalars = config['scalars']
+            self.carry = config['carry']
             self.ctx.parameter_variance = config['parameter_variance']
 
     def serialize(self):
         serialized = self._serialize()
         serialized['scalars'] = self.scalars
+        serialized['carry'] = self.carry
         serialized['parameter_variance'] = self.ctx.parameter_variance
         return serialized
 

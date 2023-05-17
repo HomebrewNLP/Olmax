@@ -12,7 +12,7 @@ from jax import lax, numpy as jnp
 
 from src.backend import deep_replace, device_id
 from src.constants import ParallelAxes
-from src.context import Context, WhileTrainContext, init_class
+from src.context import Context, WhileTrainContext, init_class, get_carry
 from src.data import text_dataset
 from src.model.main import body_ctx, compute
 from src.optimizer import get_current_lr, update
@@ -20,28 +20,25 @@ from src.utils.checkpoint import read_train_checkpoint, write_train_checkpoint
 from src.utils.wandblog import WandbLog
 
 
-def train_step(carry: Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], dat: jax.Array) -> Tuple[
-    jax.Array, Tuple[Dict[str, Any]], Tuple[jax.Array, jax.Array]]:
-    while_ctx_dict, src = carry
+def train_step(while_ctx_dict: Dict[str, Any], inp: Tuple[jax.Array, Tuple[jax.Array, jax.Array]]
+               ) -> Tuple[Dict[str, Any], Tuple[jax.Array, Tuple[jax.Array, jax.Array]]]:
     wctx = WhileTrainContext(while_ctx_dict)
+    dat, src = inp
     grad_fn = jax.value_and_grad(compute, 0, True)
     params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
     (loss, (src, scalars)), grads = grad_fn(params, src, dat)
     update(wctx.ctx, grads, wctx.current_step)
     wctx.current_step += 1
-    return (wctx.serialize(), src), jnp.concatenate([loss.reshape(-1), scalars])
+    return wctx.serialize(), (jnp.concatenate([loss.reshape(-1), scalars]), src)
 
 
-def get_carry(ctx: Context) -> Tuple[jax.Array, jax.Array]:
-    dense = jnp.zeros([ctx.dims.batch, ctx.dims.features], dtype=ctx.model.computation_dtype)
-    sparse = jnp.zeros([ctx.dims.batch, ctx.dims.memory_slots, ctx.dims.memory_features],
-                       dtype=ctx.model.computation_dtype)
-    return dense, sparse
-
-
-def outer_step(wctx: Dict[str, Any], data: jax.Array) -> Tuple[jax.Array, Dict[str, Any]]:
-    (wctx, _), scalars = lax.scan(train_step, (wctx, get_carry(WhileTrainContext(wctx).ctx)), data)  # scan over seq
-    return wctx, scalars
+def outer_step(while_ctx_dict: Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], data: jax.Array
+               ) -> Tuple[Tuple[Dict[str, Any], Tuple[jax.Array, jax.Array]], jax.Array]:
+    wctx = WhileTrainContext(while_ctx_dict)
+    while_ctx_dict, (scalars, carry) = lax.scan(train_step, while_ctx_dict, (data, wctx.carry))  # scan over steps
+    wctx = WhileTrainContext(while_ctx_dict)
+    wctx.carry = carry
+    return wctx.serialize(), scalars
 
 
 def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,14 +59,16 @@ def jitless_step(while_ctx_dict: Dict[str, Any]) -> Dict[str, Any]:
     # --reshape--> batch, process_count * steps, sequence  ([[0, 1, 2], [3, 4, 5]]  -->  [[0, 1], [2, 3], [4, 5]])
     # --transpose--> process_count * steps, sequence, batch  ([[0, 1], [2, 3], [4, 5]] --> [[0, 2, 4], [1, 3, 5]])
     data = data.reshape(wctx.ctx.dims.batch, steps, sequence_p1)
-    data = data.transpose(1, 2, 0)  # [Batch, Steps, Sequence] -> [Steps, Sequence, Batch]
-    data = jnp.stack([data[:, :-1, :], data[:, 1:, :]], 2)  # Stack along dim=number_of_scan's
+    data = data.transpose(2, 1, 0)  # [Batch, Steps, Sequence] -> [Sequence, Steps, Batch]
+    input_ids = jnp.concatenate([jnp.ones([data.shape[0], 1, data.shape[2]], dtype=data.dtype), data[:, :-1, :]], 1)
+    data = jnp.stack([input_ids, data], 2)  # Stack along dim=number_of_scan's
 
-    wctx, scalars = lax.scan(outer_step, wctx.serialize(), data)  # scan over samples
+    # scan over sequence
+    (wctx, carry), scalars = lax.scan(outer_step, wctx.serialize(), data)
 
     wctx = WhileTrainContext(wctx)
     wctx.scalars = lax.psum(scalars.reshape(-1, scalars.shape[-1]) / jax.device_count(), ParallelAxes.model)
-    return wctx.serialize()
+    return wctx.serialize(), carry
 
 
 def get_parameters(ctx: Context, inp: jax.Array):
@@ -78,7 +77,8 @@ def get_parameters(ctx: Context, inp: jax.Array):
         initial_prng_key = ctx.prng_key
         ctx.seed += device_id()
         ctx.prng_key = jax.random.PRNGKey(ctx.seed)
-        body_ctx(ctx, get_carry(ctx), x[:, 0], x[:, 0])
+        carry = [c[0] for c in get_carry(ctx)]
+        body_ctx(ctx, carry, x[:, 0], x[:, 0])
         params = ctx.parameters
         var = ctx.parameter_variance
         ctx.parameters = {}
