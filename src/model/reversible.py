@@ -71,7 +71,7 @@ def reversible(ctx: Context, fn: ReversibleFn, sparse_access: SparseAccess, src:
                 dy_sparse = dy_sparse + dsparse  # TODO: Find a way to get the sparse gradients and scatter-add manually
             else:
                 d_params, dx0, _ = grad_fn(dy1)
-            return (d_params, dy1, y1 - x0, dx0 + dy0, y0, dy_sparse, y_sparse), [jnp.zeros_like(a) for a in args]
+            return d_params, (dy1, y1 - x0, dx0 + dy0, y0, dy_sparse, y_sparse), [jnp.zeros_like(a) for a in args]
 
         out = base(params, x1, [*(sparse,) * (sparse_access == SparseAccess.read), *inner_args])
         if sparse_access == SparseAccess.write:
