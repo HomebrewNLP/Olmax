@@ -25,7 +25,7 @@ def block(ctx: Context):
         src, loss = loss_fn(ctx, src, tgt)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
-            return src
+            return
         return (src, original_loss + loss / ctx.dims.sequence), None
 
     return _fn
@@ -46,7 +46,7 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax
     carry = ((*dense0, *dense1, *sparse), jnp.zeros((2,), dtype=jnp.float64))
 
     if ctx.is_initializing:
-        ctx.parameters, *src = block(ctx)(carry, (src[0], tgt[0], jnp.zeros([], dtype=jnp.int32)))
+        block(ctx)(carry, (src[0], tgt[0], jnp.zeros([], dtype=jnp.int32)))
         return
 
     (out, loss), _ = lax.scan(block(ctx), carry, (src, tgt, jnp.arange(ctx.dims.sequence)))
