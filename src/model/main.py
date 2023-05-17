@@ -19,11 +19,10 @@ def block(ctx: Context):
     def _fn(src: Tuple[SIX_ARRAYS, jax.Array], inp: Tuple[jax.Array, jax.Array, jax.Array]):
         inp, tgt, position = inp
         src, original_loss = src
-        src = (ctx.parameters, *src)
         for i in range(ctx.dims.depth):
             src = reversible(ctx, read, SparseAccess.read, src, inp, position)
             src = reversible(ctx, write, SparseAccess.write, src, inp, position)
-        src, loss = loss_fn(ctx, src[1:], tgt)
+        src, loss = loss_fn(ctx, src, tgt)
         name_cache.update(ctx.name_cache)
         if ctx.is_initializing:
             return src
@@ -52,11 +51,7 @@ def body_ctx(ctx: Context, src: jax.Array, tgt: jax.Array) -> Optional[Tuple[jax
         ctx.parameters, *src = block(ctx)(carry, (src[0], tgt[0], jnp.zeros([], dtype=jnp.int32)))
         return
 
-    name_cache = copy.deepcopy(ctx.name_cache)
-    for i in range(ctx.dims.sequence):
-        ctx.name_cache = copy.deepcopy(name_cache)
-        carry, _ = block(ctx)(carry, (src[i], tgt[i], jnp.full((), i, dtype=jnp.int32)))
-    out, loss = carry
+    (out, loss), _ = lax.scan(block(ctx), carry, (src, tgt, jnp.arange(ctx.dims.sequence)))
     loss = revnet_out(out, loss)
     return loss[0], loss[1]
 
