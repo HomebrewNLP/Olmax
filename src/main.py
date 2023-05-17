@@ -22,7 +22,6 @@ from src.utils.wandblog import WandbLog
 
 def train_step(while_ctx_dict: Dict[str, Any], data_slice: jax.Array) -> Dict[str, Any]:
     wctx = WhileTrainContext(while_ctx_dict)
-    steps = wctx.ctx.training.device_steps * jax.process_count()
     grad_fn = jax.value_and_grad(compute, 0, True)
     params = {k: v for k, v in wctx.ctx.parameters.items() if '/optimizer' not in k}
     scalars, grads = grad_fn(params, data_slice)
