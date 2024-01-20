@@ -40,7 +40,6 @@ def dense_block(ctx: Context, inp: jax.Array, depth: jax.Array) -> jax.Array:
 
     masked, padded = pattern_match(_get_mix_fn, max_dims, depth, inp)
     inp_glu = inp * lax.pad(inp[:, :-1], jnp.ones((), dtype=inp.dtype), ((0, 0, 0), (1, 0, 0), (0, 0, 0)))
-    inp = jnp.concatenate([inp, inp_glu, masked, padded], -1)
 
-    inp = conv(ctx, inp, 5, 4 * ctx.dims.features, 4 * ctx.dims.features)
+    inp = sum(conv(ctx, i, 5, ctx.dims.features, 4 * ctx.dims.features) for i in (inp, inp_glu, masked, padded))
     return scale_norm_act_conv(ctx, inp, 5, 4 * ctx.dims.features, ctx.dims.features)
