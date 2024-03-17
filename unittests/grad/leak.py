@@ -7,6 +7,7 @@ from jax import lax, numpy as jnp
 
 from src.constants import ParallelAxes
 from src.context import Context
+from src.main import add_zeros
 from src.model.main import stem
 from src.model.reversible import revnet_out
 from unittests.grad.backend import grad_fn, randn_fn, trials
@@ -42,8 +43,6 @@ def test(samples: int, depth: int):
     ctx.dims.depth = depth
     ctx.dims.features = 8
     ctx.dims.inner_bottleneck_features = 4
-    ctx.dims.pointwise_features = 16
-    ctx.dims.spatial_mixing_kernel = ctx.dims.sequence // 2
     src = randn(ctx.dims.batch, ctx.dims.sequence, ctx.dims.features).astype(jnp.bfloat16)
 
     def _fn(x: jax.Array):
@@ -53,6 +52,7 @@ def test(samples: int, depth: int):
         return params
 
     params = jax.pmap(_fn, ParallelAxes.model)(src)
+    add_zeros(params)
     ctx.is_initializing = False
 
     def _inner(inp: typing.Tuple[typing.Dict[str, jax.Array], jax.Array]):

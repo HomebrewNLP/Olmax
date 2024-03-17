@@ -4,8 +4,7 @@ from jax import lax
 from src.backend import with_context
 from src.constants import ParallelAxes
 from src.context import Context
-from src.model.conv import conv
-from src.model.norm import prenorm, scale_norm_act
+from src.model.norm import scale_norm_act, scale_norm_act_conv
 
 
 def all_to_all(ctx: Context, x: jax.Array, split_axis: int, concat_axis: int) -> jax.Array:
@@ -22,7 +21,6 @@ def all_to_all(ctx: Context, x: jax.Array, split_axis: int, concat_axis: int) ->
     return _fn(x)
 
 
-@prenorm
 @with_context()
 def dense_moe(ctx: Context, inp: jax.Array) -> jax.Array:
     devices = jax.device_count()
@@ -30,7 +28,7 @@ def dense_moe(ctx: Context, inp: jax.Array) -> jax.Array:
     batch, sequence, features = inp.shape
     sequence_slice = sequence // devices
 
-    inp = conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, features, ctx.dims.inner_bottleneck_features)
+    inp = scale_norm_act_conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, features, ctx.dims.inner_bottleneck_features)
 
     # [Batch, Sequence, Features]  ->  [Batch, SequenceSlice, Features * Devices]
     # In essence, 1) Collect features from all devices + 2) Drop unused sequence elements
@@ -40,9 +38,7 @@ def dense_moe(ctx: Context, inp: jax.Array) -> jax.Array:
         inp = inp.reshape(batch, sequence_slice, big_params)
 
     # Devices^2 more parameters than normal bottleneck block but only Devices-times more flops due to sparsity above
-    inp = scale_norm_act(ctx, inp, big_params)
-    inp = conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, big_params, big_params, tied=True)
-    inp = scale_norm_act(ctx, inp, big_params)
+    inp = scale_norm_act_conv(ctx, inp, ctx.dims.inner_bottleneck_kernel, big_params, big_params, tied=True)
 
     # [Batch, SequenceSlice, Features * Devices]  ->  [Batch, Sequence, Features]  (PixelShuffle across devices)
     if not ctx.is_initializing:
@@ -50,4 +46,5 @@ def dense_moe(ctx: Context, inp: jax.Array) -> jax.Array:
         inp = all_to_all(ctx, inp, 3, 2)
         inp = inp.reshape(batch, sequence, ctx.dims.inner_bottleneck_features)
 
-    return conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, features)
+    out = scale_norm_act_conv(ctx, inp, ctx.dims.outer_bottleneck_kernel, ctx.dims.inner_bottleneck_features, features)
+    return scale_norm_act(ctx, out, features, act=False)

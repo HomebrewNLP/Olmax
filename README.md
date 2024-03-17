@@ -48,6 +48,10 @@ running quickly and with a small memory footprint of O(N^1.5) instead of O(N^2).
 Therefore, an axial mlp-mixer needs less memory and compute than a standard transformer while providing better
 performance at scale.
 
+**UPDATE**
+This is now merged with the dense convolution by running `cat([x.T, x]) @ W_big` rather than `x @ W` and in a separate
+block `x.T @ W_2`.
+
 #### Reversible
 
 Most commonly, large transformers use [activation checkpointing](https://arxiv.org/abs/1604.06174v2), which saves the
@@ -89,7 +93,6 @@ speedup for both training and inference.
 #### MoE
 
 ### Optimizer
-
 
 #### Adaptive Gradient Clipping
 
